@@ -4,8 +4,6 @@ import os
 from datetime import datetime
 import secrets
 
-from ..models.order import db, Order, Subscription
-
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
 # Configurar Stripe
@@ -23,6 +21,13 @@ def generate_subscription_number():
     random_part = secrets.token_hex(4).upper()
     return f'SUB-{timestamp}-{random_part}'
 
+@stripe_bp.route('/config', methods=['GET'])
+def get_config():
+    """Get Stripe publishable key"""
+    return jsonify({
+        'publishableKey': os.getenv('STRIPE_PUBLISHABLE_KEY')
+    })
+
 @stripe_bp.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
     """Create Stripe Checkout session for one-time purchase"""
@@ -35,6 +40,9 @@ def create_checkout_session():
         
         items = data['items']
         customer_info = data['customer_info']
+        
+        # Generate order number
+        order_number = generate_order_number()
         
         # Calculate total
         line_items = []
@@ -51,28 +59,6 @@ def create_checkout_session():
                 'quantity': item['quantity'],
             })
         
-        # Create order in database
-        order = Order(
-            order_number=generate_order_number(),
-            customer_email=customer_info['email'],
-            customer_name=customer_info['name'],
-            customer_phone=customer_info.get('phone', ''),
-            shipping_address=customer_info['address'],
-            shipping_city=customer_info['city'],
-            shipping_postal_code=customer_info['postal_code'],
-            shipping_country=customer_info.get('country', 'España'),
-            items=items,
-            subtotal=sum(item['price'] * item['quantity'] for item in items),
-            shipping_cost=0.0,  # TODO: Calculate shipping
-            total=sum(item['price'] * item['quantity'] for item in items),
-            payment_status='pending',
-            order_status='processing',
-            customer_notes=customer_info.get('notes', '')
-        )
-        
-        db.session.add(order)
-        db.session.commit()
-        
         # Create Stripe Checkout Session
         frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
         
@@ -84,19 +70,21 @@ def create_checkout_session():
             cancel_url=f'{frontend_url}/checkout?cancelled=true',
             customer_email=customer_info['email'],
             metadata={
-                'order_id': order.id,
-                'order_number': order.order_number
+                'order_number': order_number,
+                'customer_name': customer_info['name'],
+                'customer_phone': customer_info.get('phone', ''),
+                'shipping_address': customer_info['address'],
+                'shipping_city': customer_info['city'],
+                'shipping_postal_code': customer_info['postal_code'],
+                'shipping_country': customer_info.get('country', 'España'),
+                'customer_notes': customer_info.get('notes', '')
             }
         )
-        
-        # Update order with session ID
-        order.stripe_checkout_session_id = session.id
-        db.session.commit()
         
         return jsonify({
             'sessionId': session.id,
             'url': session.url,
-            'order_number': order.order_number
+            'order_number': order_number
         })
         
     except Exception as e:
@@ -121,12 +109,16 @@ def create_subscription_checkout():
         if not frequency:
             return jsonify({'error': 'Subscription frequency is required'}), 400
         
+        # Generate subscription number
+        subscription_number = generate_subscription_number()
+        
         # Map frequency to Stripe interval
         interval_mapping = {
             'weekly': {'interval': 'week', 'interval_count': 1},
             'biweekly': {'interval': 'week', 'interval_count': 2},
             'monthly': {'interval': 'month', 'interval_count': 1},
-            'bimonthly': {'interval': 'month', 'interval_count': 2}
+            'quarterly': {'interval': 'month', 'interval_count': 3},
+            'semiannual': {'interval': 'month', 'interval_count': 6}
         }
         
         if frequency not in interval_mapping:
@@ -134,9 +126,7 @@ def create_subscription_checkout():
         
         interval_config = interval_mapping[frequency]
         
-        # Create or retrieve Stripe Price
-        # In production, you should create these prices in Stripe Dashboard
-        # For now, we'll create them dynamically
+        # Create Stripe Price for subscription
         price = stripe.Price.create(
             unit_amount=int(item['price'] * 100),
             currency='eur',
@@ -145,24 +135,6 @@ def create_subscription_checkout():
                 'name': f"{item['name']} - Suscripción {frequency}",
             },
         )
-        
-        # Create subscription record
-        subscription = Subscription(
-            subscription_number=generate_subscription_number(),
-            customer_email=customer_info['email'],
-            customer_name=customer_info['name'],
-            product_id=item['id'],
-            product_name=item['name'],
-            product_slug=item['slug'],
-            quantity=item['quantity'],
-            unit_price=item['price'],
-            frequency=frequency,
-            status='pending',
-            stripe_price_id=price.id
-        )
-        
-        db.session.add(subscription)
-        db.session.commit()
         
         # Create Stripe Checkout Session for subscription
         frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
@@ -178,19 +150,19 @@ def create_subscription_checkout():
             cancel_url=f'{frontend_url}/checkout?cancelled=true',
             customer_email=customer_info['email'],
             metadata={
-                'subscription_id': subscription.id,
-                'subscription_number': subscription.subscription_number
+                'subscription_number': subscription_number,
+                'product_id': item['id'],
+                'product_name': item['name'],
+                'product_slug': item['slug'],
+                'frequency': frequency,
+                'customer_name': customer_info['name']
             }
         )
-        
-        # Update subscription with session ID
-        subscription.stripe_subscription_id = session.subscription
-        db.session.commit()
         
         return jsonify({
             'sessionId': session.id,
             'url': session.url,
-            'subscription_number': subscription.subscription_number
+            'subscription_number': subscription_number
         })
         
     except Exception as e:
@@ -222,63 +194,29 @@ def stripe_webhook():
         
         if session['mode'] == 'payment':
             # One-time payment completed
-            order_id = session['metadata'].get('order_id')
-            if order_id:
-                order = Order.query.get(order_id)
-                if order:
-                    order.payment_status = 'paid'
-                    order.stripe_payment_intent_id = session.get('payment_intent')
-                    order.paid_at = datetime.utcnow()
-                    db.session.commit()
-                    
-                    # TODO: Send confirmation email via Brevo
-                    print(f"Order {order.order_number} paid successfully")
+            order_number = session['metadata'].get('order_number')
+            print(f"Order {order_number} paid successfully")
+            # TODO: Send confirmation email via Brevo
         
         elif session['mode'] == 'subscription':
             # Subscription created
-            subscription_id = session['metadata'].get('subscription_id')
-            if subscription_id:
-                subscription = Subscription.query.get(subscription_id)
-                if subscription:
-                    subscription.status = 'active'
-                    subscription.stripe_subscription_id = session.get('subscription')
-                    subscription.stripe_customer_id = session.get('customer')
-                    db.session.commit()
-                    
-                    # TODO: Send subscription confirmation email via Brevo
-                    print(f"Subscription {subscription.subscription_number} activated")
+            subscription_number = session['metadata'].get('subscription_number')
+            print(f"Subscription {subscription_number} activated")
+            # TODO: Send subscription confirmation email via Brevo
     
     elif event['type'] == 'invoice.payment_succeeded':
         # Recurring payment succeeded
         invoice = event['data']['object']
         subscription_id = invoice.get('subscription')
-        
-        if subscription_id:
-            subscription = Subscription.query.filter_by(
-                stripe_subscription_id=subscription_id
-            ).first()
-            
-            if subscription:
-                # TODO: Create order for this subscription cycle
-                # TODO: Send invoice email via Brevo
-                print(f"Subscription {subscription.subscription_number} payment succeeded")
+        print(f"Subscription {subscription_id} payment succeeded")
+        # TODO: Send invoice email via Brevo
     
     elif event['type'] == 'customer.subscription.deleted':
         # Subscription cancelled
         subscription_obj = event['data']['object']
         subscription_id = subscription_obj['id']
-        
-        subscription = Subscription.query.filter_by(
-            stripe_subscription_id=subscription_id
-        ).first()
-        
-        if subscription:
-            subscription.status = 'cancelled'
-            subscription.cancelled_at = datetime.utcnow()
-            db.session.commit()
-            
-            # TODO: Send cancellation confirmation email via Brevo
-            print(f"Subscription {subscription.subscription_number} cancelled")
+        print(f"Subscription {subscription_id} cancelled")
+        # TODO: Send cancellation confirmation email via Brevo
     
     return jsonify({'status': 'success'})
 
@@ -292,7 +230,8 @@ def get_session_status(session_id):
         return jsonify({
             'status': session.status,
             'payment_status': session.payment_status,
-            'customer_email': session.customer_details.email if session.customer_details else None
+            'customer_email': session.customer_details.email if session.customer_details else None,
+            'metadata': session.metadata
         })
         
     except Exception as e:
