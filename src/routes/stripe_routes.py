@@ -3,6 +3,7 @@ import stripe
 import os
 from datetime import datetime
 import secrets
+from services.whatsapp_service import notify_new_order, notify_new_subscription
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
@@ -196,13 +197,53 @@ def stripe_webhook():
             # One-time payment completed
             order_number = session['metadata'].get('order_number')
             print(f"Order {order_number} paid successfully")
-            # TODO: Send confirmation email via Brevo
+            
+            # Obtener detalles del pedido
+            try:
+                line_items = stripe.checkout.Session.list_line_items(session['id'], limit=100)
+                items = []
+                for item in line_items.data:
+                    items.append({
+                        'name': item.description,
+                        'quantity': item.quantity,
+                        'price': item.amount_total / 100
+                    })
+                
+                order_data = {
+                    'order_number': order_number,
+                    'customer_name': session['metadata'].get('customer_name', 'N/A'),
+                    'customer_email': session.get('customer_details', {}).get('email', 'N/A'),
+                    'customer_phone': session['metadata'].get('customer_phone', 'N/A'),
+                    'items': items,
+                    'total': session['amount_total'] / 100 if session.get('amount_total') else 0,
+                    'shipping_address': f"{session['metadata'].get('customer_address', '')}, {session['metadata'].get('customer_city', '')}, {session['metadata'].get('customer_postal_code', '')}"
+                }
+                
+                # Enviar notificación por WhatsApp
+                notify_new_order(order_data)
+            except Exception as e:
+                print(f"Error sending order notification: {str(e)}")
         
         elif session['mode'] == 'subscription':
             # Subscription created
             subscription_number = session['metadata'].get('subscription_number')
             print(f"Subscription {subscription_number} activated")
-            # TODO: Send subscription confirmation email via Brevo
+            
+            # Obtener detalles de la suscripción
+            try:
+                subscription_data = {
+                    'subscription_number': subscription_number,
+                    'customer_name': session['metadata'].get('customer_name', 'N/A'),
+                    'customer_email': session.get('customer_details', {}).get('email', 'N/A'),
+                    'product_name': session['metadata'].get('product_name', 'N/A'),
+                    'frequency': session['metadata'].get('frequency', 'N/A'),
+                    'price': session['amount_total'] / 100 if session.get('amount_total') else 0
+                }
+                
+                # Enviar notificación por WhatsApp
+                notify_new_subscription(subscription_data)
+            except Exception as e:
+                print(f"Error sending subscription notification: {str(e)}")
     
     elif event['type'] == 'invoice.payment_succeeded':
         # Recurring payment succeeded
