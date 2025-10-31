@@ -3,7 +3,7 @@ import stripe
 import os
 from datetime import datetime
 import secrets
-from services.whatsapp_service import notify_new_order, notify_new_subscription
+from src.services.whatsapp_service import notify_new_order, notify_new_subscription
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
