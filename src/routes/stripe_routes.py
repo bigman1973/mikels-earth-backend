@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 import secrets
 from src.services.whatsapp_service import notify_new_order, notify_new_subscription
+from src.services.email_service import notify_new_order_email, notify_new_subscription_email
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
@@ -219,8 +220,9 @@ def stripe_webhook():
                     'shipping_address': f"{session['metadata'].get('customer_address', '')}, {session['metadata'].get('customer_city', '')}, {session['metadata'].get('customer_postal_code', '')}"
                 }
                 
-                # Enviar notificación por WhatsApp
+                # Enviar notificaciones por WhatsApp y Email
                 notify_new_order(order_data)
+                notify_new_order_email(order_data)
             except Exception as e:
                 print(f"Error sending order notification: {str(e)}")
         
@@ -240,8 +242,9 @@ def stripe_webhook():
                     'price': session['amount_total'] / 100 if session.get('amount_total') else 0
                 }
                 
-                # Enviar notificación por WhatsApp
+                # Enviar notificaciones por WhatsApp y Email
                 notify_new_subscription(subscription_data)
+                notify_new_subscription_email(subscription_data)
             except Exception as e:
                 print(f"Error sending subscription notification: {str(e)}")
     
