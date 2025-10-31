@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 import secrets
 from src.services.whatsapp_service import notify_new_order, notify_new_subscription
-from src.services.email_service import notify_new_order_email, notify_new_subscription_email
+from src.services.email_service import notify_new_order_email, notify_new_subscription_email, send_customer_order_confirmation
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
@@ -223,6 +223,9 @@ def stripe_webhook():
                 # Enviar notificaciones por WhatsApp y Email
                 notify_new_order(order_data)
                 notify_new_order_email(order_data)
+                
+                # Enviar email de confirmación al cliente
+                send_customer_order_confirmation(order_data)
             except Exception as e:
                 print(f"Error sending order notification: {str(e)}")
         
