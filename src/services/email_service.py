@@ -19,6 +19,9 @@ def send_email(to_email, subject, html_content):
         print("ERROR: BREVO_API_KEY no configurada")
         return False
     
+    # Limpiar la API key (eliminar saltos de línea y espacios)
+    api_key = api_key.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+    
     headers = {
         'accept': 'application/json',
         'api-key': api_key,
