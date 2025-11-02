@@ -149,6 +149,15 @@ def format_order_email(order_data):
                     <p>{order_data.get('shipping_address', 'N/A')}</p>
                 </div>
                 
+                {f'''<div class="section">
+                    <h3>📝 Datos de Factura</h3>
+                    <p><strong>Nombre Fiscal:</strong> {order_data.get('invoice_data', {}).get('fiscalName', 'N/A')}</p>
+                    <p><strong>NIF/CIF:</strong> {order_data.get('invoice_data', {}).get('nif', 'N/A')}</p>
+                    {f"<p><strong>Dirección Fiscal:</strong> {order_data.get('invoice_data', {}).get('fiscalAddress', 'N/A')}</p>" if order_data.get('invoice_data', {}).get('fiscalAddress') else ''}
+                    {f"<p><strong>Ciudad:</strong> {order_data.get('invoice_data', {}).get('fiscalCity', 'N/A')}</p>" if order_data.get('invoice_data', {}).get('fiscalCity') else ''}
+                    {f"<p><strong>Código Postal:</strong> {order_data.get('invoice_data', {}).get('fiscalPostalCode', 'N/A')}</p>" if order_data.get('invoice_data', {}).get('fiscalPostalCode') else ''}
+                </div>''' if order_data.get('needs_invoice') else ''}
+                
                 <div style="text-align: center;">
                     <a href="https://dashboard.stripe.com/payments" class="button">Ver en Stripe Dashboard</a>
                 </div>
@@ -342,6 +351,17 @@ def format_customer_order_confirmation(order_data):
                     <h3>📍 Dirección de Envío</h3>
                     <p>{order_data.get('shipping_address', 'N/A')}</p>
                 </div>
+                
+                {f'''<div class="section">
+                    <h3>📝 Datos de Factura</h3>
+                    <div class="highlight-box">
+                        <p style="margin: 5px 0;"><strong>Nombre Fiscal:</strong> {order_data.get('invoice_data', {}).get('fiscalName', 'N/A')}</p>
+                        <p style="margin: 5px 0;"><strong>NIF/CIF:</strong> {order_data.get('invoice_data', {}).get('nif', 'N/A')}</p>
+                        {f"<p style='margin: 5px 0;'><strong>Dirección Fiscal:</strong> {order_data.get('invoice_data', {}).get('fiscalAddress', 'N/A')}</p>" if order_data.get('invoice_data', {}).get('fiscalAddress') else ''}
+                        {f"<p style='margin: 5px 0;'><strong>Ciudad:</strong> {order_data.get('invoice_data', {}).get('fiscalCity', 'N/A')} - {order_data.get('invoice_data', {}).get('fiscalPostalCode', 'N/A')}</p>" if order_data.get('invoice_data', {}).get('fiscalCity') else ''}
+                    </div>
+                    <p style="font-size: 0.9em; color: #666; margin-top: 10px;">Recibirás tu factura por email en las próximas 24-48 horas.</p>
+                </div>''' if order_data.get('needs_invoice') else ''}
                 
                 <div class="section">
                     <h3>🚚 ¿Qué sigue?</h3>
