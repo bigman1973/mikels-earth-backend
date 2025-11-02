@@ -125,6 +125,20 @@ def format_order_email(order_data):
                             {items_html}
                         </tbody>
                     </table>
+                    <table style="margin-top: 15px;">
+                        <tr>
+                            <td style="text-align: right; padding: 5px; color: #666;">Subtotal:</td>
+                            <td style="text-align: right; padding: 5px; width: 100px;">{order_data.get('subtotal', order_data.get('total', 0)):.2f}€</td>
+                        </tr>
+                        {f'''<tr>
+                            <td style="text-align: right; padding: 5px; color: #16a34a; font-weight: bold;">Descuento {order_data.get('discount_code', '')}:</td>
+                            <td style="text-align: right; padding: 5px; color: #16a34a; font-weight: bold;">-{order_data.get('discount_amount', 0):.2f}€</td>
+                        </tr>''' if order_data.get('discount_code') else ''}
+                        <tr>
+                            <td style="text-align: right; padding: 5px; color: #666;">Envío:</td>
+                            <td style="text-align: right; padding: 5px; color: #16a34a; font-weight: bold;">GRATIS</td>
+                        </tr>
+                    </table>
                     <div class="total">
                         Total: {order_data.get('total', 0):.2f}€
                     </div>
@@ -304,6 +318,20 @@ def format_customer_order_confirmation(order_data):
                         <tbody>
                             {items_html}
                         </tbody>
+                    </table>
+                    <table style="margin-top: 15px;">
+                        <tr>
+                            <td style="text-align: right; padding: 5px; color: #666;">Subtotal:</td>
+                            <td style="text-align: right; padding: 5px; width: 100px;">{order_data.get('subtotal', order_data.get('total', 0)):.2f}€</td>
+                        </tr>
+                        {f'''<tr>
+                            <td style="text-align: right; padding: 5px; color: #16a34a; font-weight: bold;">Descuento {order_data.get('discount_code', '')}:</td>
+                            <td style="text-align: right; padding: 5px; color: #16a34a; font-weight: bold;">-{order_data.get('discount_amount', 0):.2f}€</td>
+                        </tr>''' if order_data.get('discount_code') else ''}
+                        <tr>
+                            <td style="text-align: right; padding: 5px; color: #666;">Envío:</td>
+                            <td style="text-align: right; padding: 5px; color: #16a34a; font-weight: bold;">GRATIS</td>
+                        </tr>
                     </table>
                     <div class="total">
                         Total: {order_data.get('total', 0):.2f}€
