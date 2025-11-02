@@ -210,6 +210,15 @@ def stripe_webhook():
                         'price': item.amount_total / 100
                     })
                 
+                # Construir dirección completa
+                address_parts = [
+                    session['metadata'].get('shipping_address', ''),
+                    session['metadata'].get('shipping_city', ''),
+                    session['metadata'].get('shipping_postal_code', ''),
+                    session['metadata'].get('shipping_country', '')
+                ]
+                full_address = ', '.join([part for part in address_parts if part])
+                
                 order_data = {
                     'order_number': order_number,
                     'customer_name': session['metadata'].get('customer_name', 'N/A'),
@@ -217,7 +226,7 @@ def stripe_webhook():
                     'customer_phone': session['metadata'].get('customer_phone', 'N/A'),
                     'items': items,
                     'total': session['amount_total'] / 100 if session.get('amount_total') else 0,
-                    'shipping_address': f"{session['metadata'].get('customer_address', '')}, {session['metadata'].get('customer_city', '')}, {session['metadata'].get('customer_postal_code', '')}"
+                    'shipping_address': full_address if full_address else 'No especificada'
                 }
                 
                 # Enviar notificaciones por WhatsApp y Email
