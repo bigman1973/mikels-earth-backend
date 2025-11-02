@@ -19,9 +19,23 @@ app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'sta
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'asdf#FGSgvasgf$5$WGT')
 
 # Enable CORS
+# Permitir múltiples orígenes: producción, Vercel preview, y desarrollo local
+allowed_origins = [
+    os.getenv('FRONTEND_URL', 'http://localhost:5173'),  # Producción principal
+    "https://www.mikels.es",
+    "https://mikels.es",
+    "https://mikels-earth-frontend.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:8081"
+]
+
+# Añadir cualquier preview deployment de Vercel
+if os.getenv('VERCEL_URL'):
+    allowed_origins.append(f"https://{os.getenv('VERCEL_URL')}")
+
 CORS(app, resources={
     r"/api/*": {
-        "origins": [os.getenv('FRONTEND_URL', 'http://localhost:5173'), "http://localhost:8081"],
+        "origins": allowed_origins,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"]
     }
