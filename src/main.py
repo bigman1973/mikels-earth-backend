@@ -12,6 +12,8 @@ from src.routes.user import user_bp
 from src.routes.stripe_routes import stripe_bp
 from src.routes.notification_routes import notification_bp
 from src.routes.newsletter_routes import newsletter_bp
+from src.routes.experience_routes import experience_bp
+from src.routes.contact_routes import contact_bp
 
 # Load environment variables
 load_dotenv()
@@ -46,6 +48,8 @@ app.register_blueprint(user_bp, url_prefix='/api')
 app.register_blueprint(stripe_bp)
 app.register_blueprint(notification_bp)
 app.register_blueprint(newsletter_bp, url_prefix='/api/newsletter')
+app.register_blueprint(experience_bp, url_prefix='/api/experience')
+app.register_blueprint(contact_bp, url_prefix='/api/contact')
 
 # Database disabled - using Stripe for payment management
 # app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'database', 'app.db')}"

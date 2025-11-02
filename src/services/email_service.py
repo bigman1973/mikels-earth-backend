@@ -650,3 +650,313 @@ def add_contact_to_brevo(email):
         print(f"Error adding contact to Brevo: {str(e)}")
         return {"success": False, "error": str(e)}
 
+
+
+
+def send_workshop_visit_notification(nombre, email, telefono, interes):
+    """
+    Envía notificación a info@mikels.es cuando alguien solicita visita al obrador
+    """
+    subject = f"🏭 Nueva solicitud de visita al obrador - {nombre}"
+    
+    interes_text = {
+        'visita': 'Visita al obrador',
+        'taller': 'Taller de elaboración',
+        'degustacion': 'Degustación de productos'
+    }.get(interes, interes)
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #2d5016; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #f9f9f9; padding: 20px; border-radius: 0 0 5px 5px; }}
+            .highlight {{ background-color: #f0f7e9; padding: 15px; border-left: 4px solid #2d5016; margin: 15px 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🏭 Nueva Solicitud de Visita al Obrador</h1>
+            </div>
+            <div class="content">
+                <p>Se ha recibido una nueva solicitud de visita al obrador.</p>
+                
+                <div class="highlight">
+                    <p style="margin: 5px 0;"><strong>Nombre:</strong> {nombre}</p>
+                    <p style="margin: 5px 0;"><strong>Email:</strong> {email}</p>
+                    <p style="margin: 5px 0;"><strong>Teléfono:</strong> {telefono if telefono else 'No proporcionado'}</p>
+                    <p style="margin: 5px 0;"><strong>Interés:</strong> {interes_text}</p>
+                    <p style="margin: 5px 0;"><strong>Fecha:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                </div>
+                
+                <p>Por favor, contacta con el interesado para coordinar la visita.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": os.getenv('BREVO_API_KEY'),
+                "content-type": "application/json"
+            },
+            json={
+                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "to": [{"email": "info@mikels.es"}],
+                "subject": subject,
+                "htmlContent": html_content
+            }
+        )
+        return response.status_code == 201
+    except Exception as e:
+        print(f"Error sending workshop visit notification: {str(e)}")
+        return False
+
+
+def send_workshop_visit_confirmation(nombre, email):
+    """
+    Envía email de confirmación al interesado en visitar el obrador
+    """
+    subject = "✅ Solicitud de visita recibida - Mikel's Earth"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #2d5016; color: white; padding: 30px 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #ffffff; padding: 30px; border: 1px solid #e0e0e0; border-top: none; }}
+            .highlight {{ background-color: #f0f7e9; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center; }}
+            .footer {{ background-color: #f9f9f9; padding: 20px; text-align: center; border-radius: 0 0 5px 5px; font-size: 0.9em; color: #666; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1 style="margin: 0;">🏭 ¡Gracias por tu interés!</h1>
+            </div>
+            <div class="content">
+                <p>Hola {nombre},</p>
+                
+                <p>Hemos recibido tu solicitud para visitar nuestro obrador. ¡Nos encanta que quieras conocer de cerca cómo elaboramos nuestros productos artesanales!</p>
+                
+                <div class="highlight">
+                    <p style="font-size: 1.2em; margin: 0; color: #2d5016;">
+                        <strong>Nos pondremos en contacto contigo muy pronto</strong>
+                    </p>
+                    <p style="margin: 10px 0 0 0; color: #666;">
+                        para coordinar la fecha y hora de tu visita
+                    </p>
+                </div>
+                
+                <p><strong>¿Qué podrás ver en el obrador?</strong></p>
+                <ul style="color: #555;">
+                    <li>El proceso completo de elaboración artesanal</li>
+                    <li>Nuestras instalaciones y maquinaria tradicional</li>
+                    <li>La historia familiar detrás de Mikel's Earth</li>
+                    <li>Degustación de nuestros productos (según disponibilidad)</li>
+                </ul>
+                
+                <p>Si tienes alguna pregunta mientras tanto, no dudes en contactarnos:</p>
+                <p>
+                    📧 Email: <a href="mailto:info@mikels.es" style="color: #2d5016;">info@mikels.es</a><br>
+                    📱 WhatsApp: <a href="https://wa.me/436789070062172" style="color: #2d5016;">+43 6789 0700 62172</a>
+                </p>
+                
+                <p style="margin-top: 30px;">¡Hasta pronto!</p>
+                <p style="color: #2d5016; font-weight: bold;">El equipo de Mikel's Earth</p>
+            </div>
+            <div class="footer">
+                <p>Mikel's Earth - Del campo a tu mesa</p>
+                <p style="font-size: 0.85em; color: #999;">Carrer Cardenal Cisneros, 10 - Lérida, España</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": os.getenv('BREVO_API_KEY'),
+                "content-type": "application/json"
+            },
+            json={
+                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "to": [{"email": email, "name": nombre}],
+                "subject": subject,
+                "htmlContent": html_content
+            }
+        )
+        return response.status_code == 201
+    except Exception as e:
+        print(f"Error sending workshop visit confirmation: {str(e)}")
+        return False
+
+
+
+
+def send_contact_notification(name, email, phone, message):
+    """
+    Envía notificación a info@mikels.es cuando alguien envía mensaje de contacto
+    """
+    subject = f"📬 Nuevo mensaje de contacto - {name}"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #2d5016; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #f9f9f9; padding: 20px; border-radius: 0 0 5px 5px; }}
+            .highlight {{ background-color: #f0f7e9; padding: 15px; border-left: 4px solid #2d5016; margin: 15px 0; }}
+            .message-box {{ background-color: white; padding: 15px; border-radius: 5px; margin: 15px 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📬 Nuevo Mensaje de Contacto</h1>
+            </div>
+            <div class="content">
+                <p>Has recibido un nuevo mensaje desde el formulario de contacto de la web.</p>
+                
+                <div class="highlight">
+                    <p style="margin: 5px 0;"><strong>Nombre:</strong> {name}</p>
+                    <p style="margin: 5px 0;"><strong>Email:</strong> <a href="mailto:{email}">{email}</a></p>
+                    <p style="margin: 5px 0;"><strong>Teléfono:</strong> {phone if phone else 'No proporcionado'}</p>
+                    <p style="margin: 5px 0;"><strong>Fecha:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                </div>
+                
+                <div class="message-box">
+                    <p style="margin: 0 0 10px 0;"><strong>Mensaje:</strong></p>
+                    <p style="margin: 0; white-space: pre-wrap;">{message}</p>
+                </div>
+                
+                <p>Por favor, responde al cliente lo antes posible.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": os.getenv('BREVO_API_KEY'),
+                "content-type": "application/json"
+            },
+            json={
+                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "to": [{"email": "info@mikels.es"}],
+                "replyTo": {"email": email, "name": name},
+                "subject": subject,
+                "htmlContent": html_content
+            }
+        )
+        return response.status_code == 201
+    except Exception as e:
+        print(f"Error sending contact notification: {str(e)}")
+        return False
+
+
+def send_contact_confirmation(name, email):
+    """
+    Envía email de confirmación al cliente que envió mensaje de contacto
+    """
+    subject = "✅ Mensaje recibido - Mikel's Earth"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #2d5016; color: white; padding: 30px 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #ffffff; padding: 30px; border: 1px solid #e0e0e0; border-top: none; }}
+            .highlight {{ background-color: #f0f7e9; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center; }}
+            .footer {{ background-color: #f9f9f9; padding: 20px; text-align: center; border-radius: 0 0 5px 5px; font-size: 0.9em; color: #666; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1 style="margin: 0;">✅ ¡Mensaje recibido!</h1>
+            </div>
+            <div class="content">
+                <p>Hola {name},</p>
+                
+                <p>Gracias por ponerte en contacto con nosotros. Hemos recibido tu mensaje correctamente.</p>
+                
+                <div class="highlight">
+                    <p style="font-size: 1.2em; margin: 0; color: #2d5016;">
+                        <strong>Te responderemos en menos de 24 horas</strong>
+                    </p>
+                </div>
+                
+                <p>Mientras tanto, si tu consulta es urgente, puedes contactarnos directamente por:</p>
+                <p style="background-color: #f9f9f9; padding: 15px; border-radius: 5px;">
+                    📧 Email: <a href="mailto:info@mikels.es" style="color: #2d5016;">info@mikels.es</a><br>
+                    📱 WhatsApp: <a href="https://wa.me/436789070062172" style="color: #2d5016;">+43 6789 0700 62172</a>
+                </p>
+                
+                <p>También te invitamos a:</p>
+                <ul style="color: #555;">
+                    <li><a href="https://www.mikels.es/productos" style="color: #2d5016;">Explorar nuestros productos artesanales</a></li>
+                    <li><a href="https://www.mikels.es/el-obrador" style="color: #2d5016;">Conocer nuestro obrador</a></li>
+                    <li><a href="https://www.mikels.es/la-familia" style="color: #2d5016;">Descubrir nuestra historia familiar</a></li>
+                </ul>
+                
+                <p style="margin-top: 30px;">¡Gracias por tu interés en Mikel's Earth!</p>
+                <p style="color: #2d5016; font-weight: bold;">El equipo de Mikel's Earth</p>
+            </div>
+            <div class="footer">
+                <p>Mikel's Earth - Del campo a tu mesa</p>
+                <p style="font-size: 0.85em; color: #999;">Carrer Cardenal Cisneros, 10 - Lérida, España</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": os.getenv('BREVO_API_KEY'),
+                "content-type": "application/json"
+            },
+            json={
+                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "to": [{"email": email, "name": name}],
+                "subject": subject,
+                "htmlContent": html_content
+            }
+        )
+        return response.status_code == 201
+    except Exception as e:
+        print(f"Error sending contact confirmation: {str(e)}")
+        return False
+
