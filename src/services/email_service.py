@@ -428,3 +428,85 @@ def send_product_notification_request(product_name, customer_name, customer_emai
     
     return send_email(owner_email, subject, html_content)
 
+
+
+
+def send_customer_notification_confirmation(product_name, customer_name, customer_email):
+    """
+    Envía email de confirmación al cliente cuando solicita ser notificado de un producto sold out
+    """
+    subject = f"✅ Te avisaremos cuando {product_name} esté disponible - Mikel's Earth"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #2d5016; color: white; padding: 30px 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .header h1 {{ margin: 0; font-size: 28px; }}
+            .content {{ background-color: #f9f9f9; padding: 20px; }}
+            .section {{ background-color: white; padding: 20px; margin-bottom: 15px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+            .section h3 {{ color: #2d5016; margin-top: 0; }}
+            .highlight-box {{ background-color: #f0f7e9; padding: 20px; border-left: 4px solid #2d5016; margin: 15px 0; text-align: center; }}
+            .product-name {{ font-size: 1.3em; font-weight: bold; color: #2d5016; margin: 10px 0; }}
+            .footer {{ text-align: center; padding: 20px; color: #666; font-size: 0.9em; }}
+            .contact-info {{ background-color: #f0f7e9; padding: 15px; border-radius: 5px; margin-top: 15px; }}
+            .icon {{ font-size: 48px; margin-bottom: 10px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <div class="icon">🔔</div>
+                <h1>¡Solicitud Recibida!</h1>
+            </div>
+            
+            <div class="content">
+                <div class="section">
+                    <h3>Hola {customer_name},</h3>
+                    <p>Gracias por tu interés en nuestros productos. Hemos recibido tu solicitud y te avisaremos por email cuando el siguiente producto esté disponible:</p>
+                    
+                    <div class="highlight-box">
+                        <div class="product-name">🌾 {product_name}</div>
+                        <p style="color: #666; margin: 5px 0;">En cosecha - Disponible pronto</p>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h3>📧 ¿Qué sigue?</h3>
+                    <p><strong>1. Cosecha:</strong> Estamos en plena cosecha de nuestros productos frescos</p>
+                    <p><strong>2. Preparación:</strong> Una vez listos, prepararemos el producto con el máximo cuidado</p>
+                    <p><strong>3. Te avisamos:</strong> Recibirás un email en cuanto esté disponible para comprar</p>
+                </div>
+                
+                <div class="section">
+                    <h3>🌿 Mientras tanto...</h3>
+                    <p>Explora otros productos disponibles en nuestra tienda:</p>
+                    <p style="text-align: center; margin-top: 15px;">
+                        <a href="https://www.mikels.es/productos" style="display: inline-block; padding: 12px 24px; background-color: #2d5016; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">Ver Todos los Productos</a>
+                    </p>
+                </div>
+                
+                <div class="contact-info">
+                    <h4 style="margin-top: 0; color: #2d5016;">¿Tienes alguna pregunta?</h4>
+                    <p style="margin: 5px 0;">📧 Email: info@mikels.es</p>
+                    <p style="margin: 5px 0;">📱 WhatsApp: +43 6789 0700 62172</p>
+                    <p style="margin: 5px 0;">🌐 Web: www.mikels.es</p>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <p><strong>Mikel's Earth</strong></p>
+                <p>Productos del campo directo a tu mesa desde 1819</p>
+                <p style="font-size: 0.8em; color: #999; margin-top: 15px;">Este email se envió a {customer_email} porque solicitaste ser notificado sobre la disponibilidad de un producto.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return send_email(customer_email, subject, html_content)
+

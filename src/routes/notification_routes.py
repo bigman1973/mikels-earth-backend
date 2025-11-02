@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from src.services.email_service import send_product_notification_request
+from src.services.email_service import send_product_notification_request, send_customer_notification_confirmation
 
 notification_bp = Blueprint('notification', __name__, url_prefix='/api/notification')
 
@@ -21,12 +21,24 @@ def notify_me():
         customer_phone = data.get('customer_phone', '')
         
         # Send notification email to owner
-        send_product_notification_request(
+        owner_email_sent = send_product_notification_request(
             product_name=product_name,
             customer_name=customer_name,
             customer_email=customer_email,
             customer_phone=customer_phone
         )
+        
+        # Send confirmation email to customer
+        customer_email_sent = send_customer_notification_confirmation(
+            product_name=product_name,
+            customer_name=customer_name,
+            customer_email=customer_email
+        )
+        
+        if not owner_email_sent:
+            print("⚠️ Email al propietario no se pudo enviar")
+        if not customer_email_sent:
+            print("⚠️ Email al cliente no se pudo enviar")
         
         return jsonify({
             'success': True,
