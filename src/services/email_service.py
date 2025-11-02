@@ -558,3 +558,95 @@ def send_customer_notification_confirmation(product_name, customer_name, custome
     
     return send_email(customer_email, subject, html_content)
 
+
+
+
+def send_newsletter_subscription_notification(email):
+    """
+    Envía notificación a info@mikels.es cuando alguien se suscribe al newsletter
+    """
+    subject = f"🔔 Nueva suscripción al Newsletter - {email}"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #2d5016; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #f9f9f9; padding: 20px; border-radius: 0 0 5px 5px; }}
+            .highlight {{ background-color: #f0f7e9; padding: 15px; border-left: 4px solid #2d5016; margin: 15px 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📧 Nueva Suscripción al Newsletter</h1>
+            </div>
+            <div class="content">
+                <p>Se ha registrado una nueva suscripción al newsletter de Mikel's Earth.</p>
+                
+                <div class="highlight">
+                    <p style="margin: 0;"><strong>Email:</strong> {email}</p>
+                    <p style="margin: 5px 0 0 0;"><strong>Fecha:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                </div>
+                
+                <p>El contacto ha sido añadido automáticamente a Brevo.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": os.getenv('BREVO_API_KEY'),
+                "content-type": "application/json"
+            },
+            json={
+                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "to": [{"email": "info@mikels.es"}],
+                "subject": subject,
+                "htmlContent": html_content
+            }
+        )
+        return response.status_code == 201
+    except Exception as e:
+        print(f"Error sending newsletter notification email: {str(e)}")
+        return False
+
+
+def add_contact_to_brevo(email):
+    """
+    Añade un contacto a la lista de newsletter en Brevo
+    """
+    try:
+        response = requests.post(
+            "https://api.brevo.com/v3/contacts",
+            headers={
+                "accept": "application/json",
+                "api-key": os.getenv('BREVO_API_KEY'),
+                "content-type": "application/json"
+            },
+            json={
+                "email": email,
+                "listIds": [2],  # ID de la lista de newsletter en Brevo
+                "updateEnabled": True  # Actualizar si ya existe
+            }
+        )
+        
+        if response.status_code in [201, 204]:
+            return {"success": True, "id": response.json().get('id') if response.status_code == 201 else None}
+        else:
+            print(f"Brevo API error: {response.status_code} - {response.text}")
+            return {"success": False, "error": response.text}
+            
+    except Exception as e:
+        print(f"Error adding contact to Brevo: {str(e)}")
+        return {"success": False, "error": str(e)}
+

@@ -11,6 +11,7 @@ from src.models.order import Order, Subscription
 from src.routes.user import user_bp
 from src.routes.stripe_routes import stripe_bp
 from src.routes.notification_routes import notification_bp
+from src.routes.newsletter_routes import newsletter_bp
 
 # Load environment variables
 load_dotenv()
@@ -44,6 +45,7 @@ CORS(app, resources={
 app.register_blueprint(user_bp, url_prefix='/api')
 app.register_blueprint(stripe_bp)
 app.register_blueprint(notification_bp)
+app.register_blueprint(newsletter_bp, url_prefix='/api/newsletter')
 
 # Database disabled - using Stripe for payment management
 # app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'database', 'app.db')}"
