@@ -358,3 +358,73 @@ def send_customer_order_confirmation(order_data):
     
     return send_email(customer_email, subject, html_content)
 
+
+
+
+def send_product_notification_request(product_name, customer_name, customer_email, customer_phone=''):
+    """
+    Envía notificación al propietario cuando un cliente solicita ser avisado de un producto sold out
+    """
+    owner_email = os.getenv('OWNER_EMAIL', 'info@mikels.es')
+    subject = f"🔔 Solicitud de Notificación - {product_name}"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #2d5016; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #f9f9f9; padding: 20px; }}
+            .section {{ background-color: white; padding: 15px; margin-bottom: 15px; border-radius: 5px; }}
+            .section h3 {{ color: #2d5016; margin-top: 0; }}
+            .highlight {{ background-color: #fff3cd; padding: 10px; border-left: 4px solid #ffc107; margin: 10px 0; }}
+            .footer {{ text-align: center; padding: 20px; color: #666; font-size: 0.9em; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🔔 Solicitud de Notificación</h1>
+            </div>
+            
+            <div class="content">
+                <div class="highlight">
+                    <strong>⚠️ Un cliente quiere ser notificado cuando este producto esté disponible</strong>
+                </div>
+                
+                <div class="section">
+                    <h3>📦 Producto Solicitado</h3>
+                    <p style="font-size: 1.2em; font-weight: bold; color: #2d5016;">{product_name}</p>
+                </div>
+                
+                <div class="section">
+                    <h3>👤 Datos del Cliente</h3>
+                    <p><strong>Nombre:</strong> {customer_name}</p>
+                    <p><strong>Email:</strong> {customer_email}</p>
+                    {f'<p><strong>Teléfono:</strong> {customer_phone}</p>' if customer_phone else ''}
+                </div>
+                
+                <div class="section">
+                    <h3>📝 Acción Requerida</h3>
+                    <p>Cuando el producto esté disponible, contacta al cliente para informarle:</p>
+                    <ul>
+                        <li>Email: {customer_email}</li>
+                        {f'<li>Teléfono: {customer_phone}</li>' if customer_phone else ''}
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <p>Este es un email automático de solicitud de notificación.</p>
+                <p>Mikel's Earth - Productos del campo directo a tu mesa</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return send_email(owner_email, subject, html_content)
+
