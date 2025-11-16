@@ -374,7 +374,7 @@ def format_customer_order_confirmation(order_data):
                     <h4 style="margin-top: 0; color: #2d5016;">¿Necesitas ayuda?</h4>
                     <p style="margin: 5px 0;">📧 Email: info@mikels.es</p>
                     <p style="margin: 5px 0;">📱 WhatsApp: +43 6789 0700 62172</p>
-                    <p style="margin: 5px 0;">🌐 Web: mikels-earth-frontend.vercel.app</p>
+                    <p style="margin: 5px 0;">🌐 Web: www.mikels.es</p>
                 </div>
             </div>
             

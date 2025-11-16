@@ -27,7 +27,7 @@ allowed_origins = [
     os.getenv('FRONTEND_URL', 'http://localhost:5173'),  # Producción principal
     "https://www.mikels.es",
     "https://mikels.es",
-    "https://mikels-earth-frontend.vercel.app",
+    "https://www.mikels.es",
     "http://localhost:5173",
     "http://localhost:8081"
 ]
