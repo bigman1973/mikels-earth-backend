@@ -1068,7 +1068,8 @@ def send_newsletter_subscription_confirmation(email):
                 <p>Si tienes alguna pregunta, no dudes en contactarnos:</p>
                 <p>
                     📧 Email: <a href="mailto:info@mikels.es" style="color: #2d5016;">info@mikels.es</a><br>
-                    📱 WhatsApp: <a href="https://wa.me/436789070062172" style="color: #2d5016;">+43 6789 0700 62172</a>
+                    📱 WhatsApp: <a href="https://wa.me/436789070062172" style="color: #2d5016;">+43 6789 0700 62172</a><br>
+                    🌐 Web: <a href="https://www.mikels.es" style="color: #2d5016;">www.mikels.es</a>
                 </p>
                 
                 <p style="margin-top: 30px; font-size: 0.9em; color: #666;">
