@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from src.services.email_service import send_newsletter_subscription_notification, add_contact_to_brevo
+from src.services.email_service import send_newsletter_subscription_notification, send_newsletter_subscription_confirmation, add_contact_to_brevo
 
 newsletter_bp = Blueprint('newsletter', __name__)
 
@@ -20,6 +20,9 @@ def subscribe_newsletter():
         
         # Enviar notificación a info@mikels.es
         send_newsletter_subscription_notification(email)
+        
+        # Enviar email de confirmación al suscriptor
+        send_newsletter_subscription_confirmation(email)
         
         return jsonify({
             'success': True,

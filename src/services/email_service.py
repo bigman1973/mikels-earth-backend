@@ -1011,3 +1011,107 @@ def send_contact_confirmation(name, email):
         print(f"Error sending contact confirmation: {str(e)}")
         return False
 
+
+
+
+def send_newsletter_subscription_confirmation(email):
+    """
+    Envía email de confirmación al usuario que se suscribe al newsletter
+    """
+    subject = "✅ ¡Bienvenido a la familia Mikel's Earth!"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #2d5016; color: white; padding: 30px 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #ffffff; padding: 30px; border: 1px solid #e0e0e0; border-top: none; }}
+            .highlight {{ background-color: #f0f7e9; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center; }}
+            .footer {{ background-color: #f9f9f9; padding: 20px; text-align: center; border-radius: 0 0 5px 5px; font-size: 0.9em; color: #666; }}
+            .btn {{ display: inline-block; padding: 12px 30px; background-color: #2d5016; color: white; text-decoration: none; border-radius: 5px; margin: 10px 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1 style="margin: 0;">🌿 ¡Bienvenido a Mikel's Earth!</h1>
+            </div>
+            <div class="content">
+                <p>¡Gracias por suscribirte a nuestro newsletter!</p>
+                
+                <div class="highlight">
+                    <p style="font-size: 1.2em; margin: 0; color: #2d5016;">
+                        <strong>Ahora formas parte de nuestra familia</strong>
+                    </p>
+                    <p style="margin: 10px 0 0 0; color: #666;">
+                        Más de 200 años cultivando tradición
+                    </p>
+                </div>
+                
+                <p><strong>¿Qué recibirás en tu bandeja de entrada?</strong></p>
+                <ul style="color: #555;">
+                    <li>🍑 Recetas exclusivas con nuestros productos</li>
+                    <li>📖 Historias de nuestra tierra y tradición familiar</li>
+                    <li>🎁 Ofertas especiales y promociones únicas</li>
+                    <li>🌱 Consejos sobre productos naturales y artesanales</li>
+                    <li>📅 Novedades y lanzamientos antes que nadie</li>
+                </ul>
+                
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="https://www.mikels.es/tienda" class="btn" style="color: white;">Descubre nuestros productos</a>
+                </p>
+                
+                <p>Si tienes alguna pregunta, no dudes en contactarnos:</p>
+                <p>
+                    📧 Email: <a href="mailto:info@mikels.es" style="color: #2d5016;">info@mikels.es</a><br>
+                    📱 WhatsApp: <a href="https://wa.me/436789070062172" style="color: #2d5016;">+43 6789 0700 62172</a>
+                </p>
+                
+                <p style="margin-top: 30px; font-size: 0.9em; color: #666;">
+                    <em>No spam. Solo contenido de calidad. Puedes darte de baja en cualquier momento.</em>
+                </p>
+                
+                <p style="margin-top: 30px;">¡Gracias por confiar en nosotros!</p>
+                <p style="color: #2d5016; font-weight: bold;">El equipo de Mikel's Earth</p>
+            </div>
+            <div class="footer">
+                <p>Mikel's Earth - Del campo a tu mesa desde 1819</p>
+                <p style="font-size: 0.85em; color: #999;">Carrer Cardenal Cisneros, 10 - Lérida, España</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        api_key = os.getenv('BREVO_API_KEY')
+        if not api_key:
+            print("ERROR: BREVO_API_KEY no configurada")
+            return False
+        
+        # Limpiar la API key
+        api_key = api_key.strip().replace('\\n', '').replace('\\r', '').replace(' ', '')
+        
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": api_key,
+                "content-type": "application/json"
+            },
+            json={
+                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "to": [{"email": email}],
+                "subject": subject,
+                "htmlContent": html_content
+            }
+        )
+        return response.status_code == 201
+    except Exception as e:
+        print(f"Error sending newsletter confirmation email: {str(e)}")
+        return False
+
