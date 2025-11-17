@@ -601,11 +601,19 @@ def send_newsletter_subscription_notification(email):
     """
     
     try:
+        api_key = os.getenv('BREVO_API_KEY')
+        if not api_key:
+            print("ERROR: BREVO_API_KEY no configurada")
+            return False
+        
+        # Limpiar la API key
+        api_key = api_key.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+        
         response = requests.post(
             "https://api.brevo.com/v3/smtp/email",
             headers={
                 "accept": "application/json",
-                "api-key": os.getenv('BREVO_API_KEY'),
+                "api-key": api_key,
                 "content-type": "application/json"
             },
             json={
@@ -626,11 +634,19 @@ def add_contact_to_brevo(email):
     Añade un contacto a la lista de newsletter en Brevo
     """
     try:
+        api_key = os.getenv('BREVO_API_KEY')
+        if not api_key:
+            print("ERROR: BREVO_API_KEY no configurada")
+            return {"success": False, "error": "API key not configured"}
+        
+        # Limpiar la API key
+        api_key = api_key.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+        
         response = requests.post(
             "https://api.brevo.com/v3/contacts",
             headers={
                 "accept": "application/json",
-                "api-key": os.getenv('BREVO_API_KEY'),
+                "api-key": api_key,
                 "content-type": "application/json"
             },
             json={
@@ -640,10 +656,13 @@ def add_contact_to_brevo(email):
             }
         )
         
+        print(f"Brevo API response: {response.status_code}")
+        
         if response.status_code in [201, 204]:
+            print(f"✅ Contacto añadido a Brevo exitosamente: {email}")
             return {"success": True, "id": response.json().get('id') if response.status_code == 201 else None}
         else:
-            print(f"Brevo API error: {response.status_code} - {response.text}")
+            print(f"❌ Brevo API error: {response.status_code} - {response.text}")
             return {"success": False, "error": response.text}
             
     except Exception as e:
@@ -702,11 +721,19 @@ def send_workshop_visit_notification(nombre, email, telefono, interes):
     """
     
     try:
+        api_key = os.getenv('BREVO_API_KEY')
+        if not api_key:
+            print("ERROR: BREVO_API_KEY no configurada")
+            return False
+        
+        # Limpiar la API key
+        api_key = api_key.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+        
         response = requests.post(
             "https://api.brevo.com/v3/smtp/email",
             headers={
                 "accept": "application/json",
-                "api-key": os.getenv('BREVO_API_KEY'),
+                "api-key": api_key,
                 "content-type": "application/json"
             },
             json={
@@ -788,11 +815,19 @@ def send_workshop_visit_confirmation(nombre, email):
     """
     
     try:
+        api_key = os.getenv('BREVO_API_KEY')
+        if not api_key:
+            print("ERROR: BREVO_API_KEY no configurada")
+            return False
+        
+        # Limpiar la API key
+        api_key = api_key.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+        
         response = requests.post(
             "https://api.brevo.com/v3/smtp/email",
             headers={
                 "accept": "application/json",
-                "api-key": os.getenv('BREVO_API_KEY'),
+                "api-key": api_key,
                 "content-type": "application/json"
             },
             json={
@@ -858,11 +893,19 @@ def send_contact_notification(name, email, phone, message):
     """
     
     try:
+        api_key = os.getenv('BREVO_API_KEY')
+        if not api_key:
+            print("ERROR: BREVO_API_KEY no configurada")
+            return False
+        
+        # Limpiar la API key
+        api_key = api_key.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+        
         response = requests.post(
             "https://api.brevo.com/v3/smtp/email",
             headers={
                 "accept": "application/json",
-                "api-key": os.getenv('BREVO_API_KEY'),
+                "api-key": api_key,
                 "content-type": "application/json"
             },
             json={
@@ -941,11 +984,19 @@ def send_contact_confirmation(name, email):
     """
     
     try:
+        api_key = os.getenv('BREVO_API_KEY')
+        if not api_key:
+            print("ERROR: BREVO_API_KEY no configurada")
+            return False
+        
+        # Limpiar la API key
+        api_key = api_key.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+        
         response = requests.post(
             "https://api.brevo.com/v3/smtp/email",
             headers={
                 "accept": "application/json",
-                "api-key": os.getenv('BREVO_API_KEY'),
+                "api-key": api_key,
                 "content-type": "application/json"
             },
             json={
