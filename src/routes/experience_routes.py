@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from services.email_service import send_workshop_visit_notification, send_workshop_visit_confirmation
+from src.services.email_service import send_workshop_visit_notification, send_workshop_visit_confirmation
 
 experience_bp = Blueprint('experience', __name__)
 

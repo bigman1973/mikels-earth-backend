@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from services.email_service import send_newsletter_subscription_notification, add_contact_to_brevo
+from src.services.email_service import send_newsletter_subscription_notification, add_contact_to_brevo
 
 newsletter_bp = Blueprint('newsletter', __name__)
 
