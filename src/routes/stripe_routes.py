@@ -42,11 +42,17 @@ def create_checkout_session():
         
         items = data['items']
         customer_info = data['customer_info']
+        discount_code = data.get('discount_code')
+        discount_amount = data.get('discount_amount', 0)
         
         # Generate order number
         order_number = generate_order_number()
         
-        # Calculate total
+        # Calculate subtotal and total
+        subtotal = sum(item['price'] * item['quantity'] for item in items)
+        total = subtotal - discount_amount
+        
+        # Create line items
         line_items = []
         for item in items:
             line_items.append({
@@ -64,14 +70,14 @@ def create_checkout_session():
         # Create Stripe Checkout Session
         frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
         
-        session = stripe.checkout.Session.create(
-            payment_method_types=['card'],
-            line_items=line_items,
-            mode='payment',
-            success_url=f'{frontend_url}/order-success?session_id={{CHECKOUT_SESSION_ID}}',
-            cancel_url=f'{frontend_url}/checkout?cancelled=true',
-            customer_email=customer_info['email'],
-            metadata={
+        session_params = {
+            'payment_method_types': ['card'],
+            'line_items': line_items,
+            'mode': 'payment',
+            'success_url': f'{frontend_url}/order-success?session_id={{CHECKOUT_SESSION_ID}}',
+            'cancel_url': f'{frontend_url}/checkout?cancelled=true',
+            'customer_email': customer_info['email'],
+            'metadata': {
                 'order_number': order_number,
                 'customer_name': customer_info['name'],
                 'customer_phone': customer_info.get('phone', ''),
@@ -79,9 +85,26 @@ def create_checkout_session():
                 'shipping_city': customer_info['city'],
                 'shipping_postal_code': customer_info['postal_code'],
                 'shipping_country': customer_info.get('country', 'España'),
-                'customer_notes': customer_info.get('notes', '')
+                'customer_notes': customer_info.get('notes', ''),
+                'discount_code': discount_code or '',
+                'discount_amount': str(discount_amount),
+                'subtotal': str(subtotal),
+                'total': str(total)
             }
-        )
+        }
+        
+        # Apply discount if exists
+        if discount_code and discount_amount > 0:
+            # Create a coupon in Stripe for this specific checkout
+            coupon = stripe.Coupon.create(
+                amount_off=int(discount_amount * 100),  # Convert to cents
+                currency='eur',
+                duration='once',
+                name=discount_code
+            )
+            session_params['discounts'] = [{'coupon': coupon.id}]
+        
+        session = stripe.checkout.Session.create(**session_params)
         
         return jsonify({
             'sessionId': session.id,
