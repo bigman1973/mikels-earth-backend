@@ -55,14 +55,28 @@ app.register_blueprint(contact_bp, url_prefix='/api/contact')
 app.register_blueprint(coupon_bp, url_prefix='/api/coupon')
 
 # Database configuration for coupons and user management
-app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'database', 'app.db')}"
+# Use DATABASE_URL from Railway (PostgreSQL) or fallback to SQLite for local dev
+database_url = os.getenv('DATABASE_URL')
+if database_url:
+    # Railway provides DATABASE_URL for PostgreSQL
+    # Fix for SQLAlchemy 1.4+ which requires postgresql:// instead of postgres://
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    # Fallback to SQLite for local development
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/app.db'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 
 # Create database tables
 with app.app_context():
-    db.create_all()
-    print("Database tables created successfully")
+    try:
+        db.create_all()
+        print("Database tables created successfully")
+    except Exception as e:
+        print(f"Warning: Could not create tables: {e}")
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
