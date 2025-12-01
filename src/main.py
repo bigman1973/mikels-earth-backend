@@ -8,12 +8,14 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from src.models.user import db
 from src.models.order import Order, Subscription
+from src.models.coupon import Coupon
 from src.routes.user import user_bp
 from src.routes.stripe_routes import stripe_bp
 from src.routes.notification_routes import notification_bp
 from src.routes.newsletter_routes import newsletter_bp
 from src.routes.experience_routes import experience_bp
 from src.routes.contact_routes import contact_bp
+from src.routes.coupon_routes import coupon_bp
 
 # Load environment variables
 load_dotenv()
@@ -50,13 +52,17 @@ app.register_blueprint(notification_bp)
 app.register_blueprint(newsletter_bp, url_prefix='/api/newsletter')
 app.register_blueprint(experience_bp, url_prefix='/api/experience')
 app.register_blueprint(contact_bp, url_prefix='/api/contact')
+app.register_blueprint(coupon_bp, url_prefix='/api/coupon')
 
-# Database disabled - using Stripe for payment management
-# app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'database', 'app.db')}"
-# app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-# db.init_app(app)
-# with app.app_context():
-#     db.create_all()
+# Database configuration for coupons and user management
+app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'database', 'app.db')}"
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
+
+# Create database tables
+with app.app_context():
+    db.create_all()
+    print("Database tables created successfully")
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

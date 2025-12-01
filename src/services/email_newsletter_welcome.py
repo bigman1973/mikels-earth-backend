@@ -6,9 +6,12 @@ import requests
 from datetime import datetime
 
 
-def send_newsletter_welcome_email(email):
+def send_newsletter_welcome_email(email, coupon_code="BIENVENIDA10"):
     """
-    Envía email de bienvenida con la historia de Jordi y código de descuento BIENVENIDA10
+    Envía email de bienvenida con la historia de Jordi y código de descuento único
+    Args:
+        email: Email del suscriptor
+        coupon_code: Código de cupón único generado (default: BIENVENIDA10)
     """
     subject = "🌿 Bienvenido a la familia Mikel's Earth + Tu regalo (10% descuento)"
     
@@ -292,7 +295,7 @@ def send_newsletter_welcome_email(email):
                 <div class="discount-box">
                     <h2>🎁 Tu regalo de bienvenida</h2>
                     <p>Como bienvenida a nuestra familia, quiero regalarte un <strong>10% de descuento</strong> en tu primera compra.</p>
-                    <div class="discount-code">BIENVENIDA10</div>
+                    <div class="discount-code">{coupon_code}</div>
                     <p style="font-size: 14px; margin-top: 15px;">Copia este código y úsalo en tu primera compra</p>
                     <a href="https://www.mikels.es/tienda" class="btn">Quiero que mis hijos disfruten como Roger y Ares</a>
                 </div>
@@ -328,7 +331,7 @@ def send_newsletter_welcome_email(email):
                     <p>🌐 Web: <a href="https://www.mikels.es" style="color: #2d5016; text-decoration: none; font-weight: bold;">www.mikels.es</a></p>
                 </div>
                 
-                <p style="font-size: 14px; color: #666; margin-top: 30px;"><em>El código BIENVENIDA10 es válido solo para tu primera compra y no es acumulable con otras promociones.</em></p>
+                <p style="font-size: 14px; color: #666; margin-top: 30px;"><em>El código {coupon_code} es válido solo para tu primera compra y no es acumulable con otras promociones.</em></p>
                 
                 <p style="margin-top: 40px;">Un abrazo desde Lleida,</p>
                 <p style="color: #2d5016; font-weight: bold; font-size: 18px;">Jordi Giró</p>
