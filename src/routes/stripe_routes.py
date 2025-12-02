@@ -263,13 +263,23 @@ def stripe_webhook():
                 discount_code = session['metadata'].get('discount_code')
                 if discount_code and discount_code.startswith('MIKELS10-'):
                     try:
-                        from src.models.coupon import Coupon
-                        is_valid, result = Coupon.validate_coupon(discount_code, order_data['customer_email'])
-                        if is_valid:
-                            result.mark_as_used()
+                        # Llamar al servicio de cupones para marcar como usado
+                        coupon_service_url = os.getenv('COUPON_SERVICE_URL', 'https://mikels-coupons-service-production.up.railway.app')
+                        response = requests.post(
+                            f"{coupon_service_url}/api/coupon/use",
+                            json={
+                                "code": discount_code,
+                                "email": order_data['customer_email']
+                            },
+                            timeout=5
+                        )
+                        
+                        if response.status_code == 200:
                             print(f"Coupon {discount_code} marked as used for {order_data['customer_email']}")
+                        else:
+                            print(f"Error marking coupon as used: {response.status_code} - {response.text}")
                     except Exception as coupon_error:
-                        print(f"Error marking coupon as used: {str(coupon_error)}")
+                        print(f"Error calling coupon service to mark as used: {str(coupon_error)}")
             except Exception as e:
                 print(f"Error sending order notification: {str(e)}")
         
