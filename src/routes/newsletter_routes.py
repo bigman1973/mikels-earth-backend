@@ -14,21 +14,23 @@ def subscribe_newsletter():
     try:
         data = request.get_json()
         email = data.get('email')
+        coupon_code = data.get('coupon_code')  # Cupón generado por el microservicio
         
         if not email:
             return jsonify({'error': 'Email is required'}), 400
         
+        # Si no viene cupón del frontend, intentar generar uno (compatibilidad)
+        if not coupon_code:
+            try:
+                coupon = Coupon.create_coupon(email, discount_percentage=10)
+                coupon_code = coupon.code
+            except Exception as e:
+                print(f"Error creating coupon: {str(e)}")
+                # Si falla, usar código genérico como fallback
+                coupon_code = "BIENVENIDA10"
+        
         # Añadir contacto a Brevo
         brevo_result = add_contact_to_brevo(email)
-        
-        # Generar cupón único para este email
-        try:
-            coupon = Coupon.create_coupon(email, discount_percentage=10)
-            coupon_code = coupon.code
-        except Exception as e:
-            print(f"Error creating coupon: {str(e)}")
-            # Si falla, usar código genérico como fallback
-            coupon_code = "BIENVENIDA10"
         
         # Enviar notificación a info@mikels.es
         send_newsletter_subscription_notification(email)
