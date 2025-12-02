@@ -23,7 +23,7 @@ def subscribe_newsletter():
         if not coupon_code:
             try:
                 # Crear cupón único usando el modelo Coupon (PostgreSQL)
-                coupon = Coupon.create_coupon(email, discount_percentage=10)
+                coupon = Coupon.create_coupon(email, discount_percent=10)
                 coupon_code = coupon.code
                 print(f"Coupon created successfully: {coupon_code} for {email}")
             except Exception as e:

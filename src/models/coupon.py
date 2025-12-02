@@ -18,7 +18,7 @@ class Coupon(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(50), unique=True, nullable=False, index=True)
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
-    discount_percentage = db.Column(db.Integer, default=10, nullable=False)
+    discount_percent = db.Column(db.Integer, default=10, nullable=False)
     used = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     used_at = db.Column(db.DateTime, nullable=True)
@@ -32,7 +32,7 @@ class Coupon(db.Model):
             'id': self.id,
             'code': self.code,
             'email': self.email,
-            'discount_percentage': self.discount_percentage,
+            'discount_percentage': self.discount_percent,
             'used': self.used,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'used_at': self.used_at.isoformat() if self.used_at else None
@@ -49,7 +49,7 @@ class Coupon(db.Model):
         return f'MIKELS10-{random_part}'
     
     @classmethod
-    def create_coupon(cls, email, discount_percentage=10):
+    def create_coupon(cls, email, discount_percent=10):
         """
         Crear un nuevo cupón para un email
         Retorna el cupón creado o None si el email ya tiene un cupón
@@ -72,7 +72,7 @@ class Coupon(db.Model):
         coupon = cls(
             code=code,
             email=email,
-            discount_percentage=discount_percentage
+            discount_percent=discount_percent
         )
         
         db.session.add(coupon)

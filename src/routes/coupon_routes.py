@@ -36,7 +36,7 @@ def validate_coupon():
             'valid': True,
             'coupon': {
                 'code': coupon.code,
-                'discount_percentage': coupon.discount_percentage,
+                'discount_percentage': coupon.discount_percent,
                 'email': coupon.email
             }
         }), 200
