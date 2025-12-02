@@ -258,6 +258,18 @@ def stripe_webhook():
                 
                 # Enviar email de confirmación al cliente
                 send_customer_order_confirmation(order_data)
+                
+                # Marcar cupón como usado si se usó uno
+                discount_code = session['metadata'].get('discount_code')
+                if discount_code and discount_code.startswith('MIKELS10-'):
+                    try:
+                        from src.models.coupon import Coupon
+                        is_valid, result = Coupon.validate_coupon(discount_code, order_data['customer_email'])
+                        if is_valid:
+                            result.mark_as_used()
+                            print(f"Coupon {discount_code} marked as used for {order_data['customer_email']}")
+                    except Exception as coupon_error:
+                        print(f"Error marking coupon as used: {str(coupon_error)}")
             except Exception as e:
                 print(f"Error sending order notification: {str(e)}")
         
