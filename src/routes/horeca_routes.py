@@ -30,9 +30,24 @@ def create_horeca_order():
         # Validar que al menos un producto tenga cantidad > 0
         aceite_5l = int(data.get('aceite5L', 0))
         aceite_temprano = int(data.get('aceiteTemprano', 0))
+        subscribe_newsletter = data.get('subscribeNewsletter', False)
         
         if aceite_5l == 0 and aceite_temprano == 0:
             return jsonify({'error': 'Debes seleccionar al menos un producto'}), 400
+        
+        # Si el usuario quiere suscribirse al newsletter, procesarlo
+        if subscribe_newsletter:
+            try:
+                # Suscribir al newsletter (reutilizando la lógica existente)
+                newsletter_response = requests.post(
+                    'https://mikels-earth-backend-production.up.railway.app/api/newsletter/subscribe',
+                    json={'email': data['email']},
+                    headers={'Content-Type': 'application/json'}
+                )
+                if newsletter_response.status_code == 200:
+                    print(f"✅ Cliente HORECA suscrito al newsletter: {data['email']}")
+            except Exception as e:
+                print(f"Error suscribiendo al newsletter: {str(e)}")
         
         # Preparar email para Mikel's Earth
         email_content = f"""
@@ -66,6 +81,9 @@ def create_horeca_order():
         
         <h3>COMENTARIOS</h3>
         <p>{data.get('comments', 'Sin comentarios adicionales')}</p>
+        
+        <h3>NEWSLETTER</h3>
+        <p>{'✅ Suscrito al newsletter (recibirá cupón 10% descuento)' if subscribe_newsletter else '❌ No suscrito al newsletter'}</p>
         
         <hr>
         <p><small>Fecha de solicitud: {datetime.now().strftime('%d/%m/%Y %H:%M')}</small></p>
