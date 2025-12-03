@@ -16,6 +16,7 @@ from src.routes.newsletter_routes import newsletter_bp
 from src.routes.experience_routes import experience_bp
 from src.routes.contact_routes import contact_bp
 from src.routes.coupon_routes import coupon_bp
+from src.routes.horeca_routes import horeca_bp
 
 # Load environment variables
 load_dotenv()
@@ -53,6 +54,7 @@ app.register_blueprint(newsletter_bp, url_prefix='/api/newsletter')
 app.register_blueprint(experience_bp, url_prefix='/api/experience')
 app.register_blueprint(contact_bp, url_prefix='/api/contact')
 app.register_blueprint(coupon_bp, url_prefix='/api/coupon')
+app.register_blueprint(horeca_bp, url_prefix='/api/horeca')
 
 # Database configuration for coupons and user management
 # Use DATABASE_URL from Railway (PostgreSQL) or fallback to SQLite for local dev
