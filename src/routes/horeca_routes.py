@@ -2,6 +2,7 @@
 Rutas para pedidos HORECA (Hostelería, Restauración y Catering)
 """
 from flask import Blueprint, request, jsonify
+from flask_cors import cross_origin
 import os
 import requests
 from datetime import datetime
@@ -9,7 +10,8 @@ from datetime import datetime
 horeca_bp = Blueprint('horeca', __name__)
 
 
-@horeca_bp.route('/order', methods=['POST'])
+@horeca_bp.route('/order', methods=['POST', 'OPTIONS'])
+@cross_origin(origins=['https://www.mikels.es', 'https://mikels.es', 'http://localhost:5173'], supports_credentials=True)
 def create_horeca_order():
     """
     Procesa una solicitud de pedido HORECA
