@@ -30,8 +30,8 @@ def create_horeca_order():
                 return jsonify({'error': f'El campo {field} es obligatorio'}), 400
         
         # Validar que al menos un producto tenga cantidad > 0
-        aceite_5l = int(data.get('aceite5L', 0))
-        aceite_temprano = int(data.get('aceiteTemprano', 0))
+        aceite_5l = int(data.get('quantity5L', 0))
+        aceite_temprano = int(data.get('quantityTemprano', 0))
         subscribe_newsletter = data.get('subscribeNewsletter', False)
         
         if aceite_5l == 0 and aceite_temprano == 0:
