@@ -22,7 +22,7 @@ def create_horeca_order():
         # Validar datos requeridos
         required_fields = [
             'establishmentName', 'establishmentType', 'contactName',
-            'phone', 'email', 'street', 'city', 'postalCode', 'province'
+            'phone', 'email', 'address', 'city', 'postalCode', 'province'
         ]
         
         for field in required_fields:
@@ -103,7 +103,7 @@ def create_horeca_order():
         
         <h3>DIRECCIÓN DE ENTREGA</h3>
         <p>
-            {data['street']}<br>
+            {data['address']}<br>
             {data['city']}, {data['postalCode']}<br>
             {data['province']}, España
         </p>
