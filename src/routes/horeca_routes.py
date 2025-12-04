@@ -49,7 +49,7 @@ def create_horeca_order():
                 if newsletter_response.status_code == 200:
                     print(f"✅ Cliente HORECA suscrito al newsletter: {data['email']}")
                     
-                    # Añadir a la lista específica de HORECA en Brevo (ID: 9)
+                    # Añadir atributo personalizado ORIGEN: HORECA en Brevo
                     api_key = os.getenv('BREVO_API_KEY')
                     if api_key:
                         api_key = api_key.strip().replace('\\n', '').replace('\\r', '').replace(' ', '')
@@ -63,16 +63,18 @@ def create_horeca_order():
                                 },
                                 json={
                                     "email": data['email'],
-                                    "listIds": [9],  # Lista HORECA
+                                    "attributes": {
+                                        "ORIGEN": "HORECA"
+                                    },
                                     "updateEnabled": True
                                 }
                             )
                             if brevo_response.status_code in [201, 204]:
-                                print(f"✅ Contacto añadido a lista HORECA en Brevo: {data['email']}")
+                                print(f"✅ Contacto HORECA añadido con atributo ORIGEN: {data['email']}")
                             else:
-                                print(f"Advertencia: No se pudo añadir a lista HORECA: {brevo_response.status_code}")
+                                print(f"Advertencia: No se pudo añadir atributo ORIGEN: {brevo_response.status_code}")
                         except Exception as brevo_error:
-                            print(f"Error añadiendo a lista HORECA en Brevo: {str(brevo_error)}")
+                            print(f"Error añadiendo atributo ORIGEN en Brevo: {str(brevo_error)}")
             except Exception as e:
                 print(f"Error suscribiendo al newsletter: {str(e)}")
         
