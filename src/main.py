@@ -43,9 +43,7 @@ CORS(app, resources={
     r"/api/*": {
         "origins": allowed_origins,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True,
-        "expose_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization"]
     }
 })
 
@@ -74,17 +72,13 @@ else:
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 
-# Create database tables on first request instead of at startup
-# This prevents worker timeout issues during deployment
-@app.before_request
-def create_tables():
-    if not hasattr(app, '_tables_created'):
-        try:
-            db.create_all()
-            app._tables_created = True
-            print("Database tables created successfully")
-        except Exception as e:
-            print(f"Warning: Could not create tables: {e}")
+# Create database tables
+with app.app_context():
+    try:
+        db.create_all()
+        print("Database tables created successfully")
+    except Exception as e:
+        print(f"Warning: Could not create tables: {e}")
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
