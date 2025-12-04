@@ -41,11 +41,36 @@ def create_horeca_order():
                 # Suscribir al newsletter (reutilizando la lógica existente)
                 newsletter_response = requests.post(
                     'https://mikels-earth-backend-production.up.railway.app/api/newsletter/subscribe',
-                    json={'email': data['email']},
+                    json={'email': data['email'], 'source': 'horeca'},
                     headers={'Content-Type': 'application/json'}
                 )
                 if newsletter_response.status_code == 200:
                     print(f"✅ Cliente HORECA suscrito al newsletter: {data['email']}")
+                    
+                    # Añadir a la lista específica de HORECA en Brevo (ID: 9)
+                    api_key = os.getenv('BREVO_API_KEY')
+                    if api_key:
+                        api_key = api_key.strip().replace('\\n', '').replace('\\r', '').replace(' ', '')
+                        try:
+                            brevo_response = requests.post(
+                                "https://api.brevo.com/v3/contacts",
+                                headers={
+                                    "accept": "application/json",
+                                    "api-key": api_key,
+                                    "content-type": "application/json"
+                                },
+                                json={
+                                    "email": data['email'],
+                                    "listIds": [9],  # Lista HORECA
+                                    "updateEnabled": True
+                                }
+                            )
+                            if brevo_response.status_code in [201, 204]:
+                                print(f"✅ Contacto añadido a lista HORECA en Brevo: {data['email']}")
+                            else:
+                                print(f"Advertencia: No se pudo añadir a lista HORECA: {brevo_response.status_code}")
+                        except Exception as brevo_error:
+                            print(f"Error añadiendo a lista HORECA en Brevo: {str(brevo_error)}")
             except Exception as e:
                 print(f"Error suscribiendo al newsletter: {str(e)}")
         
