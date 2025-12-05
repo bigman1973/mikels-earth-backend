@@ -47,6 +47,17 @@ CORS(app, resources={
     }
 })
 
+# Mover creación de tablas a la primera solicitud para evitar timeout
+@app.before_request
+def create_tables():
+    if not hasattr(app, 'tables_created'):
+        try:
+            db.create_all()
+            print("Database tables created successfully")
+            app.tables_created = True
+        except Exception as e:
+            print(f"Error creating tables: {e}")
+
 app.register_blueprint(user_bp, url_prefix='/api')
 app.register_blueprint(stripe_bp)
 app.register_blueprint(notification_bp)
@@ -72,13 +83,7 @@ else:
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 
-# Create database tables
-with app.app_context():
-    try:
-        db.create_all()
-        print("Database tables created successfully")
-    except Exception as e:
-        print(f"Warning: Could not create tables: {e}")
+# Las tablas se crean en la primera solicitud (ver @app.before_request)
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
