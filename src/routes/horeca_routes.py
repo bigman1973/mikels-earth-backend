@@ -44,7 +44,8 @@ def create_horeca_order():
                 newsletter_response = requests.post(
                     'https://mikels-earth-backend-production.up.railway.app/api/newsletter/subscribe',
                     json={'email': data['email'], 'source': 'horeca'},
-                    headers={'Content-Type': 'application/json'}
+                    headers={'Content-Type': 'application/json'},
+                    timeout=5
                 )
                 if newsletter_response.status_code == 200:
                     print(f"✅ Cliente HORECA suscrito al newsletter: {data['email']}")
@@ -67,7 +68,8 @@ def create_horeca_order():
                                         "ORIGEN": "HORECA"
                                     },
                                     "updateEnabled": True
-                                }
+                                },
+                                timeout=5
                             )
                             if brevo_response.status_code in [201, 204]:
                                 print(f"✅ Contacto HORECA añadido con atributo ORIGEN: {data['email']}")
@@ -139,7 +141,8 @@ def create_horeca_order():
                 "to": [{"email": "info@mikels.es"}],
                 "subject": f"🏨 Nuevo Pedido HORECA - {data['establishmentName']}",
                 "htmlContent": email_content
-            }
+            },
+            timeout=10
         )
         
         if response_admin.status_code != 201:
@@ -185,7 +188,8 @@ def create_horeca_order():
                 "to": [{"email": data['email']}],
                 "subject": "Solicitud de Pedido HORECA Recibida - Mikel's Earth",
                 "htmlContent": client_email_content
-            }
+            },
+            timeout=10
         )
         
         if response_client.status_code != 201:
