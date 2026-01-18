@@ -6,9 +6,12 @@ import os
 import hashlib
 import hmac
 import jwt
+import uuid
+import boto3
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Blueprint, request, jsonify
+from werkzeug.utils import secure_filename
 from src.models.user import db
 from src.models.blog import BlogPost
 
@@ -19,6 +22,18 @@ ADMIN_USERNAME = os.getenv('BLOG_ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.getenv('BLOG_ADMIN_PASSWORD', 'mikels2026')
 JWT_SECRET = os.getenv('JWT_SECRET', 'mikels-blog-secret-key-2026')
 BREVO_WEBHOOK_KEY = os.getenv('BREVO_WEBHOOK_KEY', '')
+
+# Configuración S3 para subida de imágenes
+S3_BUCKET = os.getenv('S3_BUCKET', 'mikels-earth-blog')
+S3_REGION = os.getenv('S3_REGION', 'eu-west-1')
+AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID', '')
+AWS_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY', '')
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 # ============================================
@@ -54,7 +69,6 @@ def token_required(f):
 def verify_brevo_webhook(request_data, signature):
     """Verifica la firma del webhook de Brevo"""
     if not BREVO_WEBHOOK_KEY:
-        # Si no hay key configurada, aceptar (para desarrollo)
         return True
     
     expected_signature = hmac.new(
@@ -78,17 +92,12 @@ def get_posts():
         per_page = request.args.get('per_page', 10, type=int)
         category = request.args.get('category', None)
         
-        # Query base: solo posts publicados
         query = BlogPost.query.filter_by(status='published')
         
-        # Filtrar por categoría si se especifica
         if category:
             query = query.filter_by(category=category)
         
-        # Ordenar por fecha de publicación (más recientes primero)
         query = query.order_by(BlogPost.published_at.desc())
-        
-        # Paginar
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
         
         posts = [post.to_summary() for post in pagination.items]
@@ -147,31 +156,21 @@ def get_categories():
 
 @blog_bp.route('/webhook/brevo', methods=['POST'])
 def brevo_webhook():
-    """
-    Recibe emails de Brevo y los procesa:
-    - Si el asunto empieza con [DELETE]: elimina el post
-    - Si el asunto empieza con [DRAFT]: guarda como borrador
-    - Si no: publica el post
-    """
+    """Recibe emails de Brevo y los procesa"""
     try:
-        # Verificar firma del webhook (opcional en desarrollo)
         signature = request.headers.get('X-Mailin-Signature', '')
         if BREVO_WEBHOOK_KEY and not verify_brevo_webhook(request.data, signature):
             return jsonify({'error': 'Firma inválida'}), 401
         
         data = request.json
         
-        # Extraer datos del email
         subject = data.get('Subject', data.get('subject', ''))
         html_content = data.get('Html', data.get('html', ''))
         text_content = data.get('Text', data.get('text', ''))
-        from_email = data.get('From', data.get('from', ''))
         attachments = data.get('Attachments', data.get('attachments', []))
         
-        # Determinar el contenido a usar
         content = html_content if html_content else f'<p>{text_content}</p>'
         
-        # Verificar si es una solicitud de eliminación
         if subject.upper().startswith('[DELETE]'):
             slug_to_delete = subject[8:].strip().lower()
             slug_to_delete = BlogPost.generate_slug(slug_to_delete)
@@ -180,23 +179,14 @@ def brevo_webhook():
             if post:
                 db.session.delete(post)
                 db.session.commit()
-                return jsonify({
-                    'success': True,
-                    'action': 'deleted',
-                    'slug': slug_to_delete
-                })
+                return jsonify({'success': True, 'action': 'deleted', 'slug': slug_to_delete})
             else:
-                return jsonify({
-                    'success': False,
-                    'error': f'Post con slug "{slug_to_delete}" no encontrado'
-                }), 404
+                return jsonify({'success': False, 'error': f'Post no encontrado'}), 404
         
-        # Verificar si es un borrador
         is_draft = subject.upper().startswith('[DRAFT]')
         if is_draft:
             subject = subject[7:].strip()
         
-        # Extraer categoría si existe [CATEGORIA] en el asunto
         category = None
         if '[' in subject and ']' in subject:
             start = subject.index('[')
@@ -204,13 +194,10 @@ def brevo_webhook():
             category = subject[start+1:end].strip()
             subject = subject[end+1:].strip()
         
-        # Generar slug
         slug = BlogPost.generate_slug(subject)
         
-        # Verificar si ya existe un post con ese slug
         existing_post = BlogPost.query.filter_by(slug=slug).first()
         if existing_post:
-            # Actualizar post existente
             existing_post.title = subject
             existing_post.content = content
             existing_post.excerpt = BlogPost.generate_excerpt(content)
@@ -222,14 +209,8 @@ def brevo_webhook():
                 existing_post.published_at = datetime.utcnow()
             
             db.session.commit()
-            
-            return jsonify({
-                'success': True,
-                'action': 'updated',
-                'post': existing_post.to_summary()
-            })
+            return jsonify({'success': True, 'action': 'updated', 'post': existing_post.to_summary()})
         
-        # Crear nuevo post
         new_post = BlogPost(
             title=subject,
             slug=slug,
@@ -240,10 +221,7 @@ def brevo_webhook():
             published_at=None if is_draft else datetime.utcnow()
         )
         
-        # Procesar imagen adjunta si existe
         if attachments and len(attachments) > 0:
-            # Por ahora guardamos la URL de la primera imagen
-            # En producción, subirías a S3 o similar
             first_attachment = attachments[0]
             if isinstance(first_attachment, dict):
                 new_post.featured_image = first_attachment.get('url', first_attachment.get('Url', ''))
@@ -251,11 +229,7 @@ def brevo_webhook():
         db.session.add(new_post)
         db.session.commit()
         
-        return jsonify({
-            'success': True,
-            'action': 'created',
-            'post': new_post.to_summary()
-        })
+        return jsonify({'success': True, 'action': 'created', 'post': new_post.to_summary()})
     
     except Exception as e:
         print(f"Error en webhook de Brevo: {str(e)}")
@@ -275,17 +249,12 @@ def admin_login():
         password = data.get('password', '')
         
         if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-            # Generar token JWT
             token = jwt.encode({
                 'username': username,
                 'exp': datetime.utcnow() + timedelta(hours=24)
             }, JWT_SECRET, algorithm='HS256')
             
-            return jsonify({
-                'success': True,
-                'token': token,
-                'username': username
-            })
+            return jsonify({'success': True, 'token': token, 'username': username})
         
         return jsonify({'error': 'Credenciales inválidas'}), 401
     
@@ -297,10 +266,7 @@ def admin_login():
 @token_required
 def verify_token(current_user):
     """Verificar si el token es válido"""
-    return jsonify({
-        'valid': True,
-        'username': current_user
-    })
+    return jsonify({'valid': True, 'username': current_user})
 
 
 @blog_bp.route('/admin/posts', methods=['GET'])
@@ -322,7 +288,6 @@ def admin_get_posts(current_user):
         
         posts = [post.to_dict() for post in pagination.items]
         
-        # Estadísticas
         total_posts = BlogPost.query.count()
         published_count = BlogPost.query.filter_by(status='published').count()
         draft_count = BlogPost.query.filter_by(status='draft').count()
@@ -373,7 +338,6 @@ def admin_update_post(current_user, post_id):
         
         if 'title' in data:
             post.title = data['title']
-            # Regenerar slug si cambia el título
             post.slug = BlogPost.generate_slug(data['title'])
         
         if 'content' in data:
@@ -393,17 +357,13 @@ def admin_update_post(current_user, post_id):
             old_status = post.status
             post.status = data['status']
             
-            # Si cambia de draft a published, actualizar fecha de publicación
             if old_status == 'draft' and data['status'] == 'published':
                 post.published_at = datetime.utcnow()
         
         post.updated_at = datetime.utcnow()
         db.session.commit()
         
-        return jsonify({
-            'success': True,
-            'post': post.to_dict()
-        })
+        return jsonify({'success': True, 'post': post.to_dict()})
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -423,10 +383,7 @@ def admin_delete_post(current_user, post_id):
         db.session.delete(post)
         db.session.commit()
         
-        return jsonify({
-            'success': True,
-            'message': f'Post "{title}" eliminado correctamente'
-        })
+        return jsonify({'success': True, 'message': f'Post "{title}" eliminado correctamente'})
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -447,12 +404,79 @@ def admin_publish_post(current_user, post_id):
         post.updated_at = datetime.utcnow()
         db.session.commit()
         
+        return jsonify({'success': True, 'post': post.to_dict()})
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@blog_bp.route('/admin/upload-image', methods=['POST'])
+@token_required
+def admin_upload_image(current_user):
+    """Subir una imagen para el blog"""
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'No se encontró ninguna imagen'}), 400
+        
+        file = request.files['image']
+        
+        if file.filename == '':
+            return jsonify({'error': 'No se seleccionó ningún archivo'}), 400
+        
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'Tipo de archivo no permitido. Use: png, jpg, jpeg, gif, webp'}), 400
+        
+        # Verificar tamaño
+        file.seek(0, 2)
+        size = file.tell()
+        file.seek(0)
+        
+        if size > MAX_FILE_SIZE:
+            return jsonify({'error': 'El archivo es demasiado grande. Máximo 5MB'}), 400
+        
+        # Generar nombre único
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        unique_filename = f"blog/{uuid.uuid4().hex}.{ext}"
+        
+        # Subir a S3 si hay credenciales configuradas
+        if AWS_ACCESS_KEY and AWS_SECRET_KEY:
+            s3_client = boto3.client(
+                's3',
+                region_name=S3_REGION,
+                aws_access_key_id=AWS_ACCESS_KEY,
+                aws_secret_access_key=AWS_SECRET_KEY
+            )
+            
+            s3_client.upload_fileobj(
+                file,
+                S3_BUCKET,
+                unique_filename,
+                ExtraArgs={
+                    'ContentType': file.content_type,
+                    'ACL': 'public-read'
+                }
+            )
+            
+            image_url = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{unique_filename}"
+        else:
+            # Fallback: guardar localmente (para desarrollo)
+            upload_folder = os.path.join(os.path.dirname(__file__), '..', '..', 'uploads', 'blog')
+            os.makedirs(upload_folder, exist_ok=True)
+            
+            local_filename = f"{uuid.uuid4().hex}.{ext}"
+            local_path = os.path.join(upload_folder, local_filename)
+            file.save(local_path)
+            
+            image_url = f"/uploads/blog/{local_filename}"
+        
         return jsonify({
             'success': True,
-            'post': post.to_dict()
+            'url': image_url,
+            'filename': unique_filename
         })
     
     except Exception as e:
+        print(f"Error al subir imagen: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -471,7 +495,6 @@ def admin_create_post(current_user):
         
         slug = BlogPost.generate_slug(title)
         
-        # Verificar si ya existe
         if BlogPost.query.filter_by(slug=slug).first():
             return jsonify({'error': 'Ya existe un post con ese título'}), 400
         
@@ -490,10 +513,7 @@ def admin_create_post(current_user):
         db.session.add(new_post)
         db.session.commit()
         
-        return jsonify({
-            'success': True,
-            'post': new_post.to_dict()
-        }), 201
+        return jsonify({'success': True, 'post': new_post.to_dict()}), 201
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
