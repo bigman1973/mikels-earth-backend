@@ -526,8 +526,12 @@ def admin_create_post(current_user):
         
         slug = BlogPost.generate_slug(title)
         
-        if BlogPost.query.filter_by(slug=slug).first():
-            return jsonify({'error': 'Ya existe un post con ese título'}), 400
+        # Verificar si el slug ya existe y añadir un sufijo si es necesario
+        base_slug = slug
+        counter = 1
+        while BlogPost.query.filter_by(slug=slug).first():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
         
         new_post = BlogPost(
             title=title,
@@ -547,4 +551,7 @@ def admin_create_post(current_user):
         return jsonify({'success': True, 'post': new_post.to_dict()}), 201
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        print(f"ERROR AL CREAR POST: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({'error': f"Error al guardar en base de datos: {str(e)}"}), 500
