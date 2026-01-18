@@ -7,7 +7,11 @@ import hashlib
 import hmac
 import jwt
 import uuid
-import boto3
+try:
+    import boto3
+    BOTO3_AVAILABLE = True
+except ImportError:
+    BOTO3_AVAILABLE = False
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Blueprint, request, jsonify
@@ -438,8 +442,8 @@ def admin_upload_image(current_user):
         ext = file.filename.rsplit('.', 1)[1].lower()
         unique_filename = f"blog/{uuid.uuid4().hex}.{ext}"
         
-        # Subir a S3 si hay credenciales configuradas
-        if AWS_ACCESS_KEY and AWS_SECRET_KEY:
+        # Subir a S3 si hay credenciales configuradas y boto3 está disponible
+        if BOTO3_AVAILABLE and AWS_ACCESS_KEY and AWS_SECRET_KEY:
             s3_client = boto3.client(
                 's3',
                 region_name=S3_REGION,
