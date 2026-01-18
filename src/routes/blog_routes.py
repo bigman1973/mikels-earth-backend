@@ -12,6 +12,13 @@ try:
     BOTO3_AVAILABLE = True
 except ImportError:
     BOTO3_AVAILABLE = False
+
+try:
+    import cloudinary
+    import cloudinary.uploader
+    CLOUDINARY_AVAILABLE = True
+except ImportError:
+    CLOUDINARY_AVAILABLE = False
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Blueprint, request, jsonify
@@ -32,6 +39,20 @@ S3_BUCKET = os.getenv('S3_BUCKET', 'mikels-earth-blog')
 S3_REGION = os.getenv('S3_REGION', 'eu-west-1')
 AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID', '')
 AWS_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY', '')
+
+# Configuración Cloudinary para subida de imágenes
+CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME', '')
+CLOUDINARY_API_KEY = os.getenv('CLOUDINARY_API_KEY', '')
+CLOUDINARY_API_SECRET = os.getenv('CLOUDINARY_API_SECRET', '')
+
+# Configurar Cloudinary si hay credenciales
+if CLOUDINARY_AVAILABLE and CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:
+    cloudinary.config(
+        cloud_name=CLOUDINARY_CLOUD_NAME,
+        api_key=CLOUDINARY_API_KEY,
+        api_secret=CLOUDINARY_API_SECRET,
+        secure=True
+    )
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
@@ -440,10 +461,21 @@ def admin_upload_image(current_user):
         
         # Generar nombre único
         ext = file.filename.rsplit('.', 1)[1].lower()
-        unique_filename = f"blog/{uuid.uuid4().hex}.{ext}"
+        unique_filename = f"mikels-blog/{uuid.uuid4().hex}"
         
-        # Subir a S3 si hay credenciales configuradas y boto3 está disponible
-        if BOTO3_AVAILABLE and AWS_ACCESS_KEY and AWS_SECRET_KEY:
+        # PRIORIDAD 1: Cloudinary (recomendado)
+        if CLOUDINARY_AVAILABLE and CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:
+            result = cloudinary.uploader.upload(
+                file,
+                public_id=unique_filename,
+                folder="mikels-earth-blog",
+                resource_type="image",
+                overwrite=True
+            )
+            image_url = result.get('secure_url')
+            
+        # PRIORIDAD 2: S3 si hay credenciales configuradas
+        elif BOTO3_AVAILABLE and AWS_ACCESS_KEY and AWS_SECRET_KEY:
             s3_client = boto3.client(
                 's3',
                 region_name=S3_REGION,
@@ -454,24 +486,19 @@ def admin_upload_image(current_user):
             s3_client.upload_fileobj(
                 file,
                 S3_BUCKET,
-                unique_filename,
+                f"{unique_filename}.{ext}",
                 ExtraArgs={
                     'ContentType': file.content_type,
                     'ACL': 'public-read'
                 }
             )
             
-            image_url = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{unique_filename}"
+            image_url = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{unique_filename}.{ext}"
         else:
-            # Fallback: guardar localmente (para desarrollo)
-            upload_folder = os.path.join(os.path.dirname(__file__), '..', '..', 'uploads', 'blog')
-            os.makedirs(upload_folder, exist_ok=True)
-            
-            local_filename = f"{uuid.uuid4().hex}.{ext}"
-            local_path = os.path.join(upload_folder, local_filename)
-            file.save(local_path)
-            
-            image_url = f"/uploads/blog/{local_filename}"
+            # Sin servicio de almacenamiento configurado
+            return jsonify({
+                'error': 'No hay servicio de almacenamiento configurado. Configure Cloudinary o S3 en las variables de entorno.'
+            }), 500
         
         return jsonify({
             'success': True,
