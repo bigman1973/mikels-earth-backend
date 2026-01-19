@@ -43,9 +43,10 @@ if os.getenv('VERCEL_URL'):
 
 CORS(app, resources={
     r"/api/*": {
-        "origins": allowed_origins,
+        "origins": "*",
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
     }
 })
 
