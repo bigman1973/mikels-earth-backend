@@ -3,9 +3,10 @@ import sys
 # DON'T CHANGE THIS !!!
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+from datetime import datetime
 from src.models.user import db
 from src.models.order import Order, Subscription
 from src.models.coupon import Coupon
@@ -88,6 +89,16 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 
 # Las tablas se crean en la primera solicitud (ver @app.before_request)
+
+# Health check endpoint para Railway
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint para que Railway verifique que el servicio está activo"""
+    return jsonify({
+        'status': 'ok',
+        'service': 'mikels-earth-backend',
+        'timestamp': datetime.now().isoformat()
+    }), 200
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
