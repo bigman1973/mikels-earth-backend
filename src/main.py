@@ -100,6 +100,25 @@ def health_check():
         'timestamp': datetime.now().isoformat()
     }), 200
 
+@app.route('/api/test-email', methods=['GET'])
+def test_email():
+    """Endpoint temporal de diagnóstico para probar envío de email"""
+    from src.services.email_service import send_email
+    import os
+    api_key = os.getenv('BREVO_API_KEY', 'NOT SET')
+    key_preview = api_key[:10] + '...' if len(api_key) > 10 else api_key
+    result = send_email(
+        'info@mikels.es',
+        'TEST - Prueba de email desde backend',
+        '<h1>Email de prueba</h1><p>Si recibes esto, Brevo funciona correctamente.</p><p>Fecha: ' + datetime.now().isoformat() + '</p>'
+    )
+    return jsonify({
+        'email_sent': result,
+        'brevo_key_configured': api_key != 'NOT SET' and len(api_key) > 5,
+        'brevo_key_preview': key_preview,
+        'timestamp': datetime.now().isoformat()
+    }), 200
+
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
