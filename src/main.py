@@ -3,7 +3,7 @@ import sys
 # DON'T CHANGE THIS !!!
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from flask import Flask, send_from_directory, jsonify
+from flask import Flask, send_from_directory, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
@@ -107,13 +107,15 @@ def test_email():
     import os
     api_key = os.getenv('BREVO_API_KEY', 'NOT SET')
     key_preview = api_key[:10] + '...' if len(api_key) > 10 else api_key
+    to_email = request.args.get('to', 'info@mikels.es')
     result = send_email(
-        'info@mikels.es',
+        to_email,
         'TEST - Prueba de email desde backend',
-        '<h1>Email de prueba</h1><p>Si recibes esto, Brevo funciona correctamente.</p><p>Fecha: ' + datetime.now().isoformat() + '</p>'
+        '<h1>Email de prueba</h1><p>Si recibes esto, Brevo funciona correctamente.</p><p>Fecha: ' + datetime.now().isoformat() + '</p><p>Enviado a: ' + to_email + '</p>'
     )
     return jsonify({
         'email_sent': result,
+        'to': to_email,
         'brevo_key_configured': api_key != 'NOT SET' and len(api_key) > 5,
         'brevo_key_preview': key_preview,
         'timestamp': datetime.now().isoformat()
