@@ -1,7 +1,6 @@
 # PostgreSQL coupons table ready - 2025-12-01 22:45
 from flask import Blueprint, request, jsonify
-from src.services.email_service import send_newsletter_subscription_notification, add_contact_to_brevo
-from src.services.email_newsletter_welcome import send_newsletter_welcome_email
+from src.services.email_dispatcher import dispatch_newsletter_subscription_notification, dispatch_newsletter_welcome, dispatch_add_contact
 from src.models.coupon import Coupon
 
 newsletter_bp = Blueprint('newsletter', __name__)
@@ -31,23 +30,22 @@ def subscribe_newsletter():
                 # Si falla, usar código genérico como fallback
                 coupon_code = "BIENVENIDA10"
         
-        # Añadir contacto a Brevo
-        brevo_result = add_contact_to_brevo(email)
+        # Añadir contacto a Klaviyo + Brevo (durante transición)
+        contact_result = dispatch_add_contact(email)
         
-        # Enviar notificación a info@mikels.es
-        send_newsletter_subscription_notification(email)
+        # Enviar notificación a info@mikels.es (Klaviyo + Brevo fallback)
+        dispatch_newsletter_subscription_notification(email)
         
-        # Enviar email de bienvenida al suscriptor con código de descuento único
-        send_newsletter_welcome_email(email, coupon_code)
+        # Enviar email de bienvenida al suscriptor con código de descuento único (Klaviyo + Brevo fallback)
+        dispatch_newsletter_welcome(email, coupon_code)
         
         return jsonify({
             'success': True,
             'message': 'Subscription successful',
             'coupon_code': coupon_code,
-            'brevo_contact_id': brevo_result.get('id') if brevo_result else None
+            'contact_id': contact_result.get('id') if contact_result else None
         }), 200
         
     except Exception as e:
         print(f"Error in newsletter subscription: {str(e)}")
         return jsonify({'error': str(e)}), 500
-

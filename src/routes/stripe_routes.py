@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 import secrets
 from src.services.whatsapp_service import notify_new_order, notify_new_subscription
-from src.services.email_service import notify_new_order_email, notify_new_subscription_email, send_customer_order_confirmation
+from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
@@ -253,12 +253,12 @@ def stripe_webhook():
                     'shipping_address': full_address if full_address else 'No especificada'
                 }
                 
-                # Enviar notificaciones por WhatsApp y Email
+                # Enviar notificaciones por WhatsApp
                 notify_new_order(order_data)
-                notify_new_order_email(order_data)
                 
-                # Enviar email de confirmación al cliente
-                send_customer_order_confirmation(order_data)
+                # Enviar notificaciones por Email (Klaviyo + Brevo fallback)
+                dispatch_order_notification(order_data)
+                dispatch_order_confirmation(order_data)
                 
                 # Marcar cupón como usado si se usó uno
                 discount_code = session['metadata'].get('discount_code')
@@ -293,9 +293,9 @@ def stripe_webhook():
                     'price': session['amount_total'] / 100 if session.get('amount_total') else 0
                 }
                 
-                # Enviar notificaciones por WhatsApp y Email
+                # Enviar notificaciones por WhatsApp y Email (Klaviyo + Brevo fallback)
                 notify_new_subscription(subscription_data)
-                notify_new_subscription_email(subscription_data)
+                dispatch_subscription_notification(subscription_data)
             except Exception as e:
                 print(f"Error sending subscription notification: {str(e)}")
     
@@ -304,14 +304,14 @@ def stripe_webhook():
         invoice = event['data']['object']
         subscription_id = invoice.get('subscription')
         print(f"Subscription {subscription_id} payment succeeded")
-        # TODO: Send invoice email via Brevo
+        # TODO: Send invoice email
     
     elif event['type'] == 'customer.subscription.deleted':
         # Subscription cancelled
         subscription_obj = event['data']['object']
         subscription_id = subscription_obj['id']
         print(f"Subscription {subscription_id} cancelled")
-        # TODO: Send cancellation confirmation email via Brevo
+        # TODO: Send cancellation confirmation email
     
     return jsonify({'status': 'success'})
 
@@ -331,4 +331,3 @@ def get_session_status(session_id):
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-

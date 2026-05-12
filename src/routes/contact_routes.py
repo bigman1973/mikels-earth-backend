@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from src.services.email_service import send_contact_notification, send_contact_confirmation
+from src.services.email_dispatcher import dispatch_contact_notification, dispatch_contact_confirmation
 
 contact_bp = Blueprint('contact', __name__)
 
@@ -18,11 +18,11 @@ def send_message():
         if not name or not email or not message:
             return jsonify({'error': 'Nombre, email y mensaje son requeridos'}), 400
         
-        # Enviar notificación a info@mikels.es
-        send_contact_notification(name, email, phone, message)
+        # Enviar notificación a info@mikels.es (Klaviyo + Brevo fallback)
+        dispatch_contact_notification(name, email, phone, message)
         
-        # Enviar confirmación al cliente
-        send_contact_confirmation(name, email)
+        # Enviar confirmación al cliente (Klaviyo + Brevo fallback)
+        dispatch_contact_confirmation(name, email)
         
         return jsonify({
             'success': True,
@@ -32,4 +32,3 @@ def send_message():
     except Exception as e:
         print(f"Error in contact form: {str(e)}")
         return jsonify({'error': str(e)}), 500
-

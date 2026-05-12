@@ -1,6 +1,7 @@
 """
 Servicio de notificaciones por email para el blog de Mikel's Earth
 Envía confirmaciones cuando se publica o elimina un post
+Usa Klaviyo primero, con fallback a Brevo
 """
 import os
 import requests
@@ -19,11 +20,48 @@ def send_blog_notification(action, post_title, post_slug, recipient_email=None):
         post_slug: Slug del post
         recipient_email: Email del destinatario (opcional)
     """
+    recipient = recipient_email or NOTIFICATION_EMAIL
+    
+    # Intentar primero con Klaviyo
+    klaviyo_ok = _send_via_klaviyo(action, post_title, post_slug, recipient)
+    
+    if klaviyo_ok:
+        return True
+    
+    # Fallback a Brevo
+    return _send_via_brevo(action, post_title, post_slug, recipient)
+
+
+def _send_via_klaviyo(action, post_title, post_slug, recipient):
+    """Envía notificación de blog via Klaviyo Events API"""
+    try:
+        from src.services.klaviyo_service import send_klaviyo_event
+        
+        post_url = f"https://www.mikels.es/blog/{post_slug}"
+        
+        properties = {
+            "Action": action,
+            "PostTitle": post_title,
+            "PostSlug": post_slug,
+            "PostUrl": post_url,
+            "Source": "mikels-earth-blog"
+        }
+        
+        return send_klaviyo_event(
+            metric_name=f"Mikels Blog {action.capitalize()}",
+            profile_email=recipient,
+            properties=properties
+        )
+    except Exception as e:
+        print(f"⚠️ [BLOG] Error Klaviyo: {e}")
+        return False
+
+
+def _send_via_brevo(action, post_title, post_slug, recipient):
+    """Envía notificación de blog via Brevo (fallback)"""
     if not BREVO_API_KEY:
         print("BREVO_API_KEY no configurada, saltando notificación")
         return False
-    
-    recipient = recipient_email or NOTIFICATION_EMAIL
     
     # Configurar mensaje según la acción
     subjects = {

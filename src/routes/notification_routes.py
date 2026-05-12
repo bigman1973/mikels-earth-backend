@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from src.services.email_service import send_product_notification_request, send_customer_notification_confirmation
+from src.services.email_dispatcher import dispatch_product_notification_request, dispatch_product_notification_confirmation
 
 notification_bp = Blueprint('notification', __name__, url_prefix='/api/notification')
 
@@ -20,16 +20,16 @@ def notify_me():
         customer_email = data['customer_email']
         customer_phone = data.get('customer_phone', '')
         
-        # Send notification email to owner
-        owner_email_sent = send_product_notification_request(
+        # Send notification email to owner (Klaviyo + Brevo fallback)
+        owner_email_sent = dispatch_product_notification_request(
             product_name=product_name,
             customer_name=customer_name,
             customer_email=customer_email,
             customer_phone=customer_phone
         )
         
-        # Send confirmation email to customer
-        customer_email_sent = send_customer_notification_confirmation(
+        # Send confirmation email to customer (Klaviyo + Brevo fallback)
+        customer_email_sent = dispatch_product_notification_confirmation(
             product_name=product_name,
             customer_name=customer_name,
             customer_email=customer_email
@@ -48,4 +48,3 @@ def notify_me():
     except Exception as e:
         print(f"Error processing notification request: {str(e)}")
         return jsonify({'error': 'Error al procesar la solicitud'}), 500
-
