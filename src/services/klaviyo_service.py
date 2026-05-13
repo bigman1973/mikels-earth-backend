@@ -111,7 +111,8 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
 
 def add_contact_to_klaviyo(email, first_name=None, last_name=None, source=None):
     """
-    Añade o actualiza un perfil en Klaviyo y lo suscribe a email marketing.
+    Añade o actualiza un perfil en Klaviyo, lo suscribe a email marketing
+    y lo añade a la lista 'Newsletter Mikel's Earth'.
     
     Args:
         email: Email del contacto
@@ -126,6 +127,9 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, source=None):
     if not api_key:
         print("ERROR: KLAVIYO_API_KEY no configurada")
         return {"success": False, "error": "API key not configured"}
+    
+    # ID de la lista "Newsletter Mikel's Earth" en Klaviyo
+    NEWSLETTER_LIST_ID = os.getenv('KLAVIYO_NEWSLETTER_LIST_ID', 'WWPsb2')
     
     # Primero crear/actualizar el perfil
     profile_attrs = {"email": email}
@@ -159,11 +163,12 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, source=None):
         if response.status_code in [200, 201, 202, 204, 409]:
             print(f"✅ [KLAVIYO] Perfil creado/actualizado para {email}")
             
-            # Suscribir al email marketing
+            # Suscribir al email marketing Y añadir a la lista Newsletter
             subscribe_payload = {
                 "data": {
                     "type": "profile-subscription-bulk-create-job",
                     "attributes": {
+                        "custom_source": "Newsletter Website",
                         "profiles": {
                             "data": [
                                 {
@@ -181,6 +186,14 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, source=None):
                                 }
                             ]
                         }
+                    },
+                    "relationships": {
+                        "list": {
+                            "data": {
+                                "type": "list",
+                                "id": NEWSLETTER_LIST_ID
+                            }
+                        }
                     }
                 }
             }
@@ -192,7 +205,7 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, source=None):
             )
             
             if sub_response.status_code in [200, 201, 202, 204]:
-                print(f"✅ [KLAVIYO] Suscripción activada para {email}")
+                print(f"✅ [KLAVIYO] Suscripción activada y añadido a lista Newsletter para {email}")
             else:
                 print(f"⚠️ [KLAVIYO] Error suscribiendo {email}: {sub_response.status_code} - {sub_response.text}")
             
