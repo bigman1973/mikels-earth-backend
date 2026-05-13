@@ -254,6 +254,7 @@ def klaviyo_notify_new_order(order_data):
     discount_amount = order_data.get('discount_amount', 0)
     
     order_number = order_data.get('order_number', 'N/A')
+    items_html = _build_items_html(items)
     properties = {
         "OrderNumber": order_number,
         "order_id": order_number,  # Alias para compatibilidad con subjects
@@ -261,17 +262,24 @@ def klaviyo_notify_new_order(order_data):
         "CustomerEmail": order_data.get('customer_email', 'N/A'),
         "CustomerPhone": order_data.get('customer_phone', 'N/A'),
         "Items": items,
-        "ItemsHtml": _build_items_html(items),
-        "Subtotal": f"{subtotal:.2f}€",
-        "Total": f"{total:.2f}€",
+        "ItemsHtml": items_html,
+        "Subtotal": f"{subtotal:.2f}\u20ac",
+        "Total": f"{total:.2f}\u20ac",
         "ShippingAddress": order_data.get('shipping_address', 'N/A'),
         "DiscountCode": discount_code,
-        "DiscountAmount": f"{discount_amount:.2f}€" if discount_amount else '',
+        "DiscountAmount": f"{discount_amount:.2f}\u20ac" if discount_amount else '',
         "DiscountText": f"Descuento ({discount_code})" if discount_code else '',
         "NeedsInvoice": order_data.get('needs_invoice', False),
         "InvoiceData": order_data.get('invoice_data', {}),
         "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
-        "Source": "mikels-earth-backend"
+        "Source": "mikels-earth-backend",
+        # Aliases en snake_case para compatibilidad con plantillas existentes
+        "customer_name": order_data.get('customer_name', 'N/A'),
+        "customer_email": order_data.get('customer_email', 'N/A'),
+        "items_html": items_html,
+        "total": f"{total:.2f}\u20ac",
+        "subtotal": f"{subtotal:.2f}\u20ac",
+        "stripe_url": order_data.get('stripe_url', '')
     }
     
     return send_klaviyo_event(
@@ -301,25 +309,33 @@ def klaviyo_send_order_confirmation(order_data):
     invoice_data = order_data.get('invoice_data', {})
     
     order_number = order_data.get('order_number', 'N/A')
+    items_html = _build_items_html(items)
+    shipping_text = "GRATIS" if total >= 40 else "4.95\u20ac"
     properties = {
         "OrderNumber": order_number,
         "order_id": order_number,  # Alias para compatibilidad con subjects
         "CustomerName": order_data.get('customer_name', 'N/A'),
         "Items": items,
-        "ItemsHtml": _build_items_html(items),
-        "Subtotal": f"{subtotal:.2f}€",
-        "Total": f"{total:.2f}€",
+        "ItemsHtml": items_html,
+        "Subtotal": f"{subtotal:.2f}\u20ac",
+        "Total": f"{total:.2f}\u20ac",
         "ShippingAddress": order_data.get('shipping_address', 'N/A'),
-        "ShippingText": "GRATIS" if total >= 40 else "4.95€",
+        "ShippingText": shipping_text,
         "DiscountCode": discount_code,
-        "DiscountAmount": f"{discount_amount:.2f}€" if discount_amount else '',
+        "DiscountAmount": f"{discount_amount:.2f}\u20ac" if discount_amount else '',
         "DiscountText": f"Descuento ({discount_code})" if discount_code else '',
         "NeedsInvoice": order_data.get('needs_invoice', False),
         "BillingName": invoice_data.get('name', '') if invoice_data else '',
         "BillingAddress": invoice_data.get('address', '') if invoice_data else '',
         "BillingNif": invoice_data.get('nif', '') if invoice_data else '',
         "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
-        "Source": "mikels-earth-backend"
+        "Source": "mikels-earth-backend",
+        # Aliases en snake_case para compatibilidad con plantillas existentes
+        "customer_name": order_data.get('customer_name', 'N/A'),
+        "items_html": items_html,
+        "total": f"{total:.2f}\u20ac",
+        "subtotal": f"{subtotal:.2f}\u20ac",
+        "shipping": shipping_text
     }
     
     profile_attrs = {}
@@ -365,9 +381,15 @@ def klaviyo_notify_new_subscription(subscription_data):
         "CustomerEmail": subscription_data.get('customer_email', 'N/A'),
         "ProductName": subscription_data.get('product_name', 'N/A'),
         "Frequency": frequency_text,
-        "Price": f"{price:.2f}€" if price else 'N/A',
+        "Price": f"{price:.2f}\u20ac" if price else 'N/A',
         "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
-        "Source": "mikels-earth-backend"
+        "Source": "mikels-earth-backend",
+        # Aliases en snake_case para compatibilidad con plantillas existentes
+        "customer_name": subscription_data.get('customer_name', 'N/A'),
+        "customer_email": subscription_data.get('customer_email', 'N/A'),
+        "product_name": subscription_data.get('product_name', 'N/A'),
+        "frequency": frequency_text,
+        "amount": f"{price:.2f}\u20ac" if price else 'N/A'
     }
     
     return send_klaviyo_event(
@@ -428,7 +450,12 @@ def klaviyo_notify_contact_message(name, email, phone, message):
         "ContactPhone": phone or 'No proporcionado',
         "Message": message,
         "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
-        "Source": "mikels-earth-website"
+        "Source": "mikels-earth-website",
+        # Aliases en snake_case para compatibilidad con plantillas existentes
+        "name": name,
+        "email": email,
+        "phone": phone or 'No proporcionado',
+        "message": message
     }
     
     return send_klaviyo_event(
@@ -445,7 +472,10 @@ def klaviyo_send_contact_confirmation(name, email, message=''):
     properties = {
         "ContactName": name,
         "Message": message,
-        "Source": "mikels-earth-website"
+        "Source": "mikels-earth-website",
+        # Aliases en snake_case para compatibilidad con plantillas existentes
+        "name": name,
+        "message": message
     }
     
     return send_klaviyo_event(
@@ -474,7 +504,14 @@ def klaviyo_notify_workshop_visit(nombre, email, telefono, interes):
         "VisitorPhone": telefono or 'No proporcionado',
         "Interest": interes_text,
         "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
-        "Source": "mikels-earth-website"
+        "Source": "mikels-earth-website",
+        # Aliases en snake_case para compatibilidad con plantillas existentes
+        "name": nombre,
+        "email": email,
+        "phone": telefono or 'No proporcionado',
+        "preferred_date": interes_text,
+        "guests": 'No especificado',
+        "comments": ''
     }
     
     return send_klaviyo_event(
@@ -497,7 +534,11 @@ def klaviyo_send_workshop_visit_confirmation(nombre, email, interes='visita'):
     properties = {
         "VisitorName": nombre,
         "Interest": interes_text,
-        "Source": "mikels-earth-website"
+        "Source": "mikels-earth-website",
+        # Aliases en snake_case para compatibilidad con plantillas existentes
+        "name": nombre,
+        "guests": 'No especificado',
+        "preferred_date": interes_text
     }
     
     return send_klaviyo_event(
@@ -520,7 +561,12 @@ def klaviyo_notify_product_request(product_name, customer_name, customer_email, 
         "CustomerEmail": customer_email,
         "CustomerPhone": customer_phone or 'No proporcionado',
         "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
-        "Source": "mikels-earth-website"
+        "Source": "mikels-earth-website",
+        # Aliases en snake_case para compatibilidad con plantillas existentes
+        "name": customer_name,
+        "email": customer_email,
+        "product_name": product_name,
+        "date": datetime.now().strftime('%d/%m/%Y %H:%M')
     }
     
     return send_klaviyo_event(
@@ -537,7 +583,10 @@ def klaviyo_send_product_notification_confirmation(product_name, customer_name, 
     properties = {
         "ProductName": product_name,
         "CustomerName": customer_name,
-        "Source": "mikels-earth-website"
+        "Source": "mikels-earth-website",
+        # Aliases en snake_case para compatibilidad con plantillas existentes
+        "name": customer_name,
+        "product_name": product_name
     }
     
     return send_klaviyo_event(
