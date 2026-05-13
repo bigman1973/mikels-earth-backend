@@ -22,7 +22,7 @@ def send_message():
         dispatch_contact_notification(name, email, phone, message)
         
         # Enviar confirmación al cliente (Klaviyo + Brevo fallback)
-        dispatch_contact_confirmation(name, email)
+        dispatch_contact_confirmation(name, email, message)
         
         return jsonify({
             'success': True,

@@ -186,7 +186,7 @@ def dispatch_contact_notification(name, email, phone, message):
     return klaviyo_ok
 
 
-def dispatch_contact_confirmation(name, email):
+def dispatch_contact_confirmation(name, email, message=''):
     """
     Envía confirmación de mensaje de contacto al cliente
     """
@@ -195,7 +195,7 @@ def dispatch_contact_confirmation(name, email):
     if _use_klaviyo():
         try:
             from src.services.klaviyo_service import klaviyo_send_contact_confirmation
-            klaviyo_ok = klaviyo_send_contact_confirmation(name, email)
+            klaviyo_ok = klaviyo_send_contact_confirmation(name, email, message)
         except Exception as e:
             print(f"⚠️ [DISPATCHER] Error Klaviyo contact confirmation: {e}")
     
@@ -234,7 +234,7 @@ def dispatch_workshop_visit_notification(nombre, email, telefono, interes):
     return klaviyo_ok
 
 
-def dispatch_workshop_visit_confirmation(nombre, email):
+def dispatch_workshop_visit_confirmation(nombre, email, interes='visita'):
     """
     Envía confirmación de solicitud de visita al obrador al visitante
     """
@@ -243,7 +243,7 @@ def dispatch_workshop_visit_confirmation(nombre, email):
     if _use_klaviyo():
         try:
             from src.services.klaviyo_service import klaviyo_send_workshop_visit_confirmation
-            klaviyo_ok = klaviyo_send_workshop_visit_confirmation(nombre, email)
+            klaviyo_ok = klaviyo_send_workshop_visit_confirmation(nombre, email, interes)
         except Exception as e:
             print(f"⚠️ [DISPATCHER] Error Klaviyo workshop confirmation: {e}")
     

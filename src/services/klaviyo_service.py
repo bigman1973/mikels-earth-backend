@@ -223,6 +223,23 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, source=None):
 # Funciones de alto nivel para cada tipo de email/evento
 # ============================================================
 
+def _build_items_html(items):
+    """
+    Construye HTML con la tabla de productos del pedido para usar en plantillas de email.
+    """
+    if not items:
+        return '<p>No hay productos</p>'
+    
+    html_parts = []
+    for item in items:
+        name = item.get('name', 'Producto')
+        qty = item.get('quantity', 1)
+        price = item.get('price', 0)
+        html_parts.append(f'{name} x{qty} — {price:.2f}€')
+    
+    return '<br/>'.join(html_parts)
+
+
 def klaviyo_notify_new_order(order_data):
     """
     Envía evento 'New Order' a Klaviyo (notificación interna)
@@ -230,19 +247,30 @@ def klaviyo_notify_new_order(order_data):
     """
     owner_email = os.getenv('OWNER_EMAIL', 'info@mikels.es')
     
+    items = order_data.get('items', [])
+    subtotal = order_data.get('subtotal', order_data.get('total', 0))
+    total = order_data.get('total', 0)
+    discount_code = order_data.get('discount_code', '')
+    discount_amount = order_data.get('discount_amount', 0)
+    
+    order_number = order_data.get('order_number', 'N/A')
     properties = {
-        "OrderNumber": order_data.get('order_number', 'N/A'),
+        "OrderNumber": order_number,
+        "order_id": order_number,  # Alias para compatibilidad con subjects
         "CustomerName": order_data.get('customer_name', 'N/A'),
         "CustomerEmail": order_data.get('customer_email', 'N/A'),
         "CustomerPhone": order_data.get('customer_phone', 'N/A'),
-        "Items": order_data.get('items', []),
-        "Subtotal": order_data.get('subtotal', order_data.get('total', 0)),
-        "Total": order_data.get('total', 0),
+        "Items": items,
+        "ItemsHtml": _build_items_html(items),
+        "Subtotal": f"{subtotal:.2f}€",
+        "Total": f"{total:.2f}€",
         "ShippingAddress": order_data.get('shipping_address', 'N/A'),
-        "DiscountCode": order_data.get('discount_code', ''),
-        "DiscountAmount": order_data.get('discount_amount', 0),
+        "DiscountCode": discount_code,
+        "DiscountAmount": f"{discount_amount:.2f}€" if discount_amount else '',
+        "DiscountText": f"Descuento ({discount_code})" if discount_code else '',
         "NeedsInvoice": order_data.get('needs_invoice', False),
         "InvoiceData": order_data.get('invoice_data', {}),
+        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
         "Source": "mikels-earth-backend"
     }
     
@@ -265,16 +293,32 @@ def klaviyo_send_order_confirmation(order_data):
         print("⚠️ [KLAVIYO] No se puede enviar confirmación: email no disponible")
         return False
     
+    items = order_data.get('items', [])
+    subtotal = order_data.get('subtotal', order_data.get('total', 0))
+    total = order_data.get('total', 0)
+    discount_code = order_data.get('discount_code', '')
+    discount_amount = order_data.get('discount_amount', 0)
+    invoice_data = order_data.get('invoice_data', {})
+    
+    order_number = order_data.get('order_number', 'N/A')
     properties = {
-        "OrderNumber": order_data.get('order_number', 'N/A'),
-        "Items": order_data.get('items', []),
-        "Subtotal": order_data.get('subtotal', order_data.get('total', 0)),
-        "Total": order_data.get('total', 0),
+        "OrderNumber": order_number,
+        "order_id": order_number,  # Alias para compatibilidad con subjects
+        "CustomerName": order_data.get('customer_name', 'N/A'),
+        "Items": items,
+        "ItemsHtml": _build_items_html(items),
+        "Subtotal": f"{subtotal:.2f}€",
+        "Total": f"{total:.2f}€",
         "ShippingAddress": order_data.get('shipping_address', 'N/A'),
-        "DiscountCode": order_data.get('discount_code', ''),
-        "DiscountAmount": order_data.get('discount_amount', 0),
+        "ShippingText": "GRATIS" if total >= 40 else "4.95€",
+        "DiscountCode": discount_code,
+        "DiscountAmount": f"{discount_amount:.2f}€" if discount_amount else '',
+        "DiscountText": f"Descuento ({discount_code})" if discount_code else '',
         "NeedsInvoice": order_data.get('needs_invoice', False),
-        "InvoiceData": order_data.get('invoice_data', {}),
+        "BillingName": invoice_data.get('name', '') if invoice_data else '',
+        "BillingAddress": invoice_data.get('address', '') if invoice_data else '',
+        "BillingNif": invoice_data.get('nif', '') if invoice_data else '',
+        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
         "Source": "mikels-earth-backend"
     }
     
@@ -302,13 +346,27 @@ def klaviyo_notify_new_subscription(subscription_data):
     """
     owner_email = os.getenv('OWNER_EMAIL', 'info@mikels.es')
     
+    price = subscription_data.get('price', 0)
+    frequency_map = {
+        'weekly': 'Semanal',
+        'biweekly': 'Quincenal',
+        'monthly': 'Mensual',
+        'quarterly': 'Trimestral',
+        'semiannual': 'Semestral'
+    }
+    frequency_raw = subscription_data.get('frequency', 'N/A')
+    frequency_text = frequency_map.get(frequency_raw, frequency_raw)
+    
+    sub_number = subscription_data.get('subscription_number', 'N/A')
     properties = {
-        "SubscriptionNumber": subscription_data.get('subscription_number', 'N/A'),
+        "SubscriptionNumber": sub_number,
+        "order_id": sub_number,  # Alias para compatibilidad con subjects
         "CustomerName": subscription_data.get('customer_name', 'N/A'),
         "CustomerEmail": subscription_data.get('customer_email', 'N/A'),
         "ProductName": subscription_data.get('product_name', 'N/A'),
-        "Frequency": subscription_data.get('frequency', 'N/A'),
-        "Price": subscription_data.get('price', 0),
+        "Frequency": frequency_text,
+        "Price": f"{price:.2f}€" if price else 'N/A',
+        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
         "Source": "mikels-earth-backend"
     }
     
@@ -380,12 +438,13 @@ def klaviyo_notify_contact_message(name, email, phone, message):
     )
 
 
-def klaviyo_send_contact_confirmation(name, email):
+def klaviyo_send_contact_confirmation(name, email, message=''):
     """
     Envía evento de confirmación de contacto al cliente
     """
     properties = {
         "ContactName": name,
+        "Message": message,
         "Source": "mikels-earth-website"
     }
     
@@ -425,12 +484,19 @@ def klaviyo_notify_workshop_visit(nombre, email, telefono, interes):
     )
 
 
-def klaviyo_send_workshop_visit_confirmation(nombre, email):
+def klaviyo_send_workshop_visit_confirmation(nombre, email, interes='visita'):
     """
     Envía evento de confirmación de visita al obrador al visitante
     """
+    interes_text = {
+        'visita': 'Visita al obrador',
+        'taller': 'Taller de elaboración',
+        'degustacion': 'Degustación de productos'
+    }.get(interes, interes)
+    
     properties = {
         "VisitorName": nombre,
+        "Interest": interes_text,
         "Source": "mikels-earth-website"
     }
     
@@ -470,6 +536,7 @@ def klaviyo_send_product_notification_confirmation(product_name, customer_name, 
     """
     properties = {
         "ProductName": product_name,
+        "CustomerName": customer_name,
         "Source": "mikels-earth-website"
     }
     

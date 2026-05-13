@@ -22,7 +22,7 @@ def workshop_visit():
         dispatch_workshop_visit_notification(nombre, email, telefono, interes)
         
         # Enviar confirmación al interesado (Klaviyo + Brevo fallback)
-        dispatch_workshop_visit_confirmation(nombre, email)
+        dispatch_workshop_visit_confirmation(nombre, email, interes)
         
         return jsonify({
             'success': True,
