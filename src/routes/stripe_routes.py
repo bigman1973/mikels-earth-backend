@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 import secrets
 from src.services.whatsapp_service import notify_new_order, notify_new_subscription
-from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification
+from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification, dispatch_started_checkout
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
@@ -111,6 +111,25 @@ def create_checkout_session():
             session_params['discounts'] = [{'coupon': coupon.id}]
         
         session = stripe.checkout.Session.create(**session_params)
+        
+        # Track "Started Checkout" en Klaviyo para el Flow de carrito abandonado
+        try:
+            checkout_data = {
+                'customer_email': customer_info['email'],
+                'customer_name': customer_info.get('name', ''),
+                'customer_phone': customer_info.get('phone', ''),
+                'items': items,
+                'subtotal': subtotal,
+                'total': total,
+                'discount_code': discount_code or '',
+                'discount_amount': discount_amount,
+                'order_number': order_number,
+                'checkout_url': f"{frontend_url}/checkout"
+            }
+            dispatch_started_checkout(checkout_data)
+        except Exception as checkout_err:
+            print(f"\u26a0\ufe0f Error tracking started checkout: {checkout_err}")
+            # No bloquear el checkout si falla el tracking
         
         return jsonify({
             'sessionId': session.id,
