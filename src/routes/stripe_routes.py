@@ -243,15 +243,72 @@ def stripe_webhook():
                 ]
                 full_address = ', '.join([part for part in address_parts if part])
                 
+                # Extraer datos adicionales de metadata
+                subtotal_str = session['metadata'].get('subtotal', '0')
+                discount_code = session['metadata'].get('discount_code', '')
+                discount_amount_str = session['metadata'].get('discount_amount', '0')
+                
+                try:
+                    subtotal = float(subtotal_str) if subtotal_str else 0
+                except (ValueError, TypeError):
+                    subtotal = 0
+                
+                try:
+                    discount_amount = float(discount_amount_str) if discount_amount_str else 0
+                except (ValueError, TypeError):
+                    discount_amount = 0
+                
+                total = session['amount_total'] / 100 if session.get('amount_total') else 0
+                
                 order_data = {
                     'order_number': order_number,
                     'customer_name': session['metadata'].get('customer_name', 'N/A'),
                     'customer_email': session.get('customer_details', {}).get('email', 'N/A'),
                     'customer_phone': session['metadata'].get('customer_phone', 'N/A'),
                     'items': items,
-                    'total': session['amount_total'] / 100 if session.get('amount_total') else 0,
-                    'shipping_address': full_address if full_address else 'No especificada'
+                    'subtotal': subtotal if subtotal else total,
+                    'total': total,
+                    'shipping_address': full_address if full_address else 'No especificada',
+                    'shipping_address_line': session['metadata'].get('shipping_address', ''),
+                    'shipping_city': session['metadata'].get('shipping_city', ''),
+                    'shipping_postal_code': session['metadata'].get('shipping_postal_code', ''),
+                    'shipping_country': session['metadata'].get('shipping_country', 'España'),
+                    'discount_code': discount_code,
+                    'discount_amount': discount_amount,
+                    'customer_notes': session['metadata'].get('customer_notes', ''),
+                    'stripe_checkout_session_id': session['id'],
+                    'stripe_payment_intent_id': session.get('payment_intent', '')
                 }
+                
+                # Guardar pedido en la base de datos
+                try:
+                    from src.models.order import Order, db
+                    new_order = Order(
+                        order_number=order_number,
+                        customer_email=order_data['customer_email'],
+                        customer_name=order_data['customer_name'],
+                        customer_phone=order_data['customer_phone'],
+                        shipping_address=session['metadata'].get('shipping_address', ''),
+                        shipping_city=session['metadata'].get('shipping_city', ''),
+                        shipping_postal_code=session['metadata'].get('shipping_postal_code', ''),
+                        shipping_country=session['metadata'].get('shipping_country', 'España'),
+                        items=items,
+                        subtotal=order_data['subtotal'],
+                        shipping_cost=0 if total >= 40 else 4.95,
+                        total=total,
+                        stripe_payment_intent_id=order_data.get('stripe_payment_intent_id', ''),
+                        stripe_checkout_session_id=session['id'],
+                        payment_status='paid',
+                        order_status='processing',
+                        customer_notes=order_data.get('customer_notes', '')
+                    )
+                    new_order.paid_at = datetime.utcnow()
+                    db.session.add(new_order)
+                    db.session.commit()
+                    print(f"✅ Order {order_number} saved to database")
+                except Exception as db_error:
+                    print(f"⚠️ Error saving order to database: {str(db_error)}")
+                    # No fallar el webhook por error de BBDD
                 
                 # Enviar notificaciones por WhatsApp
                 notify_new_order(order_data)

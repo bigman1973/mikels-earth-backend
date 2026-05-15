@@ -276,9 +276,15 @@ def klaviyo_notify_new_order(order_data):
         # Aliases en snake_case para compatibilidad con plantillas existentes
         "customer_name": order_data.get('customer_name', 'N/A'),
         "customer_email": order_data.get('customer_email', 'N/A'),
+        "customer_phone": order_data.get('customer_phone', 'N/A'),
+        "phone": order_data.get('customer_phone', 'N/A'),
         "items_html": items_html,
-        "total": f"{total:.2f}\u20ac",
-        "subtotal": f"{subtotal:.2f}\u20ac",
+        "total": f"{total:.2f}€",
+        "subtotal": f"{subtotal:.2f}€",
+        "shipping_address": order_data.get('shipping_address', 'N/A'),
+        "date": datetime.now().strftime('%d/%m/%Y %H:%M'),
+        "discount_code": discount_code,
+        "discount_amount": f"{discount_amount:.2f}€" if discount_amount else '',
         "stripe_url": order_data.get('stripe_url', '')
     }
     
@@ -332,10 +338,17 @@ def klaviyo_send_order_confirmation(order_data):
         "Source": "mikels-earth-backend",
         # Aliases en snake_case para compatibilidad con plantillas existentes
         "customer_name": order_data.get('customer_name', 'N/A'),
+        "customer_email": order_data.get('customer_email', 'N/A'),
+        "customer_phone": order_data.get('customer_phone', 'N/A'),
+        "phone": order_data.get('customer_phone', 'N/A'),
         "items_html": items_html,
-        "total": f"{total:.2f}\u20ac",
-        "subtotal": f"{subtotal:.2f}\u20ac",
-        "shipping": shipping_text
+        "total": f"{total:.2f}€",
+        "subtotal": f"{subtotal:.2f}€",
+        "shipping": shipping_text,
+        "shipping_address": order_data.get('shipping_address', 'N/A'),
+        "date": datetime.now().strftime('%d/%m/%Y %H:%M'),
+        "discount_code": discount_code,
+        "discount_amount": f"{discount_amount:.2f}€" if discount_amount else ''
     }
     
     profile_attrs = {}
