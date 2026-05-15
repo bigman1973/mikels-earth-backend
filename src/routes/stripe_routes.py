@@ -77,6 +77,12 @@ def create_checkout_session():
             'success_url': f'{frontend_url}/order-success?session_id={{CHECKOUT_SESSION_ID}}',
             'cancel_url': f'{frontend_url}/checkout?cancelled=true',
             'customer_email': customer_info['email'],
+            'shipping_address_collection': {
+                'allowed_countries': ['ES', 'PT', 'FR', 'DE', 'IT', 'GB', 'AT', 'BE', 'NL', 'IE']
+            },
+            'phone_number_collection': {
+                'enabled': True
+            },
             'metadata': {
                 'order_number': order_number,
                 'customer_name': customer_info['name'],
@@ -234,12 +240,34 @@ def stripe_webhook():
                         'price': item.amount_total / 100
                     })
                 
+                # Extraer dirección de envío de Stripe shipping_details (prioridad)
+                # Esto funciona cuando el cliente usa Link o rellena en Stripe Checkout
+                stripe_shipping = session.get('shipping_details') or {}
+                stripe_shipping_address = stripe_shipping.get('address') or {}
+                stripe_shipping_name = stripe_shipping.get('name', '')
+                
+                # Extraer teléfono de customer_details (recopilado por phone_number_collection)
+                customer_details = session.get('customer_details') or {}
+                stripe_phone = customer_details.get('phone', '') or ''
+                
+                # Prioridad: datos de Stripe > metadata del frontend
+                shipping_line = stripe_shipping_address.get('line1', '') or session['metadata'].get('shipping_address', '')
+                shipping_line2 = stripe_shipping_address.get('line2', '') or ''
+                shipping_city = stripe_shipping_address.get('city', '') or session['metadata'].get('shipping_city', '')
+                shipping_postal = stripe_shipping_address.get('postal_code', '') or session['metadata'].get('shipping_postal_code', '')
+                shipping_country = stripe_shipping_address.get('country', '') or session['metadata'].get('shipping_country', 'España')
+                shipping_state = stripe_shipping_address.get('state', '') or ''
+                customer_phone = stripe_phone or session['metadata'].get('customer_phone', '')
+                customer_name = stripe_shipping_name or session['metadata'].get('customer_name', 'N/A')
+                
                 # Construir dirección completa
                 address_parts = [
-                    session['metadata'].get('shipping_address', ''),
-                    session['metadata'].get('shipping_city', ''),
-                    session['metadata'].get('shipping_postal_code', ''),
-                    session['metadata'].get('shipping_country', '')
+                    shipping_line,
+                    shipping_line2,
+                    shipping_city,
+                    shipping_state,
+                    shipping_postal,
+                    shipping_country
                 ]
                 full_address = ', '.join([part for part in address_parts if part])
                 
@@ -262,17 +290,17 @@ def stripe_webhook():
                 
                 order_data = {
                     'order_number': order_number,
-                    'customer_name': session['metadata'].get('customer_name', 'N/A'),
-                    'customer_email': session.get('customer_details', {}).get('email', 'N/A'),
-                    'customer_phone': session['metadata'].get('customer_phone', 'N/A'),
+                    'customer_name': customer_name,
+                    'customer_email': customer_details.get('email', '') or session.get('customer_email', 'N/A'),
+                    'customer_phone': customer_phone or 'No proporcionado',
                     'items': items,
                     'subtotal': subtotal if subtotal else total,
                     'total': total,
                     'shipping_address': full_address if full_address else 'No especificada',
-                    'shipping_address_line': session['metadata'].get('shipping_address', ''),
-                    'shipping_city': session['metadata'].get('shipping_city', ''),
-                    'shipping_postal_code': session['metadata'].get('shipping_postal_code', ''),
-                    'shipping_country': session['metadata'].get('shipping_country', 'España'),
+                    'shipping_address_line': shipping_line,
+                    'shipping_city': shipping_city,
+                    'shipping_postal_code': shipping_postal,
+                    'shipping_country': shipping_country,
                     'discount_code': discount_code,
                     'discount_amount': discount_amount,
                     'customer_notes': session['metadata'].get('customer_notes', ''),
@@ -288,10 +316,10 @@ def stripe_webhook():
                         customer_email=order_data['customer_email'],
                         customer_name=order_data['customer_name'],
                         customer_phone=order_data['customer_phone'],
-                        shipping_address=session['metadata'].get('shipping_address', ''),
-                        shipping_city=session['metadata'].get('shipping_city', ''),
-                        shipping_postal_code=session['metadata'].get('shipping_postal_code', ''),
-                        shipping_country=session['metadata'].get('shipping_country', 'España'),
+                        shipping_address=shipping_line,
+                        shipping_city=shipping_city,
+                        shipping_postal_code=shipping_postal,
+                        shipping_country=shipping_country,
                         items=items,
                         subtotal=order_data['subtotal'],
                         shipping_cost=0 if total >= 40 else 4.95,
