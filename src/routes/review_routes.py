@@ -19,6 +19,18 @@ import string
 review_bp = Blueprint('review', __name__)
 
 
+@review_bp.route('/init-db', methods=['GET'])
+def init_reviews_db():
+    """Endpoint temporal para forzar la creación de la tabla reviews"""
+    try:
+        db.create_all()
+        # Verificar que la tabla existe
+        count = Review.query.count()
+        return jsonify({'success': True, 'message': f'Tabla reviews OK. {count} reseñas existentes.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 def _generate_review_coupon_code():
     """Genera un código de cupón único para recompensar la reseña"""
     chars = string.ascii_uppercase + string.digits
