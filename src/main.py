@@ -19,7 +19,9 @@ from src.routes.contact_routes import contact_bp
 from src.routes.coupon_routes import coupon_bp
 from src.routes.horeca_routes import horeca_bp
 from src.routes.blog_routes import blog_bp  # Blog automatizado con Brevo
+from src.routes.review_routes import review_bp  # Sistema de reseñas
 from src.models.blog import BlogPost  # Modelo del blog
+from src.models.review import Review  # Modelo de reseñas
 
 # Load environment variables
 load_dotenv()
@@ -71,6 +73,7 @@ app.register_blueprint(contact_bp, url_prefix='/api/contact')
 app.register_blueprint(coupon_bp, url_prefix='/api/coupon')
 app.register_blueprint(horeca_bp, url_prefix='/api/horeca')
 app.register_blueprint(blog_bp, url_prefix='/api/blog')  # Blog endpoints
+app.register_blueprint(review_bp, url_prefix='/api/reviews')  # Reviews endpoints
 
 # Database configuration for coupons and user management
 # Use DATABASE_URL from Railway (PostgreSQL) or fallback to SQLite for local dev

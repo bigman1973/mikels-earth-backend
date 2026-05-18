@@ -650,6 +650,43 @@ def klaviyo_track_started_checkout(checkout_data):
     )
 
 
+def klaviyo_send_review_request(customer_email, customer_name, order_number, items):
+    """
+    Envía evento 'Mikels Review Request' a Klaviyo.
+    Se dispara 7 días después de la compra para pedir reseña.
+    """
+    items_html = _build_items_html(items)
+    
+    properties = {
+        "CustomerName": customer_name,
+        "OrderNumber": order_number,
+        "Items": items,
+        "ItemsHtml": items_html,
+        "ReviewURL": "https://www.mikels.es/opiniones",
+        "Source": "mikels-earth-backend",
+        # Aliases
+        "customer_name": customer_name,
+        "order_number": order_number,
+        "items_html": items_html,
+        "review_url": "https://www.mikels.es/opiniones"
+    }
+    
+    profile_attrs = {}
+    if customer_name:
+        parts = customer_name.split(' ', 1)
+        profile_attrs["first_name"] = parts[0]
+        if len(parts) > 1:
+            profile_attrs["last_name"] = parts[1]
+    
+    return send_klaviyo_event(
+        metric_name="Mikels Review Request",
+        profile_email=customer_email,
+        properties=properties,
+        unique_id=f"review-request-{order_number}",
+        profile_attrs=profile_attrs
+    )
+
+
 def klaviyo_send_product_notification_confirmation(product_name, customer_name, customer_email):
     """
     Envía evento de confirmación de solicitud de notificación de producto al cliente
