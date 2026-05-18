@@ -323,3 +323,28 @@ def get_featured_reviews():
     except Exception as e:
         print(f"❌ Error obteniendo reseñas destacadas: {str(e)}")
         return jsonify({'error': 'Error interno del servidor'}), 500
+
+
+@review_bp.route('/<int:review_id>', methods=['DELETE'])
+def delete_review(review_id):
+    """
+    Eliminar una reseña por ID (admin).
+    Requiere header X-Admin-Key para autorización básica.
+    """
+    try:
+        admin_key = request.headers.get('X-Admin-Key', '')
+        if admin_key != os.environ.get('ADMIN_SECRET_KEY', 'mikels-admin-2026'):
+            return jsonify({'error': 'No autorizado'}), 401
+        
+        review = Review.query.get(review_id)
+        if not review:
+            return jsonify({'error': 'Reseña no encontrada'}), 404
+        
+        db.session.delete(review)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': f'Reseña {review_id} eliminada'}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
