@@ -374,6 +374,10 @@ def update_review(review_id):
             review.status = data['status']
         if 'is_verified_purchase' in data:
             review.is_verified_purchase = data['is_verified_purchase']
+        if 'product_slug' in data:
+            review.product_slug = data['product_slug']
+        if 'product_name' in data:
+            review.product_name = data['product_name']
         
         db.session.commit()
         
