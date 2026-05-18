@@ -348,3 +348,37 @@ def delete_review(review_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+@review_bp.route('/<int:review_id>', methods=['PATCH'])
+def update_review(review_id):
+    """
+    Actualizar una reseña por ID (admin).
+    Permite cambiar created_at y otros campos.
+    Requiere header X-Admin-Key.
+    """
+    try:
+        admin_key = request.headers.get('X-Admin-Key', '')
+        if admin_key != os.environ.get('ADMIN_SECRET_KEY', 'mikels-admin-2026'):
+            return jsonify({'error': 'No autorizado'}), 401
+        
+        review = Review.query.get(review_id)
+        if not review:
+            return jsonify({'error': 'Reseña no encontrada'}), 404
+        
+        data = request.get_json()
+        
+        if 'created_at' in data:
+            review.created_at = datetime.fromisoformat(data['created_at'])
+        if 'status' in data:
+            review.status = data['status']
+        if 'is_verified_purchase' in data:
+            review.is_verified_purchase = data['is_verified_purchase']
+        
+        db.session.commit()
+        
+        return jsonify({'success': True, 'review': review.to_dict()}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
