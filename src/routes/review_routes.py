@@ -95,22 +95,26 @@ def create_review():
         # Verificar si es una compra verificada
         is_verified = False
         order_number = data.get('order_number', '').strip()
-        if order_number:
-            order = Order.query.filter_by(
-                order_number=order_number,
-                customer_email=email,
-                payment_status='paid'
-            ).first()
-            if order:
-                is_verified = True
-        else:
-            # Verificar si el email tiene algún pedido pagado
-            any_order = Order.query.filter_by(
-                customer_email=email,
-                payment_status='paid'
-            ).first()
-            if any_order:
-                is_verified = True
+        try:
+            if order_number:
+                order = Order.query.filter_by(
+                    order_number=order_number,
+                    customer_email=email,
+                    payment_status='paid'
+                ).first()
+                if order:
+                    is_verified = True
+            else:
+                # Verificar si el email tiene algún pedido pagado
+                any_order = Order.query.filter_by(
+                    customer_email=email,
+                    payment_status='paid'
+                ).first()
+                if any_order:
+                    is_verified = True
+        except Exception as e:
+            print(f"⚠️ Error verificando pedido (tabla orders puede no existir): {e}")
+            is_verified = False
         
         # Verificar si ya existe una reseña de este email para este producto
         existing_review = Review.query.filter_by(
@@ -125,11 +129,15 @@ def create_review():
         coupon_code = _generate_review_coupon_code()
         
         # Asegurar que el código es único
-        max_attempts = 10
-        for _ in range(max_attempts):
-            if not Coupon.query.filter_by(code=coupon_code).first():
-                break
-            coupon_code = _generate_review_coupon_code()
+        try:
+            max_attempts = 10
+            for _ in range(max_attempts):
+                if not Coupon.query.filter_by(code=coupon_code).first():
+                    break
+                coupon_code = _generate_review_coupon_code()
+        except Exception as e:
+            print(f"⚠️ Error verificando unicidad de cupón (tabla coupons puede no existir): {e}")
+            # El cupón generado se usa igualmente
         
         # Crear la reseña
         review = Review(
@@ -157,7 +165,7 @@ def create_review():
             )
             db.session.add(reward_coupon)
         except Exception as e:
-            print(f"⚠️ Error creando cupón de reseña: {e}")
+            print(f"⚠️ Error creando cupón de reseña (tabla coupons puede no existir): {e}")
         
         db.session.commit()
         
@@ -188,8 +196,11 @@ def create_review():
         
     except Exception as e:
         db.session.rollback()
+        import traceback
+        error_detail = traceback.format_exc()
         print(f"❌ Error creando reseña: {str(e)}")
-        return jsonify({'error': 'Error interno del servidor'}), 500
+        print(f"❌ Traceback: {error_detail}")
+        return jsonify({'error': 'Error interno del servidor', 'detail': str(e)}), 500
 
 
 @review_bp.route('', methods=['GET'])
