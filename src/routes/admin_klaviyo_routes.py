@@ -103,3 +103,128 @@ def update_klaviyo_profiles():
         'errors': error_count,
         'results': results
     }), 200
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/create-campaign', methods=['POST'])
+def create_klaviyo_campaign():
+    """
+    Crear un template y una campaña en Klaviyo (en estado DRAFT).
+    Body: {
+        "template_name": "...",
+        "template_html": "...",
+        "campaign_name": "...",
+        "subject": "...",
+        "preview_text": "...",
+        "list_id": "WWPsb2",
+        "from_email": "jordi@mikels.es",
+        "from_name": "MIKEL'S EARTH"
+    }
+    """
+    admin_key = request.headers.get('X-Admin-Key', '')
+    if admin_key != ADMIN_KEY:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json()
+    headers = _get_klaviyo_headers()
+    
+    try:
+        # Paso 1: Crear template
+        template_payload = {
+            "data": {
+                "type": "template",
+                "attributes": {
+                    "name": data['template_name'],
+                    "html": data['template_html'],
+                    "editor_type": "CODE"
+                }
+            }
+        }
+        
+        resp = requests.post(
+            f"{KLAVIYO_API_URL}/templates",
+            headers=headers,
+            json=template_payload,
+            timeout=15
+        )
+        
+        if resp.status_code not in [200, 201]:
+            return jsonify({
+                'error': f'Error creating template: {resp.status_code}',
+                'detail': resp.text[:300]
+            }), 500
+        
+        template_id = resp.json()['data']['id']
+        
+        # Paso 2: Crear campaña
+        campaign_payload = {
+            "data": {
+                "type": "campaign",
+                "attributes": {
+                    "name": data['campaign_name'],
+                    "audiences": {
+                        "included": [data['list_id']],
+                        "excluded": []
+                    },
+                    "send_strategy": {
+                        "method": "immediate"
+                    },
+                    "campaign-messages": {
+                        "data": [{
+                            "type": "campaign-message",
+                            "attributes": {
+                                "channel": "email",
+                                "label": "Email",
+                                "content": {
+                                    "subject": data['subject'],
+                                    "preview_text": data.get('preview_text', ''),
+                                    "from_email": data.get('from_email', 'jordi@mikels.es'),
+                                    "from_label": data.get('from_name', "MIKEL'S EARTH")
+                                },
+                                "render_options": {
+                                    "shorten_links": True,
+                                    "add_org_prefix": True,
+                                    "add_info_link": True,
+                                    "add_opt_out_link": True
+                                }
+                            },
+                            "relationships": {
+                                "template": {
+                                    "data": {
+                                        "type": "template",
+                                        "id": template_id
+                                    }
+                                }
+                            }
+                        }]
+                    }
+                }
+            }
+        }
+        
+        resp2 = requests.post(
+            f"{KLAVIYO_API_URL}/campaigns",
+            headers=headers,
+            json=campaign_payload,
+            timeout=15
+        )
+        
+        if resp2.status_code not in [200, 201]:
+            return jsonify({
+                'error': f'Error creating campaign: {resp2.status_code}',
+                'detail': resp2.text[:500],
+                'template_id': template_id
+            }), 500
+        
+        campaign_data = resp2.json()['data']
+        
+        return jsonify({
+            'success': True,
+            'template_id': template_id,
+            'campaign_id': campaign_data['id'],
+            'campaign_name': data['campaign_name'],
+            'status': 'DRAFT',
+            'message': 'Campaña creada en estado DRAFT. Ve a Klaviyo para revisarla y enviarla.'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
