@@ -802,3 +802,61 @@ def klaviyo_send_post_purchase_event(order_data):
         unique_id=f"post-purchase-{order_number}",
         profile_attrs=profile_attrs
     )
+
+
+def klaviyo_track_started_checkout(email, customer_name, items, total, checkout_url, items_html, cart_token):
+    """
+    Envía evento 'Started Checkout' a Klaviyo para el flow de carrito abandonado.
+    
+    Propiedades del evento:
+    - CheckoutURL: URL persistente para recuperar el carrito
+    - ItemsHtml: HTML con los productos (nombre, imagen, precio) para el email
+    - Items: Array con los productos
+    - Total: Importe total del carrito
+    - CustomerName: Nombre del cliente
+    - CartToken: Token único del carrito
+    """
+    # Preparar items para el evento
+    items_for_event = []
+    for item in items:
+        items_for_event.append({
+            "ProductName": item.get('name', 'Producto'),
+            "ProductImage": item.get('image', ''),
+            "Price": item.get('price', 0),
+            "Quantity": item.get('quantity', 1),
+            "ProductURL": f"https://www.mikels.es/producto/{item.get('slug', '')}"
+        })
+    
+    properties = {
+        "CheckoutURL": checkout_url,
+        "ItemsHtml": items_html,
+        "Items": items_for_event,
+        "Total": f"{total:.2f}",
+        "TotalNumeric": total,
+        "CustomerName": customer_name or '',
+        "CartToken": cart_token,
+        "ItemCount": sum(item.get('quantity', 1) for item in items),
+        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
+        "Source": "mikels-earth-frontend",
+        # Aliases en snake_case para compatibilidad
+        "checkout_url": checkout_url,
+        "items_html": items_html,
+        "items": items_for_event,
+        "total": f"{total:.2f}",
+        "customer_name": customer_name or ''
+    }
+    
+    profile_attrs = {}
+    if customer_name:
+        parts = customer_name.split(' ', 1)
+        profile_attrs["first_name"] = parts[0]
+        if len(parts) > 1:
+            profile_attrs["last_name"] = parts[1]
+    
+    return send_klaviyo_event(
+        metric_name="Started Checkout",
+        profile_email=email,
+        properties=properties,
+        unique_id=f"started-checkout-{cart_token}",
+        profile_attrs=profile_attrs
+    )

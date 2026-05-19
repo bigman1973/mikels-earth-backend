@@ -264,15 +264,23 @@ def dispatch_workshop_visit_confirmation(nombre, email, interes='visita'):
     return klaviyo_ok
 
 
-def dispatch_started_checkout(checkout_data):
+def dispatch_started_checkout_event(email, customer_name, items, total, checkout_url, items_html, cart_token):
     """
-    Envía evento de inicio de checkout a Klaviyo para tracking de carrito abandonado.
+    Envía evento Started Checkout a Klaviyo para tracking de carrito abandonado.
     Solo Klaviyo (no Brevo) — es una funcionalidad exclusiva de Klaviyo.
     """
     if _use_klaviyo():
         try:
             from src.services.klaviyo_service import klaviyo_track_started_checkout
-            return klaviyo_track_started_checkout(checkout_data)
+            return klaviyo_track_started_checkout(
+                email=email,
+                customer_name=customer_name,
+                items=items,
+                total=total,
+                checkout_url=checkout_url,
+                items_html=items_html,
+                cart_token=cart_token
+            )
         except Exception as e:
             print(f"⚠️ [DISPATCHER] Error Klaviyo started checkout: {e}")
             return False
