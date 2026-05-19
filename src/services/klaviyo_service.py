@@ -713,3 +713,92 @@ def klaviyo_send_product_notification_confirmation(product_name, customer_name, 
         properties=properties,
         profile_attrs={"first_name": customer_name.split(' ')[0] if customer_name else ''}
     )
+
+
+def klaviyo_send_post_purchase_event(order_data):
+    """
+    Envía evento 'Mikels Post Purchase' a Klaviyo.
+    Genera un cupón de 10% para la próxima compra (un solo uso, vinculado al email)
+    e incluye CustomerName, Items y CouponCode en el evento.
+    El flow en Klaviyo se encarga de enviar el email al cliente.
+    """
+    customer_email = order_data.get('customer_email')
+    if not customer_email or customer_email == 'N/A':
+        print("⚠️ [KLAVIYO] No se puede enviar post-purchase: email no disponible")
+        return False
+    
+    customer_name = order_data.get('customer_name', 'N/A')
+    items = order_data.get('items', [])
+    order_number = order_data.get('order_number', '')
+    
+    # Generar cupón de 10% para próxima compra
+    coupon_code = None
+    try:
+        from src.models.coupon import Coupon, db
+        import secrets as sec
+        
+        # Generar código único tipo VUELVE10-XXXXXXXX
+        code = f"VUELVE10-{sec.token_hex(4).upper()}"
+        
+        # Verificar que no existe ya un cupón post-compra para este email
+        existing = Coupon.query.filter_by(email=customer_email, discount_percent=10, used=False).filter(
+            Coupon.code.like('VUELVE10-%')
+        ).first()
+        
+        if existing:
+            # Ya tiene un cupón de próxima compra sin usar, reutilizar
+            coupon_code = existing.code
+            print(f"♻️ Reutilizando cupón post-compra existente: {coupon_code} para {customer_email}")
+        else:
+            # Crear nuevo cupón
+            new_coupon = Coupon(
+                code=code,
+                email=customer_email,
+                discount_percent=10,
+                used=False
+            )
+            db.session.add(new_coupon)
+            db.session.commit()
+            coupon_code = code
+            print(f"✅ Cupón post-compra generado: {coupon_code} para {customer_email}")
+    except Exception as coupon_err:
+        print(f"⚠️ Error generando cupón post-compra: {coupon_err}")
+        # Continuar sin cupón — el evento se envía igual
+    
+    # Construir array de Items con ProductName
+    items_for_event = []
+    for item in items:
+        items_for_event.append({
+            "ProductName": item.get('name', 'Producto'),
+            "Quantity": item.get('quantity', 1),
+            "Price": item.get('price', 0)
+        })
+    
+    properties = {
+        "CustomerName": customer_name,
+        "Items": items_for_event,
+        "CouponCode": coupon_code or '',
+        "OrderNumber": order_number,
+        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
+        "Source": "mikels-earth-backend",
+        # Aliases en snake_case
+        "customer_name": customer_name,
+        "items": items_for_event,
+        "coupon_code": coupon_code or '',
+        "order_number": order_number
+    }
+    
+    profile_attrs = {}
+    if customer_name and customer_name != 'N/A':
+        parts = customer_name.split(' ', 1)
+        profile_attrs["first_name"] = parts[0]
+        if len(parts) > 1:
+            profile_attrs["last_name"] = parts[1]
+    
+    return send_klaviyo_event(
+        metric_name="Mikels Post Purchase",
+        profile_email=customer_email,
+        properties=properties,
+        unique_id=f"post-purchase-{order_number}",
+        profile_attrs=profile_attrs
+    )

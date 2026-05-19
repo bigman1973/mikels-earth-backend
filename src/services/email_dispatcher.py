@@ -279,6 +279,22 @@ def dispatch_started_checkout(checkout_data):
     return False
 
 
+def dispatch_post_purchase_event(order_data):
+    """
+    Genera un cupón de 10% para la próxima compra y envía evento 'Mikels Post Purchase'
+    a Klaviyo con CustomerName, Items y CouponCode.
+    El flow en Klaviyo se encarga de enviar el email al cliente.
+    """
+    if _use_klaviyo():
+        try:
+            from src.services.klaviyo_service import klaviyo_send_post_purchase_event
+            return klaviyo_send_post_purchase_event(order_data)
+        except Exception as e:
+            print(f"⚠️ [DISPATCHER] Error Klaviyo post-purchase event: {e}")
+            return False
+    return False
+
+
 def dispatch_product_notification_request(product_name, customer_name, customer_email, customer_phone=''):
     """
     Envía notificación de solicitud de producto (email interno)

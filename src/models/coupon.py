@@ -17,7 +17,7 @@ class Coupon(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(50), unique=True, nullable=False, index=True)
-    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    email = db.Column(db.String(255), nullable=False, index=True)
     discount_percent = db.Column(db.Integer, default=10, nullable=False)
     used = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

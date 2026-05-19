@@ -61,6 +61,15 @@ def create_tables():
         try:
             db.create_all()
             print("Database tables created successfully")
+            # Migración: quitar unique constraint del email en coupons
+            # para permitir múltiples cupones por email (newsletter + post-compra + reseña)
+            try:
+                db.session.execute(db.text('ALTER TABLE coupons DROP CONSTRAINT IF EXISTS coupons_email_key'))
+                db.session.execute(db.text('ALTER TABLE coupons DROP CONSTRAINT IF EXISTS uq_coupons_email'))
+                db.session.commit()
+            except Exception as mig_err:
+                db.session.rollback()
+                print(f"Migration note (non-critical): {mig_err}")
             app.tables_created = True
         except Exception as e:
             print(f"Error creating tables: {e}")

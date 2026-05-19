@@ -364,9 +364,16 @@ def stripe_webhook():
                 dispatch_order_notification(order_data)
                 dispatch_order_confirmation(order_data)
                 
+                # Generar cupón de 10% para próxima compra y enviar evento a Klaviyo
+                try:
+                    from src.services.email_dispatcher import dispatch_post_purchase_event
+                    dispatch_post_purchase_event(order_data)
+                except Exception as coupon_post_err:
+                    print(f"⚠️ Error dispatching post-purchase event: {coupon_post_err}")
+                
                 # Marcar cupón como usado si se usó uno
                 discount_code = session['metadata'].get('discount_code')
-                if discount_code and discount_code.startswith('MIKELS10-'):
+                if discount_code and (discount_code.startswith('MIKELS10-') or discount_code.startswith('VUELVE10-') or discount_code.startswith('GRACIAS10-')):
                     try:
                         # Marcar cupón como usado usando el modelo Coupon (PostgreSQL)
                         from src.models.coupon import Coupon
