@@ -309,3 +309,113 @@ def update_klaviyo_template(template_id):
         return jsonify({'success': True, 'message': 'Template updated'}), 200
     else:
         return jsonify({'error': resp.text, 'status': resp.status_code}), resp.status_code
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/create-template', methods=['POST'])
+def create_klaviyo_template():
+    """Crear un nuevo template en Klaviyo"""
+    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    body = request.get_json()
+    name = body.get('name')
+    html = body.get('html')
+    
+    if not name or not html:
+        return jsonify({'error': 'name and html fields required'}), 400
+    
+    headers = _get_klaviyo_headers()
+    
+    payload = {
+        "data": {
+            "type": "template",
+            "attributes": {
+                "name": name,
+                "html": html
+            }
+        }
+    }
+    
+    resp = requests.post(f"{KLAVIYO_API_URL}/templates", headers=headers, json=payload)
+    
+    if resp.status_code in [200, 201]:
+        data = resp.json()
+        template_id = data.get('data', {}).get('id')
+        return jsonify({'success': True, 'template_id': template_id}), 200
+    else:
+        return jsonify({'error': resp.text, 'status': resp.status_code}), resp.status_code
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/list-flows', methods=['GET'])
+def list_klaviyo_flows():
+    """Listar todos los flows de Klaviyo"""
+    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    headers = _get_klaviyo_headers()
+    resp = requests.get(f"{KLAVIYO_API_URL}/flows", headers=headers)
+    
+    if resp.status_code == 200:
+        data = resp.json()
+        flows = []
+        for f in data.get('data', []):
+            flows.append({
+                'id': f['id'],
+                'name': f.get('attributes', {}).get('name', ''),
+                'status': f.get('attributes', {}).get('status', ''),
+                'trigger_type': f.get('attributes', {}).get('trigger_type', '')
+            })
+        return jsonify({'flows': flows}), 200
+    else:
+        return jsonify({'error': resp.text}), resp.status_code
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/flow-actions/<flow_id>', methods=['GET'])
+def get_flow_actions(flow_id):
+    """Obtener las acciones de un flow específico"""
+    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    headers = _get_klaviyo_headers()
+    resp = requests.get(f"{KLAVIYO_API_URL}/flows/{flow_id}/flow-actions", headers=headers)
+    
+    if resp.status_code == 200:
+        data = resp.json()
+        actions = []
+        for a in data.get('data', []):
+            actions.append({
+                'id': a['id'],
+                'type': a.get('attributes', {}).get('action_type', ''),
+                'settings': a.get('attributes', {}).get('settings', {})
+            })
+        return jsonify({'actions': actions}), 200
+    else:
+        return jsonify({'error': resp.text}), resp.status_code
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/update-flow-action/<action_id>', methods=['PUT'])
+def update_flow_action(action_id):
+    """Actualizar los settings de un flow action (para cambiar template)"""
+    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    body = request.get_json()
+    
+    headers = _get_klaviyo_headers()
+    
+    payload = {
+        "data": {
+            "type": "flow-action",
+            "id": action_id,
+            "attributes": {
+                "settings": body.get('settings', {})
+            }
+        }
+    }
+    
+    resp = requests.patch(f"{KLAVIYO_API_URL}/flow-actions/{action_id}", headers=headers, json=payload)
+    
+    if resp.status_code in [200, 204]:
+        return jsonify({'success': True}), 200
+    else:
+        return jsonify({'error': resp.text, 'status': resp.status_code}), resp.status_code
