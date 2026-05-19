@@ -109,7 +109,7 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
         return False
 
 
-def add_contact_to_klaviyo(email, first_name=None, last_name=None, source=None):
+def add_contact_to_klaviyo(email, first_name=None, last_name=None, phone=None, source=None):
     """
     Añade o actualiza un perfil en Klaviyo, lo suscribe a email marketing
     y lo añade a la lista 'Newsletter Mikel's Earth'.
@@ -118,6 +118,7 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, source=None):
         email: Email del contacto
         first_name: Nombre (opcional)
         last_name: Apellido (opcional)
+        phone: Teléfono (opcional)
         source: Fuente de la suscripción (opcional)
     
     Returns:
@@ -137,6 +138,8 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, source=None):
         profile_attrs["first_name"] = first_name
     if last_name:
         profile_attrs["last_name"] = last_name
+    if phone:
+        profile_attrs["phone_number"] = phone
     
     profile_properties = {}
     if source:

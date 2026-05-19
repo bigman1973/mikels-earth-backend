@@ -137,7 +137,7 @@ def dispatch_newsletter_welcome(email, coupon_code="BIENVENIDA10"):
     return klaviyo_ok
 
 
-def dispatch_add_contact(email):
+def dispatch_add_contact(email, first_name=None, last_name=None, phone=None, source=None):
     """
     Añade contacto a la plataforma de email marketing (Klaviyo o Brevo)
     """
@@ -146,7 +146,13 @@ def dispatch_add_contact(email):
     if _use_klaviyo():
         try:
             from src.services.klaviyo_service import add_contact_to_klaviyo
-            klaviyo_result = add_contact_to_klaviyo(email, source="Newsletter Website")
+            klaviyo_result = add_contact_to_klaviyo(
+                email, 
+                first_name=first_name, 
+                last_name=last_name,
+                phone=phone,
+                source=source or "Newsletter Website"
+            )
         except Exception as e:
             print(f"⚠️ [DISPATCHER] Error Klaviyo add contact: {e}")
     

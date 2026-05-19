@@ -8,12 +8,17 @@ newsletter_bp = Blueprint('newsletter', __name__)
 @newsletter_bp.route('/subscribe', methods=['POST'])
 def subscribe_newsletter():
     """
-    Endpoint para suscribirse al newsletter
+    Endpoint para suscribirse al newsletter.
+    Acepta: email (obligatorio), first_name, last_name (obligatorios desde frontend), phone (opcional)
     """
     try:
         data = request.get_json()
         email = data.get('email')
+        first_name = data.get('first_name', '').strip()
+        last_name = data.get('last_name', '').strip()
+        phone = data.get('phone', '').strip()
         coupon_code = data.get('coupon_code')  # Cupón generado por el microservicio
+        source = data.get('source', 'website')
         
         if not email:
             return jsonify({'error': 'Email is required'}), 400
@@ -30,8 +35,14 @@ def subscribe_newsletter():
                 # Si falla, usar código genérico como fallback
                 coupon_code = "BIENVENIDA10"
         
-        # Añadir contacto a Klaviyo + Brevo (durante transición)
-        contact_result = dispatch_add_contact(email)
+        # Añadir contacto a Klaviyo con nombre, apellidos y teléfono
+        contact_result = dispatch_add_contact(
+            email, 
+            first_name=first_name, 
+            last_name=last_name, 
+            phone=phone,
+            source=source
+        )
         
         # Enviar notificación a info@mikels.es (Klaviyo + Brevo fallback)
         dispatch_newsletter_subscription_notification(email, coupon_code)
