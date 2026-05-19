@@ -228,3 +228,84 @@ def create_klaviyo_campaign():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/list-templates', methods=['GET'])
+def list_klaviyo_templates():
+    """Listar todos los templates de Klaviyo"""
+    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    headers = _get_klaviyo_headers()
+    resp = requests.get(f"{KLAVIYO_API_URL}/templates", headers=headers)
+    
+    if resp.status_code == 200:
+        data = resp.json()
+        templates = []
+        for t in data.get('data', []):
+            templates.append({
+                'id': t['id'],
+                'name': t.get('attributes', {}).get('name', ''),
+                'updated': t.get('attributes', {}).get('updated', '')
+            })
+        return jsonify({'templates': templates}), 200
+    else:
+        return jsonify({'error': resp.text}), resp.status_code
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/get-template/<template_id>', methods=['GET'])
+def get_klaviyo_template(template_id):
+    """Obtener el HTML de un template específico"""
+    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    headers = _get_klaviyo_headers()
+    resp = requests.get(f"{KLAVIYO_API_URL}/templates/{template_id}", headers=headers)
+    
+    if resp.status_code == 200:
+        data = resp.json()
+        attrs = data.get('data', {}).get('attributes', {})
+        return jsonify({
+            'id': template_id,
+            'name': attrs.get('name', ''),
+            'html': attrs.get('html', ''),
+            'text': attrs.get('text', '')
+        }), 200
+    else:
+        return jsonify({'error': resp.text}), resp.status_code
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/update-template/<template_id>', methods=['PUT'])
+def update_klaviyo_template(template_id):
+    """Actualizar el HTML de un template"""
+    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    body = request.get_json()
+    new_html = body.get('html')
+    new_name = body.get('name')
+    
+    if not new_html:
+        return jsonify({'error': 'html field required'}), 400
+    
+    headers = _get_klaviyo_headers()
+    
+    payload = {
+        "data": {
+            "type": "template",
+            "id": template_id,
+            "attributes": {
+                "html": new_html
+            }
+        }
+    }
+    
+    if new_name:
+        payload["data"]["attributes"]["name"] = new_name
+    
+    resp = requests.patch(f"{KLAVIYO_API_URL}/templates/{template_id}", headers=headers, json=payload)
+    
+    if resp.status_code in [200, 204]:
+        return jsonify({'success': True, 'message': 'Template updated'}), 200
+    else:
+        return jsonify({'error': resp.text, 'status': resp.status_code}), resp.status_code
