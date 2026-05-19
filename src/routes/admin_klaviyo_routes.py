@@ -331,6 +331,7 @@ def create_klaviyo_template():
             "type": "template",
             "attributes": {
                 "name": name,
+                "editor_type": "CODE",
                 "html": html
             }
         }
