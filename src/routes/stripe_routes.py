@@ -385,6 +385,22 @@ def stripe_webhook():
                             print(f"Coupon validation failed: {result}")
                     except Exception as coupon_error:
                         print(f"Error marking coupon as used: {str(coupon_error)}")
+                
+                # Marcar carritos abandonados de este email como convertidos
+                try:
+                    from src.models.abandoned_cart import AbandonedCart
+                    from src.models.user import db
+                    carts = AbandonedCart.query.filter_by(
+                        email=order_data['customer_email'],
+                        converted=False
+                    ).all()
+                    for cart in carts:
+                        cart.converted = True
+                    if carts:
+                        db.session.commit()
+                        print(f"✅ {len(carts)} abandoned cart(s) marked as converted for {order_data['customer_email']}")
+                except Exception as cart_err:
+                    print(f"⚠️ Error marking abandoned carts as converted: {cart_err}")
             except Exception as e:
                 print(f"Error sending order notification: {str(e)}")
         
