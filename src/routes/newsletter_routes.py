@@ -45,7 +45,7 @@ def subscribe_newsletter():
         )
         
         # Enviar notificación a info@mikels.es (Klaviyo + Brevo fallback)
-        dispatch_newsletter_subscription_notification(email, coupon_code)
+        dispatch_newsletter_subscription_notification(email, coupon_code, first_name=first_name, last_name=last_name, phone=phone)
         
         # Enviar email de bienvenida al suscriptor con código de descuento único (Klaviyo + Brevo fallback)
         dispatch_newsletter_welcome(email, coupon_code)

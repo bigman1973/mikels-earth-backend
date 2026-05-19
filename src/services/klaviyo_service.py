@@ -417,7 +417,7 @@ def klaviyo_notify_new_subscription(subscription_data):
     )
 
 
-def klaviyo_notify_newsletter_subscription(email, coupon_code=None):
+def klaviyo_notify_newsletter_subscription(email, coupon_code=None, first_name=None, last_name=None, phone=None):
     """
     Envía evento de suscripción al newsletter a Klaviyo
     """
@@ -425,6 +425,10 @@ def klaviyo_notify_newsletter_subscription(email, coupon_code=None):
     
     properties = {
         "SubscriberEmail": email,
+        "SubscriberName": f"{first_name or ''} {last_name or ''}".strip() or "No proporcionado",
+        "SubscriberFirstName": first_name or "No proporcionado",
+        "SubscriberLastName": last_name or "No proporcionado",
+        "SubscriberPhone": phone or "No proporcionado",
         "SubscriptionDate": datetime.now().strftime('%d/%m/%Y %H:%M'),
         "CouponCode": coupon_code or "No generado",
         "Source": "mikels-earth-website"

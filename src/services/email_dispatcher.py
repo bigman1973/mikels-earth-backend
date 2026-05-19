@@ -89,7 +89,7 @@ def dispatch_subscription_notification(subscription_data):
     return klaviyo_ok
 
 
-def dispatch_newsletter_subscription_notification(email, coupon_code=None):
+def dispatch_newsletter_subscription_notification(email, coupon_code=None, first_name=None, last_name=None, phone=None):
     """
     Envía notificación interna de nueva suscripción al newsletter
     """
@@ -98,7 +98,7 @@ def dispatch_newsletter_subscription_notification(email, coupon_code=None):
     if _use_klaviyo():
         try:
             from src.services.klaviyo_service import klaviyo_notify_newsletter_subscription
-            klaviyo_ok = klaviyo_notify_newsletter_subscription(email, coupon_code)
+            klaviyo_ok = klaviyo_notify_newsletter_subscription(email, coupon_code, first_name=first_name, last_name=last_name, phone=phone)
         except Exception as e:
             print(f"⚠️ [DISPATCHER] Error Klaviyo newsletter notification: {e}")
     
