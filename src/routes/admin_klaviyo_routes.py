@@ -10,7 +10,7 @@ import requests
 admin_klaviyo_bp = Blueprint('admin_klaviyo', __name__)
 
 KLAVIYO_API_URL = "https://a.klaviyo.com/api"
-KLAVIYO_REVISION = "2024-10-15"
+KLAVIYO_REVISION = "2025-04-15"
 ADMIN_KEY = "mikels-admin-2026"
 
 
