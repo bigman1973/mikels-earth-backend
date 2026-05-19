@@ -22,9 +22,11 @@ from src.routes.blog_routes import blog_bp  # Blog automatizado con Brevo
 from src.routes.review_routes import review_bp  # Sistema de reseñas
 from src.routes.abandoned_cart_routes import abandoned_cart_bp  # Carrito abandonado
 from src.routes.admin_klaviyo_routes import admin_klaviyo_bp  # Admin Klaviyo temporal
+from src.routes.product_notify_routes import product_notify_bp  # Avísame cuando esté disponible
 from src.models.blog import BlogPost  # Modelo del blog
 from src.models.review import Review  # Modelo de reseñas
 from src.models.abandoned_cart import AbandonedCart  # Modelo de carrito abandonado
+from src.models.product_notification import ProductNotification  # Modelo notificación producto
 
 # Load environment variables
 load_dotenv()
@@ -88,6 +90,7 @@ app.register_blueprint(blog_bp, url_prefix='/api/blog')  # Blog endpoints
 app.register_blueprint(review_bp, url_prefix='/api/reviews')  # Reviews endpoints
 app.register_blueprint(abandoned_cart_bp, url_prefix='/api/abandoned-cart')  # Carrito abandonado
 app.register_blueprint(admin_klaviyo_bp, url_prefix='/api')  # Admin Klaviyo
+app.register_blueprint(product_notify_bp, url_prefix='/api')  # Avísame cuando esté disponible
 
 # Database configuration for coupons and user management
 # Use DATABASE_URL from Railway (PostgreSQL) or fallback to SQLite for local dev

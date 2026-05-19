@@ -349,3 +349,33 @@ def dispatch_product_notification_confirmation(product_name, customer_name, cust
             return False
     
     return klaviyo_ok
+
+
+def dispatch_product_notify_subscribe(email, name, product_name, product_id):
+    """
+    Envía evento 'Mikels Product Notification' a Klaviyo cuando un cliente
+    se apunta a la lista de espera de un producto agotado.
+    """
+    if _use_klaviyo():
+        try:
+            from src.services.klaviyo_service import klaviyo_track_product_notify_subscribe
+            return klaviyo_track_product_notify_subscribe(email, name, product_name, product_id)
+        except Exception as e:
+            print(f"⚠️ [DISPATCHER] Error Klaviyo product notify subscribe: {e}")
+            return False
+    return False
+
+
+def dispatch_product_back_in_stock(email, name, product_name, product_id):
+    """
+    Envía evento 'Product Back In Stock' a Klaviyo cuando un producto
+    vuelve a estar disponible, para cada suscriptor que lo esperaba.
+    """
+    if _use_klaviyo():
+        try:
+            from src.services.klaviyo_service import klaviyo_track_product_back_in_stock
+            return klaviyo_track_product_back_in_stock(email, name, product_name, product_id)
+        except Exception as e:
+            print(f"⚠️ [DISPATCHER] Error Klaviyo product back in stock: {e}")
+            return False
+    return False

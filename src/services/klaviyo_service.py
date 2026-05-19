@@ -860,3 +860,71 @@ def klaviyo_track_started_checkout(email, customer_name, items, total, checkout_
         unique_id=f"started-checkout-{cart_token}",
         profile_attrs=profile_attrs
     )
+
+
+def klaviyo_track_product_notify_subscribe(email, name, product_name, product_id):
+    """
+    Envía evento 'Mikels Product Notification' a Klaviyo cuando un cliente
+    se apunta a la lista de espera de un producto agotado.
+    Dispara el flow de confirmación ("Te avisaremos cuando esté disponible").
+    """
+    properties = {
+        "product_name": product_name,
+        "product_id": product_id,
+        "ProductName": product_name,
+        "ProductId": product_id,
+        "CustomerName": name or '',
+        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
+        "Source": "mikels-earth-website"
+    }
+
+    profile_attrs = {}
+    if name:
+        parts = name.split(' ', 1)
+        profile_attrs["first_name"] = parts[0]
+        if len(parts) > 1:
+            profile_attrs["last_name"] = parts[1]
+
+    return send_klaviyo_event(
+        metric_name="Mikels Product Notification",
+        profile_email=email,
+        properties=properties,
+        unique_id=f"product-notify-{product_id}-{email}",
+        profile_attrs=profile_attrs
+    )
+
+
+def klaviyo_track_product_back_in_stock(email, name, product_name, product_id):
+    """
+    Envía evento 'Product Back In Stock' a Klaviyo cuando un producto
+    vuelve a estar disponible. Se envía a cada suscriptor que lo esperaba.
+    Dispara el flow de "Ya está disponible".
+    """
+    product_url = f"https://www.mikels.es/producto/{product_id}"
+
+    properties = {
+        "product_name": product_name,
+        "product_id": product_id,
+        "product_url": product_url,
+        "ProductName": product_name,
+        "ProductId": product_id,
+        "ProductURL": product_url,
+        "CustomerName": name or '',
+        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
+        "Source": "mikels-earth-backend"
+    }
+
+    profile_attrs = {}
+    if name:
+        parts = name.split(' ', 1)
+        profile_attrs["first_name"] = parts[0]
+        if len(parts) > 1:
+            profile_attrs["last_name"] = parts[1]
+
+    return send_klaviyo_event(
+        metric_name="Product Back In Stock",
+        profile_email=email,
+        properties=properties,
+        unique_id=f"back-in-stock-{product_id}-{email}-{datetime.now().strftime('%Y%m%d')}",
+        profile_attrs=profile_attrs
+    )
