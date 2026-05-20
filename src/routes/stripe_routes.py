@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 import secrets
 from src.services.whatsapp_service import notify_new_order, notify_new_subscription
-from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification, dispatch_started_checkout
+from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification, dispatch_started_checkout_event
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
@@ -126,7 +126,15 @@ def create_checkout_session():
                 'order_number': order_number,
                 'checkout_url': f"{frontend_url}/checkout"
             }
-            dispatch_started_checkout(checkout_data)
+            dispatch_started_checkout_event(
+                email=checkout_data['customer_email'],
+                customer_name=checkout_data['customer_name'],
+                items=checkout_data['items'],
+                total=checkout_data['total'],
+                checkout_url=checkout_data['checkout_url'],
+                items_html='',
+                cart_token=checkout_data.get('order_number', '')
+            )
         except Exception as checkout_err:
             print(f"\u26a0\ufe0f Error tracking started checkout: {checkout_err}")
             # No bloquear el checkout si falla el tracking
