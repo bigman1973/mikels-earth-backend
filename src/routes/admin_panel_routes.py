@@ -312,26 +312,71 @@ def get_clients():
 @admin_required
 def get_dashboard():
     """Devuelve datos resumidos para el dashboard del admin"""
-    from src.models.order import Order
-    from src.models.review import Review
+    # Datos locales (con protección por si las tablas no existen)
+    total_orders = 0
+    total_reviews = 0
+    recent_orders = []
+    try:
+        from src.models.order import Order
+        total_orders = Order.query.count()
+        # Últimos 5 pedidos
+        latest = Order.query.order_by(Order.created_at.desc()).limit(5).all()
+        recent_orders = [{
+            'id': o.id,
+            'email': o.customer_email,
+            'total': o.total,
+            'status': o.status,
+            'date': o.created_at.isoformat() if o.created_at else None
+        } for o in latest]
+    except Exception as e:
+        print(f'[Dashboard] Error cargando pedidos: {e}')
 
-    # Datos locales
-    total_orders = Order.query.count() if Order.query else 0
-    total_reviews = Review.query.count() if Review.query else 0
+    try:
+        from src.models.review import Review
+        total_reviews = Review.query.count()
+    except Exception as e:
+        print(f'[Dashboard] Error cargando reseñas: {e}')
 
-    # Datos de Holded (con cache simple)
-    holded_products = holded_get_products()
-    low_stock = [p for p in holded_products if p.get('hasStock') and p.get('stock', 0) < 50 and p.get('stock', 0) >= 0]
+    # Datos de Holded (con protección por timeout)
+    holded_products = []
+    low_stock = []
+    holded_status = 'connected'
+    try:
+        holded_products = holded_get_products()
+        low_stock = [p for p in holded_products if p.get('hasStock') and p.get('stock', 0) < 50 and p.get('stock', 0) >= 0]
+    except Exception as e:
+        holded_status = 'error'
+        print(f'[Dashboard] Error conectando con Holded: {e}')
+
+    # Notificaciones de producto pendientes
+    total_notifications = 0
+    try:
+        from src.models.product_notification import ProductNotification
+        total_notifications = ProductNotification.query.filter_by(notified=False).count()
+    except Exception as e:
+        print(f'[Dashboard] Error cargando notificaciones: {e}')
+
+    # Carritos abandonados
+    total_abandoned = 0
+    try:
+        from src.models.abandoned_cart import AbandonedCart
+        total_abandoned = AbandonedCart.query.filter_by(recovered=False).count()
+    except Exception as e:
+        print(f'[Dashboard] Error cargando carritos: {e}')
 
     return jsonify({
         'total_orders': total_orders,
         'total_reviews': total_reviews,
         'total_products_holded': len(holded_products),
+        'total_notifications': total_notifications,
+        'total_abandoned_carts': total_abandoned,
         'low_stock_alerts': [{
             'name': p.get('name'),
             'sku': p.get('sku'),
             'stock': p.get('stock')
         } for p in low_stock],
+        'recent_orders': recent_orders,
+        'holded_status': holded_status,
         'last_updated': datetime.utcnow().isoformat()
     })
 
