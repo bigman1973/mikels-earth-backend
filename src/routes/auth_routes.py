@@ -145,12 +145,16 @@ def microsoft_callback():
     admin_user = AdminUser.query.filter_by(microsoft_id=microsoft_id).first()
 
     if not admin_user:
-        # Primer login - crear usuario con rol por defecto
+        # Primer login - determinar rol
+        # Si no hay ningún usuario admin, el primero será admin
+        existing_admins = AdminUser.query.count()
+        default_role = 'admin' if existing_admins == 0 else 'viewer'
+        
         admin_user = AdminUser(
             microsoft_id=microsoft_id,
             email=email.lower(),
             name=name,
-            role='viewer'  # Rol por defecto, el admin puede cambiarlo después
+            role=default_role
         )
         db.session.add(admin_user)
 
@@ -167,6 +171,20 @@ def microsoft_callback():
 
     # Redirigir al frontend con el token
     return redirect(f'{FRONTEND_URL}/admin/dashboard?token={token}')
+
+
+@auth_bp.route('/promote-first-admin', methods=['POST'])
+def promote_first_admin():
+    """Endpoint temporal para promover al primer usuario a admin"""
+    secret = request.headers.get('X-Promote-Secret', '')
+    if secret != 'mK9xR4vT2pL7wQ8nB5jF3hY6cA1dG0eZ':
+        return jsonify({'error': 'No autorizado'}), 403
+    admin_user = AdminUser.query.first()
+    if admin_user:
+        admin_user.role = 'admin'
+        db.session.commit()
+        return jsonify({'message': f'{admin_user.email} promovido a admin', 'email': admin_user.email})
+    return jsonify({'error': 'No hay usuarios'}), 404
 
 
 @auth_bp.route('/me')
