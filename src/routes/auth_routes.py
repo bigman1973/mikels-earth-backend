@@ -173,20 +173,6 @@ def microsoft_callback():
     return redirect(f'{FRONTEND_URL}/admin/dashboard?token={token}')
 
 
-@auth_bp.route('/promote-first-admin', methods=['POST'])
-def promote_first_admin():
-    """Endpoint temporal para promover al primer usuario a admin"""
-    secret = request.headers.get('X-Promote-Secret', '')
-    if secret != 'mK9xR4vT2pL7wQ8nB5jF3hY6cA1dG0eZ':
-        return jsonify({'error': 'No autorizado'}), 403
-    admin_user = AdminUser.query.first()
-    if admin_user:
-        admin_user.role = 'admin'
-        db.session.commit()
-        return jsonify({'message': f'{admin_user.email} promovido a admin', 'email': admin_user.email})
-    return jsonify({'error': 'No hay usuarios'}), 404
-
-
 @auth_bp.route('/me')
 @admin_required
 def get_current_user():
