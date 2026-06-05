@@ -47,6 +47,14 @@ class Order(db.Model):
     def __repr__(self):
         return f'<Order {self.order_number}>'
     
+    @property
+    def status(self):
+        """Campo combinado de estado para el frontend del admin panel.
+        Prioridad: order_status si ya se ha gestionado, sino payment_status."""
+        if self.order_status in ('shipped', 'delivered', 'cancelled'):
+            return self.order_status
+        return self.payment_status or 'pending'
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -65,6 +73,8 @@ class Order(db.Model):
             'currency': self.currency,
             'payment_status': self.payment_status,
             'order_status': self.order_status,
+            'status': self.status,
+            'stripe_checkout_session_id': self.stripe_checkout_session_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'paid_at': self.paid_at.isoformat() if self.paid_at else None

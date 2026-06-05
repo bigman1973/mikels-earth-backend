@@ -193,9 +193,9 @@ def create_order_in_holded(order_id):
 
     # Buscar o crear contacto en Holded
     contact_id = holded_get_or_create_contact(
-        email=order.email,
+        email=order.customer_email,
         name=order.customer_name,
-        phone=order.phone or '',
+        phone=order.customer_phone or '',
         address_data={
             'address': order.shipping_address or '',
             'city': order.shipping_city or '',
@@ -224,7 +224,7 @@ def create_order_in_holded(order_id):
     success, result = holded_create_sales_order(
         contact_id=contact_id,
         items=items,
-        notes=f'Pedido web #{order.id} - Stripe: {order.stripe_session_id or "N/A"}'
+        notes=f'Pedido web #{order.id} - Stripe: {order.stripe_checkout_session_id or "N/A"}'
     )
 
     if success:
@@ -246,7 +246,7 @@ def create_invoice_in_holded(order_id):
 
     # Buscar contacto en Holded
     contact_id = holded_get_or_create_contact(
-        email=order.email,
+        email=order.customer_email,
         name=order.customer_name
     )
 
@@ -323,7 +323,9 @@ def get_dashboard():
         latest = Order.query.order_by(Order.created_at.desc()).limit(5).all()
         recent_orders = [{
             'id': o.id,
+            'order_number': o.order_number,
             'email': o.customer_email,
+            'customer_name': o.customer_name,
             'total': o.total,
             'status': o.status,
             'date': o.created_at.isoformat() if o.created_at else None
