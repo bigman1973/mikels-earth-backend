@@ -337,7 +337,8 @@ def stripe_webhook():
                 
                 # Guardar pedido en la base de datos
                 try:
-                    from src.models.order import Order, db
+                    from src.models.order import Order
+                    from src.models.user import db
                     new_order = Order(
                         order_number=order_number,
                         customer_email=order_data['customer_email'],
