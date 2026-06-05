@@ -224,6 +224,56 @@ def holded_get_invoice_pdf(document_id):
 
 
 # ============================================================
+# DOCUMENTOS DE UN CONTACTO
+# ============================================================
+
+def holded_get_contact(contact_id):
+    """Obtiene un contacto específico de Holded por ID"""
+    try:
+        response = requests.get(f'{HOLDED_BASE_URL}/contacts/{contact_id}', headers=HEADERS, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        print(f"[Holded] Error obteniendo contacto {contact_id}: {e}")
+        return None
+
+
+def holded_get_contact_invoices(contact_id):
+    """Obtiene todas las facturas de un contacto específico de Holded"""
+    try:
+        response = requests.get(
+            f'{HOLDED_BASE_URL}/documents/invoice',
+            headers=HEADERS,
+            params={'contactId': contact_id},
+            timeout=20
+        )
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except Exception as e:
+        print(f"[Holded] Error obteniendo facturas del contacto {contact_id}: {e}")
+        return []
+
+
+def holded_get_contact_salesorders(contact_id):
+    """Obtiene todos los pedidos de venta de un contacto específico de Holded"""
+    try:
+        response = requests.get(
+            f'{HOLDED_BASE_URL}/documents/salesorder',
+            headers=HEADERS,
+            params={'contactId': contact_id},
+            timeout=20
+        )
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except Exception as e:
+        print(f"[Holded] Error obteniendo pedidos del contacto {contact_id}: {e}")
+        return []
+
+
+# ============================================================
 # ALMACENES Y STOCK
 # ============================================================
 

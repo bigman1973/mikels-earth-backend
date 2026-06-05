@@ -9,12 +9,15 @@ from src.services.holded_service import (
     holded_get_product,
     holded_update_product,
     holded_get_contacts,
+    holded_get_contact,
     holded_find_contact_by_email,
     holded_create_sales_order,
     holded_create_invoice,
     holded_get_invoice_pdf,
     holded_get_warehouses,
-    holded_get_or_create_contact
+    holded_get_or_create_contact,
+    holded_get_contact_invoices,
+    holded_get_contact_salesorders
 )
 from src.models.user import db
 from datetime import datetime
@@ -301,6 +304,152 @@ def get_clients():
             'total_invoiced': c.get('socialInvoiced', 0)
         } for c in clients],
         'total': len(clients)
+    })
+
+
+@admin_panel_bp.route('/clients/<client_id>', methods=['GET'])
+@admin_required
+def get_client_detail(client_id):
+    """Devuelve el detalle de un cliente con su historial de compras de Holded,
+    diferenciando pedidos online (web) del resto."""
+    from src.models.order import Order
+    
+    # Obtener datos del contacto en Holded
+    contact = holded_get_contact(client_id)
+    if not contact:
+        return jsonify({'error': 'Cliente no encontrado en Holded'}), 404
+    
+    # Obtener facturas y pedidos de venta del contacto
+    invoices = holded_get_contact_invoices(client_id)
+    salesorders = holded_get_contact_salesorders(client_id)
+    
+    # Obtener pedidos online de nuestra DB local (por email del contacto)
+    client_email = contact.get('email', '')
+    local_orders = []
+    local_order_numbers = set()
+    if client_email:
+        local_orders = Order.query.filter_by(customer_email=client_email).order_by(Order.created_at.desc()).all()
+        local_order_numbers = {o.order_number for o in local_orders}
+    
+    # Procesar facturas - marcar como online si coincide con un pedido local
+    processed_invoices = []
+    for inv in invoices:
+        # Determinar si es online: buscar en notas/desc si tiene referencia MKL- o si fue creada desde la web
+        is_online = False
+        notes = (inv.get('notes') or '') + ' ' + (inv.get('desc') or '')
+        
+        # Verificar si las notas contienen referencia a pedido web
+        if 'MKL-' in notes or 'mikels.es' in notes.lower() or 'pedido web' in notes.lower() or 'stripe' in notes.lower():
+            is_online = True
+        
+        # Verificar por tags
+        tags = inv.get('tags') or []
+        if any(t.lower() in ['web', 'online', 'ecommerce'] for t in tags):
+            is_online = True
+        
+        # Extraer items
+        items = []
+        for item in (inv.get('items') or []):
+            items.append({
+                'name': item.get('name', ''),
+                'units': item.get('units', 1),
+                'subtotal': item.get('subtotal', 0),
+                'discount': item.get('discount', 0)
+            })
+        
+        processed_invoices.append({
+            'id': inv.get('id'),
+            'type': 'invoice',
+            'number': inv.get('docNumber', ''),
+            'date': inv.get('date'),
+            'total': inv.get('total', 0),
+            'subtotal': inv.get('subtotal', 0),
+            'status': inv.get('status', ''),
+            'channel': 'online' if is_online else 'offline',
+            'notes': inv.get('notes', ''),
+            'items': items,
+            'currency': inv.get('currency', 'EUR')
+        })
+    
+    # Procesar pedidos de venta
+    processed_salesorders = []
+    for so in salesorders:
+        is_online = False
+        notes = (so.get('notes') or '') + ' ' + (so.get('desc') or '')
+        
+        if 'MKL-' in notes or 'mikels.es' in notes.lower() or 'pedido web' in notes.lower() or 'stripe' in notes.lower():
+            is_online = True
+        
+        tags = so.get('tags') or []
+        if any(t.lower() in ['web', 'online', 'ecommerce'] for t in tags):
+            is_online = True
+        
+        items = []
+        for item in (so.get('items') or []):
+            items.append({
+                'name': item.get('name', ''),
+                'units': item.get('units', 1),
+                'subtotal': item.get('subtotal', 0),
+                'discount': item.get('discount', 0)
+            })
+        
+        processed_salesorders.append({
+            'id': so.get('id'),
+            'type': 'salesorder',
+            'number': so.get('docNumber', ''),
+            'date': so.get('date'),
+            'total': so.get('total', 0),
+            'subtotal': so.get('subtotal', 0),
+            'status': so.get('status', ''),
+            'channel': 'online' if is_online else 'offline',
+            'notes': so.get('notes', ''),
+            'items': items,
+            'currency': so.get('currency', 'EUR')
+        })
+    
+    # Combinar y ordenar por fecha (más reciente primero)
+    all_documents = processed_invoices + processed_salesorders
+    all_documents.sort(key=lambda d: d.get('date') or 0, reverse=True)
+    
+    # Pedidos online de nuestra DB local (para enriquecer)
+    local_orders_data = [o.to_dict() for o in local_orders]
+    
+    # Estadísticas
+    total_online = sum(d['total'] for d in all_documents if d['channel'] == 'online')
+    total_offline = sum(d['total'] for d in all_documents if d['channel'] == 'offline')
+    count_online = len([d for d in all_documents if d['channel'] == 'online'])
+    count_offline = len([d for d in all_documents if d['channel'] == 'offline'])
+    
+    # Datos del contacto
+    bill_address = contact.get('billAddress') or {}
+    
+    return jsonify({
+        'client': {
+            'id': contact.get('id'),
+            'name': contact.get('name', ''),
+            'email': contact.get('email', ''),
+            'phone': contact.get('phone', ''),
+            'mobile': contact.get('mobile', ''),
+            'vatnumber': contact.get('vatnumber', ''),
+            'address': bill_address.get('address', ''),
+            'city': bill_address.get('city', ''),
+            'postal_code': bill_address.get('postalCode', ''),
+            'province': bill_address.get('province', ''),
+            'country': bill_address.get('country', ''),
+            'total_invoiced': contact.get('socialInvoiced', 0),
+            'created_at': contact.get('createdAt'),
+            'notes': contact.get('notes', '')
+        },
+        'documents': all_documents,
+        'local_orders': local_orders_data,
+        'stats': {
+            'total_documents': len(all_documents),
+            'total_online': total_online,
+            'total_offline': total_offline,
+            'count_online': count_online,
+            'count_offline': count_offline,
+            'total_all': total_online + total_offline
+        }
     })
 
 
