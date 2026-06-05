@@ -168,7 +168,7 @@ def sync_stripe_orders():
         starting_after = None
         
         while has_more:
-            params = {'limit': 100, 'status': 'complete', 'expand': ['data.shipping_details', 'data.customer_details']}
+            params = {'limit': 100, 'status': 'complete'}
             if starting_after:
                 params['starting_after'] = starting_after
             
