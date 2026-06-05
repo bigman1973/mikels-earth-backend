@@ -197,16 +197,36 @@ def sync_stripe_orders():
                     
                     # Extraer datos
                     metadata = session.metadata or {}
-                    customer_details = session.customer_details or {}
-                    shipping = session.shipping_details or {}
-                    shipping_address = shipping.get('address') or {} if isinstance(shipping, dict) else {}
-                    if hasattr(shipping, 'address') and shipping.address:
-                        shipping_address = {
-                            'line1': shipping.address.line1 or '',
-                            'city': shipping.address.city or '',
-                            'postal_code': shipping.address.postal_code or '',
-                            'country': shipping.address.country or ''
-                        }
+                    customer_details = session.customer_details
+                    shipping = session.shipping_details
+                    
+                    # Extraer dirección de envío (Stripe objects, no dicts)
+                    shipping_line = ''
+                    shipping_city = ''
+                    shipping_postal = ''
+                    shipping_country = ''
+                    customer_name_from_shipping = ''
+                    
+                    try:
+                        if shipping and shipping.address:
+                            shipping_line = shipping.address.line1 or ''
+                            shipping_city = shipping.address.city or ''
+                            shipping_postal = shipping.address.postal_code or ''
+                            shipping_country = shipping.address.country or ''
+                        if shipping and shipping.name:
+                            customer_name_from_shipping = shipping.name
+                    except (AttributeError, TypeError):
+                        pass
+                    
+                    # Fallback a metadata
+                    if not shipping_line:
+                        shipping_line = metadata.get('shipping_address', 'No especificada')
+                    if not shipping_city:
+                        shipping_city = metadata.get('shipping_city', 'No especificada')
+                    if not shipping_postal:
+                        shipping_postal = metadata.get('shipping_postal_code', '00000')
+                    if not shipping_country:
+                        shipping_country = metadata.get('shipping_country', 'ES')
                     
                     order_number = metadata.get('order_number', f'MKL-SYNC-{session.id[-8:]}')
                     
@@ -216,30 +236,28 @@ def sync_stripe_orders():
                         skipped += 1
                         continue
                     
+                    # Email del cliente
                     customer_email = ''
-                    if customer_details and hasattr(customer_details, 'email'):
-                        customer_email = customer_details.email or ''
-                    elif isinstance(customer_details, dict):
-                        customer_email = customer_details.get('email', '')
+                    try:
+                        if customer_details and customer_details.email:
+                            customer_email = customer_details.email
+                    except (AttributeError, TypeError):
+                        pass
                     if not customer_email:
                         customer_email = session.customer_email or metadata.get('customer_email', 'desconocido@mikels.es')
                     
-                    customer_name = ''
-                    if shipping and hasattr(shipping, 'name'):
-                        customer_name = shipping.name or ''
-                    if not customer_name:
-                        customer_name = metadata.get('customer_name', 'Cliente')
+                    # Nombre del cliente
+                    customer_name = customer_name_from_shipping or metadata.get('customer_name', 'Cliente')
                     
+                    # Teléfono del cliente
                     customer_phone = ''
-                    if customer_details and hasattr(customer_details, 'phone'):
-                        customer_phone = customer_details.phone or ''
+                    try:
+                        if customer_details and customer_details.phone:
+                            customer_phone = customer_details.phone
+                    except (AttributeError, TypeError):
+                        pass
                     if not customer_phone:
                         customer_phone = metadata.get('customer_phone', '')
-                    
-                    shipping_line = shipping_address.get('line1', '') or metadata.get('shipping_address', 'No especificada')
-                    shipping_city = shipping_address.get('city', '') or metadata.get('shipping_city', '')
-                    shipping_postal = shipping_address.get('postal_code', '') or metadata.get('shipping_postal_code', '')
-                    shipping_country = shipping_address.get('country', '') or metadata.get('shipping_country', 'ES')
                     
                     total = session.amount_total / 100 if session.amount_total else 0
                     subtotal = float(metadata.get('subtotal', total))
