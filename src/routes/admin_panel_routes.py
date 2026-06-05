@@ -326,30 +326,45 @@ def get_client_detail(client_id):
     # Obtener pedidos online de nuestra DB local (por email del contacto)
     client_email = contact.get('email', '')
     local_orders = []
-    local_order_numbers = set()
+    local_order_dates = set()  # timestamps de pedidos web (para cruce por fecha)
     if client_email:
         local_orders = Order.query.filter_by(customer_email=client_email).order_by(Order.created_at.desc()).all()
-        local_order_numbers = {o.order_number for o in local_orders}
+        # Guardar timestamps de pedidos locales (con margen de ±1 día = 86400s)
+        for o in local_orders:
+            if o.created_at:
+                ts = int(o.created_at.timestamp())
+                local_order_dates.add(ts)
     
-    # Procesar facturas - marcar como online si coincide con un pedido local
-    processed_invoices = []
-    for inv in invoices:
-        # Determinar si es online: buscar en notas/desc si tiene referencia MKL- o si fue creada desde la web
-        is_online = False
-        notes = (inv.get('notes') or '') + ' ' + (inv.get('desc') or '')
-        
-        # Verificar si las notas contienen referencia a pedido web
-        if 'MKL-' in notes or 'mikels.es' in notes.lower() or 'pedido web' in notes.lower() or 'stripe' in notes.lower():
-            is_online = True
-        
-        # Verificar por tags
-        tags = inv.get('tags') or []
+    def is_online_document(doc):
+        """Determina si un documento de Holded es de una compra online.
+        Criterios (en orden de prioridad):
+        1. Tags 'WEB'/'ONLINE' en el documento (futuro: los pondrá el webhook)
+        2. Notas contienen 'MKL-', 'Pedido Web', 'mikels.es' o 'stripe'
+        3. Cruce con DB local: email del contacto + fecha ±1 día
+        """
+        # 1. Verificar por tags (método futuro, más fiable)
+        tags = doc.get('tags') or []
         if any(t.lower() in ['web', 'online', 'ecommerce'] for t in tags):
-            is_online = True
+            return True
         
-        # Extraer items
+        # 2. Verificar en notas/descripción
+        notes = (doc.get('notes') or '') + ' ' + (doc.get('desc') or '')
+        if 'MKL-' in notes or 'mikels.es' in notes.lower() or 'pedido web' in notes.lower() or 'stripe' in notes.lower():
+            return True
+        
+        # 3. Cruce con DB local por fecha (±1 día)
+        doc_date = doc.get('date')
+        if doc_date and local_order_dates:
+            for local_ts in local_order_dates:
+                if abs(doc_date - local_ts) <= 86400:  # ±1 día
+                    return True
+        
+        return False
+    
+    def process_document(doc, doc_type):
+        """Procesa un documento de Holded y lo formatea para el frontend."""
         items = []
-        for item in (inv.get('items') or []):
+        for item in (doc.get('items') or []):
             items.append({
                 'name': item.get('name', ''),
                 'units': item.get('units', 1),
@@ -357,55 +372,30 @@ def get_client_detail(client_id):
                 'discount': item.get('discount', 0)
             })
         
-        processed_invoices.append({
-            'id': inv.get('id'),
-            'type': 'invoice',
-            'number': inv.get('docNumber', ''),
-            'date': inv.get('date'),
-            'total': inv.get('total', 0),
-            'subtotal': inv.get('subtotal', 0),
-            'status': inv.get('status', ''),
-            'channel': 'online' if is_online else 'offline',
-            'notes': inv.get('notes', ''),
+        doc_number = doc.get('docNumber', '')
+        is_ticket = doc_number.startswith('T')
+        channel = 'online' if is_online_document(doc) else 'offline'
+        
+        return {
+            'id': doc.get('id'),
+            'type': doc_type,
+            'is_ticket': is_ticket,
+            'number': doc_number,
+            'date': doc.get('date'),
+            'total': doc.get('total', 0),
+            'subtotal': doc.get('subtotal', 0),
+            'status': doc.get('status', ''),
+            'channel': channel,
+            'notes': doc.get('notes', ''),
             'items': items,
-            'currency': inv.get('currency', 'EUR')
-        })
+            'currency': doc.get('currency', 'EUR')
+        }
+    
+    # Procesar facturas y tickets
+    processed_invoices = [process_document(inv, 'invoice') for inv in invoices]
     
     # Procesar pedidos de venta
-    processed_salesorders = []
-    for so in salesorders:
-        is_online = False
-        notes = (so.get('notes') or '') + ' ' + (so.get('desc') or '')
-        
-        if 'MKL-' in notes or 'mikels.es' in notes.lower() or 'pedido web' in notes.lower() or 'stripe' in notes.lower():
-            is_online = True
-        
-        tags = so.get('tags') or []
-        if any(t.lower() in ['web', 'online', 'ecommerce'] for t in tags):
-            is_online = True
-        
-        items = []
-        for item in (so.get('items') or []):
-            items.append({
-                'name': item.get('name', ''),
-                'units': item.get('units', 1),
-                'subtotal': item.get('subtotal', 0),
-                'discount': item.get('discount', 0)
-            })
-        
-        processed_salesorders.append({
-            'id': so.get('id'),
-            'type': 'salesorder',
-            'number': so.get('docNumber', ''),
-            'date': so.get('date'),
-            'total': so.get('total', 0),
-            'subtotal': so.get('subtotal', 0),
-            'status': so.get('status', ''),
-            'channel': 'online' if is_online else 'offline',
-            'notes': so.get('notes', ''),
-            'items': items,
-            'currency': so.get('currency', 'EUR')
-        })
+    processed_salesorders = [process_document(so, 'salesorder') for so in salesorders]
     
     # Combinar y ordenar por fecha (más reciente primero)
     all_documents = processed_invoices + processed_salesorders
