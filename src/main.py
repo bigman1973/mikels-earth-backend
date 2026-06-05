@@ -125,6 +125,28 @@ def health_check():
         'timestamp': datetime.now().isoformat()
     }), 200
 
+
+# TEMPORAL: Endpoint de diagnóstico para verificar pedidos en DB
+@app.route('/api/debug/orders-count', methods=['GET'])
+def debug_orders_count():
+    """Endpoint temporal para diagnosticar pedidos - ELIMINAR DESPUÉS"""
+    try:
+        total = Order.query.count()
+        latest = Order.query.order_by(Order.created_at.desc()).limit(3).all()
+        return jsonify({
+            'total_orders': total,
+            'latest': [{
+                'id': o.id,
+                'order_number': o.order_number,
+                'customer_name': o.customer_name,
+                'total': o.total,
+                'status': o.status,
+                'created_at': o.created_at.isoformat() if o.created_at else None
+            } for o in latest]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/test-email', methods=['GET'])
 def test_email():
     """Endpoint temporal de diagnóstico para probar envío de email"""
