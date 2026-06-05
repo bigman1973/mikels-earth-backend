@@ -172,7 +172,7 @@ def get_stock():
 def get_orders():
     """Devuelve los pedidos de la web (desde la base de datos local)"""
     from src.models.order import Order
-    orders = Order.query.order_by(Order.created_at.desc()).limit(50).all()
+    orders = Order.query.order_by(Order.created_at.desc()).all()
 
     return jsonify({
         'orders': [o.to_dict() for o in orders] if orders else [],
