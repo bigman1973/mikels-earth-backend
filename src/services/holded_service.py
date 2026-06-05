@@ -240,16 +240,18 @@ def holded_get_contact(contact_id):
 
 
 def holded_get_contact_invoices(contact_id):
-    """Obtiene todas las facturas de un contacto específico de Holded"""
+    """Obtiene todas las facturas de un contacto específico de Holded.
+    La API v1 no filtra por contactId en query params, así que filtramos manualmente."""
     try:
         response = requests.get(
             f'{HOLDED_BASE_URL}/documents/invoice',
             headers=HEADERS,
-            params={'contactId': contact_id},
             timeout=20
         )
         if response.status_code == 200:
-            return response.json()
+            all_invoices = response.json()
+            # Filtrar por el campo 'contact' que es el ID real del contacto en documentos
+            return [inv for inv in all_invoices if inv.get('contact') == contact_id]
         return []
     except Exception as e:
         print(f"[Holded] Error obteniendo facturas del contacto {contact_id}: {e}")
@@ -257,16 +259,18 @@ def holded_get_contact_invoices(contact_id):
 
 
 def holded_get_contact_salesorders(contact_id):
-    """Obtiene todos los pedidos de venta de un contacto específico de Holded"""
+    """Obtiene todos los pedidos de venta de un contacto específico de Holded.
+    La API v1 no filtra por contactId en query params, así que filtramos manualmente."""
     try:
         response = requests.get(
             f'{HOLDED_BASE_URL}/documents/salesorder',
             headers=HEADERS,
-            params={'contactId': contact_id},
             timeout=20
         )
         if response.status_code == 200:
-            return response.json()
+            all_orders = response.json()
+            # Filtrar por el campo 'contact' que es el ID real del contacto en documentos
+            return [so for so in all_orders if so.get('contact') == contact_id]
         return []
     except Exception as e:
         print(f"[Holded] Error obteniendo pedidos del contacto {contact_id}: {e}")
