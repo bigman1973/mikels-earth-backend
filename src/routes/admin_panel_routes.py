@@ -17,7 +17,9 @@ from src.services.holded_service import (
     holded_get_warehouses,
     holded_get_or_create_contact,
     holded_get_contact_invoices,
-    holded_get_contact_salesorders
+    holded_get_contact_salesorders,
+    holded_get_contact_salesreceipts,
+    holded_get_all_salesreceipts
 )
 from src.models.user import db
 from datetime import datetime
@@ -288,83 +290,164 @@ def create_invoice_in_holded(order_id):
 @admin_panel_bp.route('/clients', methods=['GET'])
 @admin_required
 def get_clients():
-    """Devuelve los contactos/clientes de Holded"""
+    """Devuelve clientes en dos categorías:
+    - b2b: Contactos de Holded (B2B/HORECA/Contado)
+    - web: Clientes de la DB local (pedidos online por Stripe)
+    """
+    from src.models.order import Order
+    from sqlalchemy import func
+    
+    # === B2B / CONTADO: Clientes de Holded ===
     contacts = holded_get_contacts()
-
-    # Filtrar solo clientes (type=client)
-    clients = [c for c in contacts if c.get('type') == 'client']
-
+    holded_clients = [c for c in contacts if c.get('type') == 'client']
+    
+    b2b_list = [{
+        'id': c.get('id'),
+        'name': c.get('name', ''),
+        'email': c.get('email') or '',
+        'phone': c.get('phone') or c.get('mobile') or '',
+        'total_invoiced': c.get('socialInvoiced', 0),
+        'source': 'holded'
+    } for c in holded_clients]
+    
+    # === WEB: Clientes de la DB local (Stripe) ===
+    # Agrupar pedidos por email para obtener clientes únicos
+    web_clients_query = db.session.query(
+        Order.customer_email,
+        Order.customer_name,
+        func.count(Order.id).label('order_count'),
+        func.sum(Order.total_amount).label('total_spent'),
+        func.max(Order.created_at).label('last_order')
+    ).filter(
+        Order.customer_email.isnot(None),
+        Order.customer_email != ''
+    ).group_by(
+        Order.customer_email,
+        Order.customer_name
+    ).order_by(
+        func.max(Order.created_at).desc()
+    ).all()
+    
+    web_list = [{
+        'id': f'web_{wc.customer_email}',
+        'email': wc.customer_email,
+        'name': wc.customer_name or wc.customer_email.split('@')[0],
+        'order_count': wc.order_count,
+        'total_spent': float(wc.total_spent or 0),
+        'last_order': wc.last_order.isoformat() if wc.last_order else None,
+        'source': 'web'
+    } for wc in web_clients_query]
+    
     return jsonify({
-        'clients': [{
-            'id': c.get('id'),
-            'name': c.get('name', ''),
-            'email': c.get('email', ''),
-            'phone': c.get('phone', ''),
-            'mobile': c.get('mobile', ''),
-            'total_invoiced': c.get('socialInvoiced', 0)
-        } for c in clients],
-        'total': len(clients)
+        'b2b': b2b_list,
+        'web': web_list,
+        'total_b2b': len(b2b_list),
+        'total_web': len(web_list)
     })
 
 
 @admin_panel_bp.route('/clients/<client_id>', methods=['GET'])
 @admin_required
 def get_client_detail(client_id):
-    """Devuelve el detalle de un cliente con su historial de compras de Holded,
-    diferenciando pedidos online (web) del resto."""
+    """Devuelve el detalle de un cliente.
+    - Si client_id empieza por 'web_' → es un cliente web (DB local)
+    - Si no → es un cliente B2B/Contado (Holded)
+    """
     from src.models.order import Order
     
-    # Obtener datos del contacto en Holded
+    # ==========================================
+    # CLIENTE WEB (DB local / Stripe)
+    # ==========================================
+    if client_id.startswith('web_'):
+        client_email = client_id[4:]  # Quitar prefijo 'web_'
+        
+        # Obtener todos los pedidos de este email
+        orders = Order.query.filter_by(customer_email=client_email).order_by(Order.created_at.desc()).all()
+        if not orders:
+            return jsonify({'error': 'Cliente web no encontrado'}), 404
+        
+        # Datos del cliente (del primer pedido)
+        first_order = orders[0]
+        client_data = {
+            'id': client_id,
+            'name': first_order.customer_name or client_email.split('@')[0],
+            'email': client_email,
+            'phone': first_order.customer_phone or '',
+            'address': first_order.shipping_address or '',
+            'city': first_order.shipping_city or '',
+            'postal_code': first_order.shipping_postal_code or '',
+            'province': first_order.shipping_province or '',
+            'country': first_order.shipping_country or '',
+            'source': 'web'
+        }
+        
+        # Buscar si tiene tickets T en Holded (cruce por nombre/email)
+        all_tickets = holded_get_all_salesreceipts()
+        # Buscar contacto en Holded por email
+        holded_contact = holded_find_contact_by_email(client_email)
+        matched_tickets = []
+        if holded_contact:
+            holded_cid = holded_contact.get('id')
+            matched_tickets = [t for t in all_tickets if t.get('contact') == holded_cid]
+        
+        # Procesar pedidos web
+        web_orders = []
+        for o in orders:
+            # Intentar encontrar ticket T correspondiente (por fecha ±1 día)
+            ticket_match = None
+            if o.created_at:
+                order_ts = int(o.created_at.timestamp())
+                for t in matched_tickets:
+                    t_date = t.get('date', 0)
+                    if abs(t_date - order_ts) <= 86400:
+                        ticket_match = t.get('docNumber')
+                        break
+            
+            web_orders.append({
+                'id': o.id,
+                'order_number': o.order_number,
+                'date': o.created_at.isoformat() if o.created_at else None,
+                'total': float(o.total_amount or 0),
+                'status': o.status,
+                'payment_status': o.payment_status,
+                'items': json.loads(o.items_json) if o.items_json else [],
+                'ticket_holded': ticket_match,  # None = pendiente de generar
+                'has_ticket': ticket_match is not None
+            })
+        
+        # Estadísticas
+        total_spent = sum(float(o.total_amount or 0) for o in orders)
+        tickets_generated = len([wo for wo in web_orders if wo['has_ticket']])
+        tickets_pending = len(web_orders) - tickets_generated
+        
+        return jsonify({
+            'client': client_data,
+            'orders': web_orders,
+            'stats': {
+                'total_orders': len(orders),
+                'total_spent': total_spent,
+                'tickets_generated': tickets_generated,
+                'tickets_pending': tickets_pending
+            },
+            'source': 'web'
+        })
+    
+    # ==========================================
+    # CLIENTE B2B / CONTADO (Holded)
+    # ==========================================
     contact = holded_get_contact(client_id)
     if not contact:
         return jsonify({'error': 'Cliente no encontrado en Holded'}), 404
     
-    # Obtener facturas y pedidos de venta del contacto
+    # Obtener facturas, pedidos de venta Y tickets del contacto
     invoices = holded_get_contact_invoices(client_id)
     salesorders = holded_get_contact_salesorders(client_id)
-    
-    # Obtener pedidos online de nuestra DB local (por email del contacto)
-    client_email = contact.get('email', '')
-    local_orders = []
-    local_order_dates = set()  # timestamps de pedidos web (para cruce por fecha)
-    if client_email:
-        local_orders = Order.query.filter_by(customer_email=client_email).order_by(Order.created_at.desc()).all()
-        # Guardar timestamps de pedidos locales (con margen de ±1 día = 86400s)
-        for o in local_orders:
-            if o.created_at:
-                ts = int(o.created_at.timestamp())
-                local_order_dates.add(ts)
-    
-    def is_online_document(doc):
-        """Determina si un documento de Holded es de una compra online.
-        Criterios (en orden de prioridad):
-        1. Tags 'WEB'/'ONLINE' en el documento (futuro: los pondrá el webhook)
-        2. Notas contienen 'MKL-', 'Pedido Web', 'mikels.es' o 'stripe'
-        3. Cruce con DB local: email del contacto + fecha ±1 día
-        """
-        # 1. Verificar por tags (método futuro, más fiable)
-        tags = doc.get('tags') or []
-        if any(t.lower() in ['web', 'online', 'ecommerce'] for t in tags):
-            return True
-        
-        # 2. Verificar en notas/descripción
-        notes = (doc.get('notes') or '') + ' ' + (doc.get('desc') or '')
-        if 'MKL-' in notes or 'mikels.es' in notes.lower() or 'pedido web' in notes.lower() or 'stripe' in notes.lower():
-            return True
-        
-        # 3. Cruce con DB local por fecha (±1 día)
-        doc_date = doc.get('date')
-        if doc_date and local_order_dates:
-            for local_ts in local_order_dates:
-                if abs(doc_date - local_ts) <= 86400:  # ±1 día
-                    return True
-        
-        return False
+    salesreceipts = holded_get_contact_salesreceipts(client_id)
     
     def process_document(doc, doc_type):
         """Procesa un documento de Holded y lo formatea para el frontend."""
         items = []
-        for item in (doc.get('items') or []):
+        for item in (doc.get('items') or doc.get('products') or []):
             items.append({
                 'name': item.get('name', ''),
                 'units': item.get('units', 1),
@@ -374,7 +457,6 @@ def get_client_detail(client_id):
         
         doc_number = doc.get('docNumber', '')
         is_ticket = doc_number.startswith('T')
-        channel = 'online' if is_online_document(doc) else 'offline'
         
         return {
             'id': doc.get('id'),
@@ -385,30 +467,25 @@ def get_client_detail(client_id):
             'total': doc.get('total', 0),
             'subtotal': doc.get('subtotal', 0),
             'status': doc.get('status', ''),
-            'channel': channel,
             'notes': doc.get('notes', ''),
+            'desc': doc.get('desc', ''),
             'items': items,
             'currency': doc.get('currency', 'EUR')
         }
     
-    # Procesar facturas y tickets
+    # Procesar todos los documentos
     processed_invoices = [process_document(inv, 'invoice') for inv in invoices]
-    
-    # Procesar pedidos de venta
     processed_salesorders = [process_document(so, 'salesorder') for so in salesorders]
+    processed_salesreceipts = [process_document(sr, 'salesreceipt') for sr in salesreceipts]
     
     # Combinar y ordenar por fecha (más reciente primero)
-    all_documents = processed_invoices + processed_salesorders
+    all_documents = processed_invoices + processed_salesorders + processed_salesreceipts
     all_documents.sort(key=lambda d: d.get('date') or 0, reverse=True)
     
-    # Pedidos online de nuestra DB local (para enriquecer)
-    local_orders_data = [o.to_dict() for o in local_orders]
-    
     # Estadísticas
-    total_online = sum(d['total'] for d in all_documents if d['channel'] == 'online')
-    total_offline = sum(d['total'] for d in all_documents if d['channel'] == 'offline')
-    count_online = len([d for d in all_documents if d['channel'] == 'online'])
-    count_offline = len([d for d in all_documents if d['channel'] == 'offline'])
+    total_invoices = sum(d['total'] for d in processed_invoices)
+    total_tickets = sum(d['total'] for d in processed_salesreceipts)
+    total_salesorders = sum(d['total'] for d in processed_salesorders)
     
     # Datos del contacto
     bill_address = contact.get('billAddress') or {}
@@ -417,9 +494,9 @@ def get_client_detail(client_id):
         'client': {
             'id': contact.get('id'),
             'name': contact.get('name', ''),
-            'email': contact.get('email', ''),
-            'phone': contact.get('phone', ''),
-            'mobile': contact.get('mobile', ''),
+            'email': contact.get('email') or '',
+            'phone': contact.get('phone') or '',
+            'mobile': contact.get('mobile') or '',
             'vatnumber': contact.get('vatnumber', ''),
             'address': bill_address.get('address', ''),
             'city': bill_address.get('city', ''),
@@ -428,18 +505,21 @@ def get_client_detail(client_id):
             'country': bill_address.get('country', ''),
             'total_invoiced': contact.get('socialInvoiced', 0),
             'created_at': contact.get('createdAt'),
-            'notes': contact.get('notes', '')
+            'notes': contact.get('notes', ''),
+            'source': 'holded'
         },
         'documents': all_documents,
-        'local_orders': local_orders_data,
         'stats': {
             'total_documents': len(all_documents),
-            'total_online': total_online,
-            'total_offline': total_offline,
-            'count_online': count_online,
-            'count_offline': count_offline,
-            'total_all': total_online + total_offline
-        }
+            'count_invoices': len(processed_invoices),
+            'count_tickets': len(processed_salesreceipts),
+            'count_salesorders': len(processed_salesorders),
+            'total_invoices': total_invoices,
+            'total_tickets': total_tickets,
+            'total_salesorders': total_salesorders,
+            'total_all': total_invoices + total_tickets + total_salesorders
+        },
+        'source': 'holded'
     })
 
 

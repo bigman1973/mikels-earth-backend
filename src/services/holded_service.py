@@ -277,6 +277,40 @@ def holded_get_contact_salesorders(contact_id):
         return []
 
 
+def holded_get_contact_salesreceipts(contact_id):
+    """Obtiene todos los tickets (salesreceipt/T) de un contacto específico de Holded.
+    La API v1 no filtra por contactId en query params, así que filtramos manualmente."""
+    try:
+        response = requests.get(
+            f'{HOLDED_BASE_URL}/documents/salesreceipt',
+            headers=HEADERS,
+            timeout=20
+        )
+        if response.status_code == 200:
+            all_receipts = response.json()
+            return [r for r in all_receipts if r.get('contact') == contact_id]
+        return []
+    except Exception as e:
+        print(f"[Holded] Error obteniendo tickets del contacto {contact_id}: {e}")
+        return []
+
+
+def holded_get_all_salesreceipts():
+    """Obtiene todos los tickets (salesreceipt/T) de Holded."""
+    try:
+        response = requests.get(
+            f'{HOLDED_BASE_URL}/documents/salesreceipt',
+            headers=HEADERS,
+            timeout=20
+        )
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except Exception as e:
+        print(f"[Holded] Error obteniendo todos los tickets: {e}")
+        return []
+
+
 # ============================================================
 # ALMACENES Y STOCK
 # ============================================================
