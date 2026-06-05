@@ -152,6 +152,7 @@ def sync_stripe_orders():
     """Recupera todas las checkout sessions completadas de Stripe y las inserta en la DB.
     Endpoint temporal de recuperación - ELIMINAR DESPUÉS."""
     import stripe
+    import json as json_lib
     stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
     
     if not stripe.api_key:
@@ -167,68 +168,56 @@ def sync_stripe_orders():
         starting_after = None
         
         while has_more:
-            params = {'limit': 100, 'status': 'complete'}
+            params = {'limit': 100, 'status': 'complete', 'expand': ['data.shipping_details', 'data.customer_details']}
             if starting_after:
                 params['starting_after'] = starting_after
             
             sessions = stripe.checkout.Session.list(**params)
             
-            for session in sessions.data:
+            for sess in sessions.data:
                 # Solo procesar pagos (no suscripciones)
-                if session.mode != 'payment':
+                if sess.mode != 'payment':
                     continue
                 
                 # Verificar si ya existe en la DB
-                existing = Order.query.filter_by(stripe_checkout_session_id=session.id).first()
+                existing = Order.query.filter_by(stripe_checkout_session_id=sess.id).first()
                 if existing:
                     skipped += 1
                     continue
                 
                 try:
+                    # Convertir a dict puro de Python para evitar problemas con objetos Stripe
+                    s = json_lib.loads(str(sess))
+                    
                     # Obtener line items
-                    line_items = stripe.checkout.Session.list_line_items(session.id, limit=100)
+                    line_items = stripe.checkout.Session.list_line_items(sess.id, limit=100)
                     items = []
-                    for item in line_items.data:
+                    for li in line_items.data:
                         items.append({
-                            'name': item.description or 'Producto',
-                            'quantity': item.quantity,
-                            'price': item.amount_total / 100
+                            'name': li.description or 'Producto',
+                            'quantity': li.quantity,
+                            'price': li.amount_total / 100
                         })
                     
-                    # Extraer datos
-                    metadata = session.metadata or {}
-                    customer_details = session.customer_details
-                    shipping = session.shipping_details
+                    # Extraer metadata (siempre es un dict)
+                    metadata = s.get('metadata') or {}
                     
-                    # Extraer dirección de envío (Stripe objects, no dicts)
-                    shipping_line = ''
-                    shipping_city = ''
-                    shipping_postal = ''
-                    shipping_country = ''
-                    customer_name_from_shipping = ''
+                    # Extraer shipping_details
+                    shipping = s.get('shipping_details') or {}
+                    shipping_addr = shipping.get('address') or {} if isinstance(shipping, dict) else {}
                     
-                    try:
-                        if shipping and shipping.address:
-                            shipping_line = shipping.address.line1 or ''
-                            shipping_city = shipping.address.city or ''
-                            shipping_postal = shipping.address.postal_code or ''
-                            shipping_country = shipping.address.country or ''
-                        if shipping and shipping.name:
-                            customer_name_from_shipping = shipping.name
-                    except (AttributeError, TypeError):
-                        pass
+                    shipping_line = (shipping_addr.get('line1') or '') or metadata.get('shipping_address', 'No especificada')
+                    shipping_city = (shipping_addr.get('city') or '') or metadata.get('shipping_city', 'No especificada')
+                    shipping_postal = (shipping_addr.get('postal_code') or '') or metadata.get('shipping_postal_code', '00000')
+                    shipping_country = (shipping_addr.get('country') or '') or metadata.get('shipping_country', 'ES')
                     
-                    # Fallback a metadata
-                    if not shipping_line:
-                        shipping_line = metadata.get('shipping_address', 'No especificada')
-                    if not shipping_city:
-                        shipping_city = metadata.get('shipping_city', 'No especificada')
-                    if not shipping_postal:
-                        shipping_postal = metadata.get('shipping_postal_code', '00000')
-                    if not shipping_country:
-                        shipping_country = metadata.get('shipping_country', 'ES')
+                    # Customer details
+                    cust = s.get('customer_details') or {}
+                    customer_email = (cust.get('email') or '') or s.get('customer_email') or metadata.get('customer_email', 'desconocido@mikels.es')
+                    customer_name = (shipping.get('name') or '') or metadata.get('customer_name', 'Cliente')
+                    customer_phone = (cust.get('phone') or '') or metadata.get('customer_phone', 'No proporcionado')
                     
-                    order_number = metadata.get('order_number', f'MKL-SYNC-{session.id[-8:]}')
+                    order_number = metadata.get('order_number', f'MKL-SYNC-{sess.id[-8:]}')
                     
                     # Verificar si ya existe por order_number
                     existing_by_number = Order.query.filter_by(order_number=order_number).first()
@@ -236,36 +225,17 @@ def sync_stripe_orders():
                         skipped += 1
                         continue
                     
-                    # Email del cliente
-                    customer_email = ''
+                    total = (s.get('amount_total') or 0) / 100
+                    subtotal_raw = metadata.get('subtotal', '')
                     try:
-                        if customer_details and customer_details.email:
-                            customer_email = customer_details.email
-                    except (AttributeError, TypeError):
-                        pass
-                    if not customer_email:
-                        customer_email = session.customer_email or metadata.get('customer_email', 'desconocido@mikels.es')
-                    
-                    # Nombre del cliente
-                    customer_name = customer_name_from_shipping or metadata.get('customer_name', 'Cliente')
-                    
-                    # Teléfono del cliente
-                    customer_phone = ''
-                    try:
-                        if customer_details and customer_details.phone:
-                            customer_phone = customer_details.phone
-                    except (AttributeError, TypeError):
-                        pass
-                    if not customer_phone:
-                        customer_phone = metadata.get('customer_phone', '')
-                    
-                    total = session.amount_total / 100 if session.amount_total else 0
-                    subtotal = float(metadata.get('subtotal', total))
+                        subtotal = float(subtotal_raw) if subtotal_raw else total
+                    except (ValueError, TypeError):
+                        subtotal = total
                     
                     new_order = Order(
                         order_number=order_number,
-                        customer_email=customer_email,
-                        customer_name=customer_name,
+                        customer_email=customer_email or 'desconocido@mikels.es',
+                        customer_name=customer_name or 'Cliente',
                         customer_phone=customer_phone or 'No proporcionado',
                         shipping_address=shipping_line or 'No especificada',
                         shipping_city=shipping_city or 'No especificada',
@@ -275,17 +245,18 @@ def sync_stripe_orders():
                         subtotal=subtotal,
                         shipping_cost=0 if total >= 40 else 4.95,
                         total=total,
-                        stripe_payment_intent_id=session.payment_intent or '',
-                        stripe_checkout_session_id=session.id,
+                        stripe_payment_intent_id=s.get('payment_intent') or '',
+                        stripe_checkout_session_id=sess.id,
                         payment_status='paid',
                         order_status='processing',
                         customer_notes=metadata.get('customer_notes', '')
                     )
                     
                     # Usar la fecha de creación de la sesión de Stripe
-                    if session.created:
-                        new_order.created_at = datetime.utcfromtimestamp(session.created)
-                        new_order.paid_at = datetime.utcfromtimestamp(session.created)
+                    created_ts = s.get('created')
+                    if created_ts:
+                        new_order.created_at = datetime.utcfromtimestamp(created_ts)
+                        new_order.paid_at = datetime.utcfromtimestamp(created_ts)
                     
                     db.session.add(new_order)
                     db.session.commit()
@@ -293,7 +264,7 @@ def sync_stripe_orders():
                     
                 except Exception as item_err:
                     db.session.rollback()
-                    errors.append(f'{session.id}: {str(item_err)}')
+                    errors.append(f'{sess.id}: {str(item_err)}')
             
             has_more = sessions.has_more
             if sessions.data:
