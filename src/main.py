@@ -147,6 +147,152 @@ def debug_orders_count():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/debug/sync-stripe-orders', methods=['POST'])
+def sync_stripe_orders():
+    """Recupera todas las checkout sessions completadas de Stripe y las inserta en la DB.
+    Endpoint temporal de recuperación - ELIMINAR DESPUÉS."""
+    import stripe
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+    
+    if not stripe.api_key:
+        return jsonify({'error': 'STRIPE_SECRET_KEY no configurada'}), 500
+    
+    synced = 0
+    skipped = 0
+    errors = []
+    
+    try:
+        # Recuperar todas las checkout sessions completadas (paginado)
+        has_more = True
+        starting_after = None
+        
+        while has_more:
+            params = {'limit': 100, 'status': 'complete'}
+            if starting_after:
+                params['starting_after'] = starting_after
+            
+            sessions = stripe.checkout.Session.list(**params)
+            
+            for session in sessions.data:
+                # Solo procesar pagos (no suscripciones)
+                if session.mode != 'payment':
+                    continue
+                
+                # Verificar si ya existe en la DB
+                existing = Order.query.filter_by(stripe_checkout_session_id=session.id).first()
+                if existing:
+                    skipped += 1
+                    continue
+                
+                try:
+                    # Obtener line items
+                    line_items = stripe.checkout.Session.list_line_items(session.id, limit=100)
+                    items = []
+                    for item in line_items.data:
+                        items.append({
+                            'name': item.description or 'Producto',
+                            'quantity': item.quantity,
+                            'price': item.amount_total / 100
+                        })
+                    
+                    # Extraer datos
+                    metadata = session.metadata or {}
+                    customer_details = session.customer_details or {}
+                    shipping = session.shipping_details or {}
+                    shipping_address = shipping.get('address') or {} if isinstance(shipping, dict) else {}
+                    if hasattr(shipping, 'address') and shipping.address:
+                        shipping_address = {
+                            'line1': shipping.address.line1 or '',
+                            'city': shipping.address.city or '',
+                            'postal_code': shipping.address.postal_code or '',
+                            'country': shipping.address.country or ''
+                        }
+                    
+                    order_number = metadata.get('order_number', f'MKL-SYNC-{session.id[-8:]}')
+                    
+                    # Verificar si ya existe por order_number
+                    existing_by_number = Order.query.filter_by(order_number=order_number).first()
+                    if existing_by_number:
+                        skipped += 1
+                        continue
+                    
+                    customer_email = ''
+                    if customer_details and hasattr(customer_details, 'email'):
+                        customer_email = customer_details.email or ''
+                    elif isinstance(customer_details, dict):
+                        customer_email = customer_details.get('email', '')
+                    if not customer_email:
+                        customer_email = session.customer_email or metadata.get('customer_email', 'desconocido@mikels.es')
+                    
+                    customer_name = ''
+                    if shipping and hasattr(shipping, 'name'):
+                        customer_name = shipping.name or ''
+                    if not customer_name:
+                        customer_name = metadata.get('customer_name', 'Cliente')
+                    
+                    customer_phone = ''
+                    if customer_details and hasattr(customer_details, 'phone'):
+                        customer_phone = customer_details.phone or ''
+                    if not customer_phone:
+                        customer_phone = metadata.get('customer_phone', '')
+                    
+                    shipping_line = shipping_address.get('line1', '') or metadata.get('shipping_address', 'No especificada')
+                    shipping_city = shipping_address.get('city', '') or metadata.get('shipping_city', '')
+                    shipping_postal = shipping_address.get('postal_code', '') or metadata.get('shipping_postal_code', '')
+                    shipping_country = shipping_address.get('country', '') or metadata.get('shipping_country', 'ES')
+                    
+                    total = session.amount_total / 100 if session.amount_total else 0
+                    subtotal = float(metadata.get('subtotal', total))
+                    
+                    new_order = Order(
+                        order_number=order_number,
+                        customer_email=customer_email,
+                        customer_name=customer_name,
+                        customer_phone=customer_phone or 'No proporcionado',
+                        shipping_address=shipping_line or 'No especificada',
+                        shipping_city=shipping_city or 'No especificada',
+                        shipping_postal_code=shipping_postal or '00000',
+                        shipping_country=shipping_country or 'ES',
+                        items=items,
+                        subtotal=subtotal,
+                        shipping_cost=0 if total >= 40 else 4.95,
+                        total=total,
+                        stripe_payment_intent_id=session.payment_intent or '',
+                        stripe_checkout_session_id=session.id,
+                        payment_status='paid',
+                        order_status='processing',
+                        customer_notes=metadata.get('customer_notes', '')
+                    )
+                    
+                    # Usar la fecha de creación de la sesión de Stripe
+                    if session.created:
+                        new_order.created_at = datetime.utcfromtimestamp(session.created)
+                        new_order.paid_at = datetime.utcfromtimestamp(session.created)
+                    
+                    db.session.add(new_order)
+                    db.session.commit()
+                    synced += 1
+                    
+                except Exception as item_err:
+                    db.session.rollback()
+                    errors.append(f'{session.id}: {str(item_err)}')
+            
+            has_more = sessions.has_more
+            if sessions.data:
+                starting_after = sessions.data[-1].id
+        
+        return jsonify({
+            'success': True,
+            'synced': synced,
+            'skipped': skipped,
+            'errors': errors[:10],
+            'total_errors': len(errors)
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/test-email', methods=['GET'])
 def test_email():
     """Endpoint temporal de diagnóstico para probar envío de email"""
