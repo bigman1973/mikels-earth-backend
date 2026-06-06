@@ -42,32 +42,90 @@ admin_panel_bp = Blueprint('admin_panel', __name__)
 def get_products():
     """
     Devuelve los productos de Holded junto con los precios web (si existen).
-    Permite comparar precios Holded vs Web.
+    Incluye también productos web que no tienen match en Holded.
+    Precios: coste y holded_price son sin IVA. web_price es con IVA.
+    Se incluye iva_rate para que el frontend pueda calcular el margen correctamente.
     """
     holded_products = holded_get_products()
 
     # Leer precios web desde el archivo de productos del frontend
-    # (En futuro se migrará a base de datos)
     web_prices = _get_web_prices()
 
     result = []
+    matched_web_skus = set()
+
     for p in holded_products:
+        sku = p.get('sku', '')
+        web_match = web_prices.get(sku, {})
+        if web_match:
+            matched_web_skus.add(sku)
+
+        # Determinar IVA: aceites alimentarios 4%, conservas 10%, otros 21%
+        iva_rate = 0.04  # Por defecto 4% para AOVE
+        taxes = p.get('taxes', [])
+        if taxes:
+            # Si tiene info de impuestos en Holded, usarla
+            for tax in taxes:
+                if isinstance(tax, dict):
+                    tax_val = tax.get('tax', '')
+                    if '10' in str(tax_val):
+                        iva_rate = 0.10
+                    elif '21' in str(tax_val):
+                        iva_rate = 0.21
+                    elif '4' in str(tax_val):
+                        iva_rate = 0.04
+
         product_data = {
             'holded_id': p.get('id'),
             'name': p.get('name', ''),
-            'sku': p.get('sku', ''),
+            'sku': sku,
             'barcode': p.get('barcode', ''),
             'holded_price': p.get('price', 0),
             'holded_total': p.get('total', 0),  # Precio con IVA
             'stock': p.get('stock', 0),
             'has_stock': p.get('hasStock', False),
             'cost': p.get('cost', 0),
-            'tax': p.get('taxes', []),
-            'web_price': web_prices.get(p.get('sku', ''), {}).get('price'),
-            'web_name': web_prices.get(p.get('sku', ''), {}).get('name'),
-            'synced': _is_price_synced(p, web_prices)
+            'tax': taxes,
+            'iva_rate': iva_rate,
+            'web_price': web_match.get('price'),
+            'web_name': web_match.get('name'),
+            'web_category': web_match.get('category'),
+            'synced': _is_price_synced(p, web_prices),
+            'source': 'holded'
         }
         result.append(product_data)
+
+    # Añadir productos web que NO tienen match en Holded
+    for sku, wp in web_prices.items():
+        if sku not in matched_web_skus:
+            # Determinar IVA por categoría
+            cat = wp.get('category', '').lower()
+            if cat in ('conservas',):
+                iva_rate = 0.10
+            elif cat in ('aceites',):
+                iva_rate = 0.04
+            else:
+                iva_rate = 0.04  # Packs de aceite/conserva → 4% por defecto
+
+            product_data = {
+                'holded_id': None,
+                'name': wp.get('name', ''),
+                'sku': sku,
+                'barcode': '',
+                'holded_price': None,
+                'holded_total': None,
+                'stock': wp.get('stock', 0),
+                'has_stock': True,
+                'cost': 0,
+                'tax': [],
+                'iva_rate': iva_rate,
+                'web_price': wp.get('price'),
+                'web_name': wp.get('name'),
+                'web_category': wp.get('category'),
+                'synced': None,
+                'source': 'web_only'
+            }
+            result.append(product_data)
 
     return jsonify({
         'products': result,
@@ -890,16 +948,25 @@ def _get_web_prices():
     except Exception as e:
         print(f"[Admin] Error leyendo precios web: {e}")
 
-    # Fallback: precios hardcodeados del catálogo actual de mikels.es
+    # Fallback: catálogo completo de mikels.es (precios con IVA incluido)
+    # SKU → datos del producto web
     return {
-        'MIKBIO19': {'name': 'Aceite Ecológico 500ml', 'price': 14.90, 'sku': 'MIKBIO19'},
-        'MIKVE500': {'name': 'Aceite Virgen Extra 500ml', 'price': 12.90, 'sku': 'MIKVE500'},
-        'MIKVET500': {'name': 'Aceite Temprano 500ml', 'price': 16.90, 'sku': 'MIKVET500'},
-        'MIKVE5LP': {'name': 'Aceite Virgen Extra 5L', 'price': 54.90, 'sku': 'MIKVE5LP'},
-        'MIKVE1000': {'name': 'Aceite Virgen Extra 1L', 'price': 19.90, 'sku': 'MIKVE1000'},
-        'MIKPARJ250': {'name': 'Mermelada Paraguayo 250g', 'price': 6.90, 'sku': 'MIKPARJ250'},
-        'MIKPARA450': {'name': 'Fruta Paraguayo 450g', 'price': 14.90, 'sku': 'MIKPARA450'},
-        'MIKNECT450': {'name': 'Fruta Nectarina 450g', 'price': 14.90, 'sku': 'MIKNECT450'},
+        # Aceites (IVA 4%)
+        'MIKVE5LP': {'name': 'Aceite de Oliva Virgen Extra 5L', 'price': 33.00, 'sku': 'MIKVE5LP', 'category': 'Aceites'},
+        'MIKVET500': {'name': 'Aceite de Oliva Virgen Extra Temprano 500ml sin filtrar', 'price': 14.90, 'sku': 'MIKVET500', 'category': 'Aceites'},
+        'MIKVE500': {'name': 'Aceite de Oliva Virgen Extra Mikel\'s Fruit (Equilibrado)', 'price': 10.00, 'sku': 'MIKVE500', 'category': 'Aceites'},
+        'MIKBIO19': {'name': 'Aceite de Oliva Virgen Extra Ecológico Mikel\'s Fruit', 'price': 13.50, 'sku': 'MIKBIO19', 'category': 'Aceites'},
+        'MIKVE1000': {'name': 'Aceite Virgen Extra 1L', 'price': 19.90, 'sku': 'MIKVE1000', 'category': 'Aceites'},
+        # Conservas (IVA 10%)
+        'MIKPARA450': {'name': 'Paraguayo en Almíbar', 'price': 14.90, 'sku': 'MIKPARA450', 'category': 'Conservas'},
+        'MIKNECT450': {'name': 'Nectarina en Almíbar', 'price': 14.90, 'sku': 'MIKNECT450', 'category': 'Conservas'},
+        'MIKPARJ250': {'name': 'Mermelada de Paraguayo Artesanal', 'price': 6.50, 'sku': 'MIKPARJ250', 'category': 'Conservas'},
+        # Packs (IVA 4% - mayoría aceite)
+        'MIKPACK01': {'name': 'Pack Degustación Premium', 'price': 9.00, 'sku': 'MIKPACK01', 'category': 'Packs'},
+        'MIKEST01': {'name': 'Estuche de Regalo Premium', 'price': 5.00, 'sku': 'MIKEST01', 'category': 'Packs'},
+        'MIKPACKFR': {'name': 'Pack Fruta Premium', 'price': 35.00, 'sku': 'MIKPACKFR', 'category': 'Packs'},
+        'MIKPACKTP': {'name': 'Pack Temprano Premium', 'price': 19.00, 'sku': 'MIKPACKTP', 'category': 'Packs'},
+        'MIKPACKCO': {'name': 'Pack Completo Mikel\'s Earth', 'price': 81.90, 'sku': 'MIKPACKCO', 'category': 'Packs'},
     }
 
 
