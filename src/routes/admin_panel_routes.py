@@ -472,14 +472,16 @@ def _get_client_detail_inner(client_id, Order):
                 'discount': discount
             })
         
-        doc_number = doc.get('docNumber', '')
-        is_ticket = doc_number.startswith('T')
+        doc_number = doc.get('docNumber') or ''
+        is_ticket = doc_number.startswith('T') if doc_number else False
+        is_draft = doc.get('draft', False)
         
         return {
             'id': doc.get('id'),
             'type': doc_type,
             'is_ticket': is_ticket,
-            'number': doc_number,
+            'is_draft': is_draft,
+            'number': doc_number or '(Borrador)',
             'date': doc.get('date'),
             'total': doc.get('total', 0),
             'subtotal': doc.get('subtotal', 0),
