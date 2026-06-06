@@ -377,6 +377,25 @@ def create_invoice_in_holded(order_id):
         return jsonify({'error': f'Error interno: {str(e)}'}), 500
 
 
+@admin_panel_bp.route('/orders/<int:order_id>/reset-holded', methods=['POST'])
+@admin_required
+@role_required('admin')
+def reset_order_holded(order_id):
+    """Resetea los campos de Holded de un pedido para poder re-procesarlo"""
+    try:
+        from src.models.order import Order
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({'error': 'Pedido no encontrado'}), 404
+        order.holded_id = None
+        order.holded_invoice_id = None
+        order.holded_doc_number = None
+        db.session.commit()
+        return jsonify({'success': True, 'message': f'Pedido {order.order_number} reseteado de Holded'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ============================================================
 # CONTACTOS / CLIENTES
 # ============================================================
