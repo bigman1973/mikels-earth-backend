@@ -86,6 +86,64 @@ def holded_find_contact_by_email(email):
     return None
 
 
+def holded_find_contact_by_name(name):
+    """Busca un contacto en Holded por nombre (comparación flexible)"""
+    if not name:
+        return None
+    contacts = holded_get_contacts()
+    name_normalized = name.strip().lower()
+    for contact in contacts:
+        contact_name = contact.get('name') or ''
+        if contact_name and contact_name.strip().lower() == name_normalized:
+            return contact
+    return None
+
+
+def holded_update_contact(contact_id, data):
+    """
+    Actualiza un contacto existente en Holded con los datos proporcionados.
+    Solo actualiza campos que tengan valor (no sobreescribe con vacíos).
+    """
+    try:
+        update_payload = {}
+        if data.get('email'):
+            update_payload['email'] = data['email']
+        if data.get('phone'):
+            update_payload['phone'] = data['phone']
+            update_payload['mobile'] = data['phone']
+        if data.get('vatnumber'):
+            update_payload['vatnumber'] = data['vatnumber']
+        
+        # Actualizar dirección si hay datos
+        if data.get('address') or data.get('city') or data.get('postal_code'):
+            update_payload['billAddress'] = {
+                'address': data.get('address', ''),
+                'city': data.get('city', ''),
+                'postalCode': data.get('postal_code', ''),
+                'province': data.get('province', ''),
+                'country': data.get('country', 'España'),
+                'countryCode': data.get('country_code', 'ES')
+            }
+        
+        if not update_payload:
+            return True  # Nada que actualizar
+        
+        response = requests.put(
+            f'{HOLDED_BASE_URL}/contacts/{contact_id}',
+            headers=HEADERS,
+            json=update_payload,
+            timeout=10
+        )
+        if response.status_code in [200, 201]:
+            print(f"[Holded] Contacto {contact_id} actualizado con: {list(update_payload.keys())}")
+            return True
+        print(f"[Holded] Error actualizando contacto {contact_id}: {response.status_code} - {response.text}")
+        return False
+    except Exception as e:
+        print(f"[Holded] Error actualizando contacto {contact_id}: {e}")
+        return False
+
+
 def holded_create_contact(data):
     """
     Crea un nuevo contacto en Holded.
@@ -398,14 +456,39 @@ def holded_get_warehouses():
 
 def holded_get_or_create_contact(email, name, phone='', address_data=None):
     """
-    Busca un contacto por email. Si no existe, lo crea.
+    Busca un contacto por email o por nombre. Si existe, actualiza sus datos.
+    Si no existe, lo crea.
     Devuelve el ID del contacto.
     """
+    # 1. Buscar por email
     existing = holded_find_contact_by_email(email)
+    
+    # 2. Si no se encuentra por email, buscar por nombre
+    if not existing:
+        existing = holded_find_contact_by_name(name)
+    
+    # 3. Si existe, actualizar sus datos y devolver su ID
     if existing:
-        return existing.get('id')
+        contact_id = existing.get('id')
+        # Preparar datos para actualizar (solo los que tengan valor)
+        update_data = {}
+        if email and not (existing.get('email') or ''):
+            update_data['email'] = email
+        elif email:
+            update_data['email'] = email
+        if phone:
+            update_data['phone'] = phone
+        if address_data:
+            update_data['address'] = address_data.get('address', '')
+            update_data['city'] = address_data.get('city', '')
+            update_data['postal_code'] = address_data.get('postal_code', '')
+            update_data['country'] = address_data.get('country', 'España')
+        
+        # Actualizar el contacto con los nuevos datos
+        holded_update_contact(contact_id, update_data)
+        return contact_id
 
-    # Crear nuevo contacto
+    # 4. Si no existe ni por email ni por nombre, crear nuevo
     data = {
         'name': name,
         'email': email,
