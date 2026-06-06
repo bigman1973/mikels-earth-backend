@@ -128,6 +128,71 @@ def health_check():
 
 
 
+@app.route('/api/debug-clients', methods=['GET'])
+def debug_clients():
+    """Endpoint temporal de diagnóstico para clientes"""
+    try:
+        from src.models.order import Order
+        from sqlalchemy import func
+        
+        # Contar pedidos totales
+        total_orders = Order.query.count()
+        
+        # Obtener emails únicos
+        emails = db.session.query(Order.customer_email).filter(
+            Order.customer_email.isnot(None),
+            Order.customer_email != ''
+        ).distinct().all()
+        
+        email_list = [e[0] for e in emails]
+        
+        # Intentar el group by
+        try:
+            web_clients_query = db.session.query(
+                Order.customer_email,
+                Order.customer_name,
+                func.count(Order.id).label('order_count'),
+                func.sum(Order.total_amount).label('total_spent'),
+                func.max(Order.created_at).label('last_order')
+            ).filter(
+                Order.customer_email.isnot(None),
+                Order.customer_email != ''
+            ).group_by(
+                Order.customer_email,
+                Order.customer_name
+            ).all()
+            group_by_count = len(web_clients_query)
+            group_by_error = None
+        except Exception as gbe:
+            group_by_count = 0
+            group_by_error = str(gbe)
+        
+        # Intentar holded contacts
+        try:
+            from src.services.holded_service import holded_get_contacts
+            contacts = holded_get_contacts()
+            holded_count = len(contacts)
+            holded_clients = len([c for c in contacts if c.get('type') == 'client'])
+            holded_error = None
+        except Exception as he:
+            holded_count = 0
+            holded_clients = 0
+            holded_error = str(he)
+        
+        return jsonify({
+            'total_orders': total_orders,
+            'unique_emails': len(email_list),
+            'email_sample': email_list[:5],
+            'group_by_count': group_by_count,
+            'group_by_error': group_by_error,
+            'holded_contacts_total': holded_count,
+            'holded_clients': holded_clients,
+            'holded_error': holded_error
+        })
+    except Exception as e:
+        return jsonify({'error': str(e), 'type': type(e).__name__}), 500
+
+
 @app.route('/api/test-email', methods=['GET'])
 def test_email():
     """Endpoint temporal de diagnóstico para probar envío de email"""
