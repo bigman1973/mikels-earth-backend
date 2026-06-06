@@ -473,6 +473,59 @@ def stripe_webhook():
         print(f"Subscription {subscription_id} payment succeeded")
         # TODO: Send invoice email
     
+    elif event['type'] == 'charge.refunded':
+        # Pago reembolsado (total o parcial)
+        charge = event['data']['object']
+        payment_intent_id = charge.get('payment_intent', '')
+        amount_refunded = charge.get('amount_refunded', 0) / 100  # cents to euros
+        amount_total = charge.get('amount', 0) / 100
+        is_full_refund = (amount_refunded >= amount_total)
+        
+        print(f"Refund detected: PI={payment_intent_id}, refunded={amount_refunded}€, total={amount_total}€, full={is_full_refund}")
+        
+        try:
+            from src.models.order import Order
+            from src.models.user import db
+            
+            # Buscar pedido por payment_intent_id
+            order = Order.query.filter_by(stripe_payment_intent_id=payment_intent_id).first()
+            
+            if order:
+                if is_full_refund:
+                    order.payment_status = 'refunded'
+                    order.order_status = 'cancelled'
+                else:
+                    order.payment_status = 'partially_refunded'
+                
+                order.admin_notes = (order.admin_notes or '') + f'\nReembolso Stripe: {amount_refunded}€ de {amount_total}€ ({"total" if is_full_refund else "parcial"}) - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
+                db.session.commit()
+                print(f"✅ Order {order.order_number} marked as {'refunded' if is_full_refund else 'partially_refunded'}")
+            else:
+                print(f"⚠️ No order found for payment_intent: {payment_intent_id}")
+        except Exception as refund_err:
+            print(f"⚠️ Error processing refund webhook: {refund_err}")
+    
+    elif event['type'] == 'payment_intent.canceled':
+        # Pago cancelado antes de completarse
+        pi = event['data']['object']
+        payment_intent_id = pi.get('id', '')
+        
+        print(f"Payment intent cancelled: {payment_intent_id}")
+        
+        try:
+            from src.models.order import Order
+            from src.models.user import db
+            
+            order = Order.query.filter_by(stripe_payment_intent_id=payment_intent_id).first()
+            if order:
+                order.payment_status = 'cancelled'
+                order.order_status = 'cancelled'
+                order.admin_notes = (order.admin_notes or '') + f'\nPago cancelado en Stripe - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
+                db.session.commit()
+                print(f"✅ Order {order.order_number} marked as cancelled")
+        except Exception as cancel_err:
+            print(f"⚠️ Error processing cancellation webhook: {cancel_err}")
+    
     elif event['type'] == 'customer.subscription.deleted':
         # Subscription cancelled
         subscription_obj = event['data']['object']

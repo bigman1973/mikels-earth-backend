@@ -396,6 +396,68 @@ def reset_order_holded(order_id):
         return jsonify({'error': str(e)}), 500
 
 
+@admin_panel_bp.route('/orders/sync-stripe', methods=['POST'])
+@admin_required
+@role_required('admin', 'sales')
+def sync_stripe_refunds():
+    """
+    Sincroniza el estado de pago de todos los pedidos con Stripe.
+    Detecta reembolsos que se hicieron directamente en Stripe.
+    """
+    try:
+        import stripe
+        from src.models.order import Order
+        
+        orders = Order.query.filter(
+            Order.stripe_payment_intent_id.isnot(None),
+            Order.stripe_payment_intent_id != '',
+            Order.payment_status.in_(['paid', 'pending'])
+        ).all()
+        
+        updated = []
+        errors = []
+        
+        for order in orders:
+            try:
+                pi = stripe.PaymentIntent.retrieve(order.stripe_payment_intent_id)
+                
+                # Verificar si tiene reembolsos
+                if pi.status == 'canceled':
+                    order.payment_status = 'cancelled'
+                    order.order_status = 'cancelled'
+                    order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Pago cancelado en Stripe - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
+                    updated.append({'order': order.order_number, 'new_status': 'cancelled'})
+                elif hasattr(pi, 'charges') and pi.charges and pi.charges.data:
+                    charge = pi.charges.data[0]
+                    if charge.refunded:
+                        order.payment_status = 'refunded'
+                        order.order_status = 'cancelled'
+                        refund_amount = charge.amount_refunded / 100
+                        order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Reembolso total {refund_amount}\u20ac detectado - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
+                        updated.append({'order': order.order_number, 'new_status': 'refunded', 'amount': refund_amount})
+                    elif charge.amount_refunded > 0:
+                        order.payment_status = 'partially_refunded'
+                        refund_amount = charge.amount_refunded / 100
+                        order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Reembolso parcial {refund_amount}\u20ac detectado - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
+                        updated.append({'order': order.order_number, 'new_status': 'partially_refunded', 'amount': refund_amount})
+            except Exception as e:
+                errors.append({'order': order.order_number, 'error': str(e)})
+        
+        if updated:
+            db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'synced': len(orders),
+            'updated': updated,
+            'errors': errors
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Error sincronizando: {str(e)}'}), 500
+
+
 # ============================================================
 # CONTACTOS / CLIENTES
 # ============================================================
