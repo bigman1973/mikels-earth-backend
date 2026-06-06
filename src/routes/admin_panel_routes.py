@@ -376,19 +376,21 @@ def get_client_detail(client_id):
             'address': first_order.shipping_address or '',
             'city': first_order.shipping_city or '',
             'postal_code': first_order.shipping_postal_code or '',
-            'province': first_order.shipping_province or '',
+            'province': '',
             'country': first_order.shipping_country or '',
             'source': 'web'
         }
         
         # Buscar si tiene tickets T en Holded (cruce por nombre/email)
-        all_tickets = holded_get_all_salesreceipts()
-        # Buscar contacto en Holded por email
-        holded_contact = holded_find_contact_by_email(client_email)
         matched_tickets = []
-        if holded_contact:
-            holded_cid = holded_contact.get('id')
-            matched_tickets = [t for t in all_tickets if t.get('contact') == holded_cid]
+        try:
+            all_tickets = holded_get_all_salesreceipts()
+            holded_contact = holded_find_contact_by_email(client_email)
+            if holded_contact:
+                holded_cid = holded_contact.get('id')
+                matched_tickets = [t for t in all_tickets if t.get('contact') == holded_cid]
+        except Exception as e:
+            print(f'Warning: Error buscando tickets en Holded para {client_email}: {e}')
         
         # Procesar pedidos web
         web_orders = []
