@@ -419,27 +419,38 @@ def sync_stripe_refunds():
         
         for order in orders:
             try:
-                pi = stripe.PaymentIntent.retrieve(order.stripe_payment_intent_id)
+                # Expandir charges para poder ver reembolsos
+                pi = stripe.PaymentIntent.retrieve(
+                    order.stripe_payment_intent_id,
+                    expand=['latest_charge']
+                )
                 
-                # Verificar si tiene reembolsos
+                # Verificar si el PI está cancelado
                 if pi.status == 'canceled':
                     order.payment_status = 'cancelled'
                     order.order_status = 'cancelled'
                     order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Pago cancelado en Stripe - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
                     updated.append({'order': order.order_number, 'new_status': 'cancelled'})
-                elif hasattr(pi, 'charges') and pi.charges and pi.charges.data:
-                    charge = pi.charges.data[0]
-                    if charge.refunded:
-                        order.payment_status = 'refunded'
-                        order.order_status = 'cancelled'
-                        refund_amount = charge.amount_refunded / 100
-                        order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Reembolso total {refund_amount}\u20ac detectado - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
-                        updated.append({'order': order.order_number, 'new_status': 'refunded', 'amount': refund_amount})
-                    elif charge.amount_refunded > 0:
-                        order.payment_status = 'partially_refunded'
-                        refund_amount = charge.amount_refunded / 100
-                        order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Reembolso parcial {refund_amount}\u20ac detectado - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
-                        updated.append({'order': order.order_number, 'new_status': 'partially_refunded', 'amount': refund_amount})
+                else:
+                    # Obtener el charge (latest_charge o via charges.data)
+                    charge = None
+                    if hasattr(pi, 'latest_charge') and pi.latest_charge and isinstance(pi.latest_charge, object) and hasattr(pi.latest_charge, 'refunded'):
+                        charge = pi.latest_charge
+                    elif hasattr(pi, 'charges') and pi.charges and pi.charges.data:
+                        charge = pi.charges.data[0]
+                    
+                    if charge:
+                        if charge.refunded:
+                            order.payment_status = 'refunded'
+                            order.order_status = 'cancelled'
+                            refund_amount = charge.amount_refunded / 100
+                            order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Reembolso total {refund_amount}\u20ac detectado - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
+                            updated.append({'order': order.order_number, 'new_status': 'refunded', 'amount': refund_amount})
+                        elif charge.amount_refunded > 0:
+                            order.payment_status = 'partially_refunded'
+                            refund_amount = charge.amount_refunded / 100
+                            order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Reembolso parcial {refund_amount}\u20ac detectado - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
+                            updated.append({'order': order.order_number, 'new_status': 'partially_refunded', 'amount': refund_amount})
             except Exception as e:
                 errors.append({'order': order.order_number, 'error': str(e)})
         
