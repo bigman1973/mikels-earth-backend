@@ -152,7 +152,7 @@ def debug_clients():
                 Order.customer_email,
                 Order.customer_name,
                 func.count(Order.id).label('order_count'),
-                func.sum(Order.total_amount).label('total_spent'),
+                func.sum(Order.total).label('total_spent'),
                 func.max(Order.created_at).label('last_order')
             ).filter(
                 Order.customer_email.isnot(None),
