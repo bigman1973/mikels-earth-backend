@@ -311,6 +311,24 @@ def holded_get_all_salesreceipts():
         return []
 
 
+def holded_get_document(doc_type, doc_id):
+    """Obtiene un documento individual de Holded por tipo e ID.
+    doc_type: 'invoice', 'salesorder', 'salesreceipt'
+    Devuelve el documento completo con items/products."""
+    try:
+        response = requests.get(
+            f'{HOLDED_BASE_URL}/documents/{doc_type}/{doc_id}',
+            headers=HEADERS,
+            timeout=15
+        )
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        print(f"[Holded] Error obteniendo documento {doc_type}/{doc_id}: {e}")
+        return None
+
+
 # ============================================================
 # ALMACENES Y STOCK
 # ============================================================

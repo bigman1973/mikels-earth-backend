@@ -19,7 +19,8 @@ from src.services.holded_service import (
     holded_get_contact_invoices,
     holded_get_contact_salesorders,
     holded_get_contact_salesreceipts,
-    holded_get_all_salesreceipts
+    holded_get_all_salesreceipts,
+    holded_get_document
 )
 from src.models.user import db
 from datetime import datetime
@@ -540,6 +541,47 @@ def _get_client_detail_inner(client_id, Order):
         },
         'source': 'holded'
     })
+
+
+# ============================================================
+# DOCUMENTO INDIVIDUAL (para cargar items bajo demanda)
+# ============================================================
+
+@admin_panel_bp.route('/documents/<doc_type>/<doc_id>', methods=['GET'])
+@admin_required
+def get_document_detail(doc_type, doc_id):
+    """Obtiene un documento individual de Holded con sus items/products.
+    doc_type: invoice, salesorder, salesreceipt"""
+    try:
+        doc = holded_get_document(doc_type, doc_id)
+        if not doc:
+            return jsonify({'error': 'Documento no encontrado'}), 404
+        
+        # Procesar items
+        items = []
+        for item in (doc.get('items') or doc.get('products') or []):
+            price = float(item.get('price', 0) or 0)
+            units = float(item.get('units', 1) or 1)
+            discount = float(item.get('discount', 0) or 0)
+            subtotal = price * units * (1 - discount / 100)
+            items.append({
+                'name': item.get('name', ''),
+                'desc': item.get('desc', ''),
+                'units': units,
+                'price': price,
+                'subtotal': round(subtotal, 2),
+                'discount': discount
+            })
+        
+        return jsonify({
+            'id': doc.get('id'),
+            'docNumber': doc.get('docNumber') or '(Borrador)',
+            'total': doc.get('total', 0),
+            'subtotal': doc.get('subtotal', 0),
+            'items': items
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ============================================================
