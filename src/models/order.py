@@ -34,6 +34,19 @@ class Order(db.Model):
     # Order status
     order_status = db.Column(db.String(20), default='processing')  # processing, shipped, delivered, cancelled
     
+    # Invoice / Billing data
+    needs_invoice = db.Column(db.Boolean, default=False)
+    fiscal_name = db.Column(db.String(200))  # Razón social o nombre fiscal
+    fiscal_nif = db.Column(db.String(20))  # NIF/CIF/DNI
+    fiscal_address = db.Column(db.String(200))
+    fiscal_city = db.Column(db.String(100))
+    fiscal_postal_code = db.Column(db.String(20))
+    
+    # Holded integration
+    holded_id = db.Column(db.String(100))  # ID del documento creado en Holded (salesorder)
+    holded_invoice_id = db.Column(db.String(100))  # ID de la factura/ticket en Holded
+    holded_doc_number = db.Column(db.String(50))  # Número de documento (F260044 o T2600005)
+    
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -74,6 +87,15 @@ class Order(db.Model):
             'order_status': self.order_status,
             'status': self.status,
             'stripe_checkout_session_id': self.stripe_checkout_session_id,
+            'needs_invoice': self.needs_invoice,
+            'fiscal_name': self.fiscal_name,
+            'fiscal_nif': self.fiscal_nif,
+            'fiscal_address': self.fiscal_address,
+            'fiscal_city': self.fiscal_city,
+            'fiscal_postal_code': self.fiscal_postal_code,
+            'holded_id': self.holded_id,
+            'holded_invoice_id': self.holded_invoice_id,
+            'holded_doc_number': self.holded_doc_number,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'paid_at': self.paid_at.isoformat() if self.paid_at else None
@@ -131,4 +153,3 @@ class Subscription(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'next_billing_date': self.next_billing_date.isoformat() if self.next_billing_date else None
         }
-

@@ -207,6 +207,47 @@ def holded_create_invoice(contact_id, items, notes=''):
         return False, str(e)
 
 
+def holded_create_salesreceipt(contact_id, items, notes=''):
+    """
+    Crea un ticket (salesreceipt / T) en Holded.
+    Se usa para clientes que NO solicitan factura formal.
+    items: lista de dicts con {name, units, subtotal, tax}
+    """
+    try:
+        receipt_items = []
+        for item in items:
+            receipt_items.append({
+                'name': item.get('name', ''),
+                'desc': item.get('description', ''),
+                'units': item.get('units', 1),
+                'subtotal': item.get('subtotal', 0),
+                'tax': item.get('tax', 's_iva_4'),
+                'sku': item.get('sku', '')
+            })
+
+        payload = {
+            'contactId': contact_id,
+            'items': receipt_items,
+            'notes': notes,
+            'date': int(datetime.now().timestamp())
+        }
+
+        response = requests.post(
+            f'{HOLDED_BASE_URL}/documents/salesreceipt',
+            headers=HEADERS,
+            json=payload,
+            timeout=15
+        )
+
+        if response.status_code in [200, 201]:
+            return True, response.json()
+        print(f"[Holded] Error creando ticket: {response.status_code} - {response.text}")
+        return False, response.text
+    except Exception as e:
+        print(f"[Holded] Error creando ticket (salesreceipt): {e}")
+        return False, str(e)
+
+
 def holded_get_invoice_pdf(document_id):
     """Obtiene el PDF de una factura de Holded"""
     try:

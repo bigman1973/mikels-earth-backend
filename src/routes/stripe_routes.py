@@ -95,7 +95,13 @@ def create_checkout_session():
                 'discount_code': discount_code or '',
                 'discount_amount': str(discount_amount),
                 'subtotal': str(subtotal),
-                'total': str(total)
+                'total': str(total),
+                'needs_invoice': str(data.get('needs_invoice', False)),
+                'fiscal_name': (data.get('invoice_data') or {}).get('fiscalName', ''),
+                'fiscal_nif': (data.get('invoice_data') or {}).get('nif', ''),
+                'fiscal_address': (data.get('invoice_data') or {}).get('fiscalAddress', ''),
+                'fiscal_city': (data.get('invoice_data') or {}).get('fiscalCity', ''),
+                'fiscal_postal_code': (data.get('invoice_data') or {}).get('fiscalPostalCode', '')
             }
         }
         
@@ -335,6 +341,25 @@ def stripe_webhook():
                     'stripe_payment_intent_id': session.get('payment_intent', '')
                 }
                 
+                # Extraer datos de facturación de metadata
+                needs_invoice_str = session['metadata'].get('needs_invoice', 'False')
+                needs_invoice = needs_invoice_str.lower() == 'true'
+                fiscal_name = session['metadata'].get('fiscal_name', '')
+                fiscal_nif = session['metadata'].get('fiscal_nif', '')
+                fiscal_address = session['metadata'].get('fiscal_address', '')
+                fiscal_city = session['metadata'].get('fiscal_city', '')
+                fiscal_postal_code = session['metadata'].get('fiscal_postal_code', '')
+                
+                # Añadir datos de facturación al order_data para notificaciones
+                order_data['needs_invoice'] = needs_invoice
+                order_data['invoice_data'] = {
+                    'fiscalName': fiscal_name,
+                    'nif': fiscal_nif,
+                    'fiscalAddress': fiscal_address,
+                    'fiscalCity': fiscal_city,
+                    'fiscalPostalCode': fiscal_postal_code
+                } if needs_invoice else None
+                
                 # Guardar pedido en la base de datos
                 try:
                     from src.models.order import Order
@@ -356,12 +381,18 @@ def stripe_webhook():
                         stripe_checkout_session_id=session['id'],
                         payment_status='paid',
                         order_status='processing',
-                        customer_notes=order_data.get('customer_notes', '')
+                        customer_notes=order_data.get('customer_notes', ''),
+                        needs_invoice=needs_invoice,
+                        fiscal_name=fiscal_name if needs_invoice else None,
+                        fiscal_nif=fiscal_nif if needs_invoice else None,
+                        fiscal_address=fiscal_address if needs_invoice else None,
+                        fiscal_city=fiscal_city if needs_invoice else None,
+                        fiscal_postal_code=fiscal_postal_code if needs_invoice else None
                     )
                     new_order.paid_at = datetime.utcnow()
                     db.session.add(new_order)
                     db.session.commit()
-                    print(f"✅ Order {order_number} saved to database")
+                    print(f"✅ Order {order_number} saved to database (invoice: {needs_invoice})")
                 except Exception as db_error:
                     print(f"⚠️ Error saving order to database: {str(db_error)}")
                     # No fallar el webhook por error de BBDD

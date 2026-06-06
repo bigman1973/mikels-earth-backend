@@ -77,6 +77,22 @@ def create_tables():
             except Exception as mig_err:
                 db.session.rollback()
                 print(f"Migration note (non-critical): {mig_err}")
+            # Migración: añadir campos de facturación y Holded a orders
+            try:
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS needs_invoice BOOLEAN DEFAULT FALSE'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS fiscal_name VARCHAR(200)'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS fiscal_nif VARCHAR(20)'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS fiscal_address VARCHAR(200)'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS fiscal_city VARCHAR(100)'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS fiscal_postal_code VARCHAR(20)'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS holded_id VARCHAR(100)'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS holded_invoice_id VARCHAR(100)'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS holded_doc_number VARCHAR(50)'))
+                db.session.commit()
+                print("Migration: invoice/holded fields added to orders")
+            except Exception as mig_err2:
+                db.session.rollback()
+                print(f"Migration invoice fields (non-critical): {mig_err2}")
             app.tables_created = True
         except Exception as e:
             print(f"Error creating tables: {e}")
