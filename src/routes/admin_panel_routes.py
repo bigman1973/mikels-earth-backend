@@ -306,7 +306,7 @@ def get_clients():
         'name': c.get('name', ''),
         'email': c.get('email') or '',
         'phone': c.get('phone') or c.get('mobile') or '',
-        'total_invoiced': c.get('socialInvoiced', 0),
+        'total_invoiced': 0,  # La API de Holded no devuelve este dato en el listado
         'source': 'holded'
     } for c in holded_clients]
     
@@ -355,6 +355,15 @@ def get_client_detail(client_id):
     """
     from src.models.order import Order
     
+    try:
+        return _get_client_detail_inner(client_id, Order)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
+
+
+def _get_client_detail_inner(client_id, Order):
     # ==========================================
     # CLIENTE WEB (DB local / Stripe)
     # ==========================================
@@ -450,11 +459,17 @@ def get_client_detail(client_id):
         """Procesa un documento de Holded y lo formatea para el frontend."""
         items = []
         for item in (doc.get('items') or doc.get('products') or []):
+            price = float(item.get('price', 0) or 0)
+            units = float(item.get('units', 1) or 1)
+            discount = float(item.get('discount', 0) or 0)
+            subtotal = price * units * (1 - discount / 100)
             items.append({
                 'name': item.get('name', ''),
-                'units': item.get('units', 1),
-                'subtotal': item.get('subtotal', 0),
-                'discount': item.get('discount', 0)
+                'desc': item.get('desc', ''),
+                'units': units,
+                'price': price,
+                'subtotal': round(subtotal, 2),
+                'discount': discount
             })
         
         doc_number = doc.get('docNumber', '')
@@ -505,7 +520,7 @@ def get_client_detail(client_id):
             'postal_code': bill_address.get('postalCode', ''),
             'province': bill_address.get('province', ''),
             'country': bill_address.get('country', ''),
-            'total_invoiced': contact.get('socialInvoiced', 0),
+            'total_invoiced': total_invoices + total_tickets + total_salesorders,
             'created_at': contact.get('createdAt'),
             'notes': contact.get('notes', ''),
             'source': 'holded'
