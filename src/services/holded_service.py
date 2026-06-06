@@ -239,9 +239,10 @@ def holded_get_contact(contact_id):
         return None
 
 
-def holded_get_contact_invoices(contact_id):
-    """Obtiene todas las facturas de un contacto específico de Holded.
-    La API v1 no filtra por contactId en query params, así que filtramos manualmente."""
+def holded_get_contact_invoices(contact_id=None):
+    """Obtiene facturas de Holded.
+    Si contact_id es None, devuelve TODAS las facturas.
+    Si contact_id tiene valor, filtra por ese contacto."""
     try:
         response = requests.get(
             f'{HOLDED_BASE_URL}/documents/invoice',
@@ -250,11 +251,13 @@ def holded_get_contact_invoices(contact_id):
         )
         if response.status_code == 200:
             all_invoices = response.json()
+            if contact_id is None:
+                return all_invoices
             # Filtrar por el campo 'contact' que es el ID real del contacto en documentos
             return [inv for inv in all_invoices if inv.get('contact') == contact_id]
         return []
     except Exception as e:
-        print(f"[Holded] Error obteniendo facturas del contacto {contact_id}: {e}")
+        print(f"[Holded] Error obteniendo facturas: {e}")
         return []
 
 

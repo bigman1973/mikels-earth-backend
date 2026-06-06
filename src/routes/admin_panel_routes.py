@@ -302,12 +302,31 @@ def get_clients():
     contacts = holded_get_contacts()
     holded_clients = [c for c in contacts if c.get('type') == 'client']
     
+    # Descargar todas las facturas para calcular total por contacto
+    try:
+        all_invoices = holded_get_contact_invoices(None)  # None = todas
+        all_salesreceipts = holded_get_all_salesreceipts()
+        
+        # Sumar totales por contacto
+        invoiced_by_contact = {}
+        for inv in all_invoices:
+            cid = inv.get('contact')
+            if cid:
+                invoiced_by_contact[cid] = invoiced_by_contact.get(cid, 0) + float(inv.get('total', 0) or 0)
+        for sr in all_salesreceipts:
+            cid = sr.get('contact')
+            if cid:
+                invoiced_by_contact[cid] = invoiced_by_contact.get(cid, 0) + float(sr.get('total', 0) or 0)
+    except Exception as e:
+        print(f'Warning: Error calculando totales facturados: {e}')
+        invoiced_by_contact = {}
+    
     b2b_list = [{
         'id': c.get('id'),
         'name': c.get('name', ''),
         'email': c.get('email') or '',
         'phone': c.get('phone') or c.get('mobile') or '',
-        'total_invoiced': 0,  # La API de Holded no devuelve este dato en el listado
+        'total_invoiced': invoiced_by_contact.get(c.get('id'), 0),
         'source': 'holded'
     } for c in holded_clients]
     
