@@ -316,7 +316,7 @@ def get_clients():
         Order.customer_email,
         Order.customer_name,
         func.count(Order.id).label('order_count'),
-        func.sum(Order.total_amount).label('total_spent'),
+        func.sum(Order.total).label('total_spent'),
         func.max(Order.created_at).label('last_order')
     ).filter(
         Order.customer_email.isnot(None),
@@ -407,16 +407,16 @@ def get_client_detail(client_id):
                 'id': o.id,
                 'order_number': o.order_number,
                 'date': o.created_at.isoformat() if o.created_at else None,
-                'total': float(o.total_amount or 0),
+                'total': float(o.total or 0),
                 'status': o.status,
                 'payment_status': o.payment_status,
-                'items': json.loads(o.items_json) if o.items_json else [],
+                'items': o.items if o.items else [],
                 'ticket_holded': ticket_match,  # None = pendiente de generar
                 'has_ticket': ticket_match is not None
             })
         
         # Estadísticas
-        total_spent = sum(float(o.total_amount or 0) for o in orders)
+        total_spent = sum(float(o.total or 0) for o in orders)
         tickets_generated = len([wo for wo in web_orders if wo['has_ticket']])
         tickets_pending = len(web_orders) - tickets_generated
         
