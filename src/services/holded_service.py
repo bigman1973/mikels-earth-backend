@@ -76,9 +76,12 @@ def holded_get_contacts():
 
 def holded_find_contact_by_email(email):
     """Busca un contacto en Holded por email"""
+    if not email:
+        return None
     contacts = holded_get_contacts()
     for contact in contacts:
-        if contact.get('email', '').lower() == email.lower():
+        contact_email = contact.get('email') or ''
+        if contact_email and contact_email.lower() == email.lower():
             return contact
     return None
 

@@ -194,52 +194,60 @@ def get_orders():
 @role_required('admin', 'sales')
 def create_order_in_holded(order_id):
     """Crea un pedido de venta en Holded a partir de un pedido web"""
-    from src.models.order import Order
-    order = Order.query.get(order_id)
+    try:
+        from src.models.order import Order
+        order = Order.query.get(order_id)
 
-    if not order:
-        return jsonify({'error': 'Pedido no encontrado'}), 404
+        if not order:
+            return jsonify({'error': 'Pedido no encontrado'}), 404
 
-    # Buscar o crear contacto en Holded
-    contact_id = holded_get_or_create_contact(
-        email=order.customer_email,
-        name=order.customer_name,
-        phone=order.customer_phone or '',
-        address_data={
-            'address': order.shipping_address or '',
-            'city': order.shipping_city or '',
-            'postal_code': order.shipping_postal_code or '',
-            'country': 'España'
-        }
-    )
+        # Buscar o crear contacto en Holded
+        contact_id = holded_get_or_create_contact(
+            email=order.customer_email,
+            name=order.customer_name,
+            phone=order.customer_phone or '',
+            address_data={
+                'address': order.shipping_address or '',
+                'city': order.shipping_city or '',
+                'postal_code': order.shipping_postal_code or '',
+                'country': 'España'
+            }
+        )
 
-    if not contact_id:
-        return jsonify({'error': 'No se pudo crear/encontrar el contacto en Holded'}), 500
+        if not contact_id:
+            return jsonify({'error': 'No se pudo crear/encontrar el contacto en Holded'}), 500
 
-    # Preparar items del pedido
-    items = []
-    if order.items:
-        order_items = json.loads(order.items) if isinstance(order.items, str) else order.items
-        for item in order_items:
-            items.append({
-                'name': item.get('name', ''),
-                'description': item.get('description', ''),
-                'units': item.get('quantity', 1),
-                'subtotal': item.get('price', 0),
-                'tax': 's_iva_4',
-                'sku': item.get('sku', '')
-            })
+        # Preparar items del pedido
+        items = []
+        if order.items:
+            order_items = json.loads(order.items) if isinstance(order.items, str) else order.items
+            for item in order_items:
+                items.append({
+                    'name': item.get('name', ''),
+                    'description': item.get('description', ''),
+                    'units': item.get('quantity', 1),
+                    'subtotal': item.get('price', 0),
+                    'tax': 's_iva_4',
+                    'sku': item.get('sku', '')
+                })
 
-    success, result = holded_create_sales_order(
-        contact_id=contact_id,
-        items=items,
-        notes=f'Pedido web #{order.id} - Stripe: {order.stripe_checkout_session_id or "N/A"}'
-    )
+        success, result = holded_create_sales_order(
+            contact_id=contact_id,
+            items=items,
+            notes=f'Pedido web #{order.id} - Stripe: {order.stripe_checkout_session_id or "N/A"}'
+        )
 
-    if success:
-        return jsonify({'success': True, 'holded_order': result})
-    else:
-        return jsonify({'error': f'Error creando pedido en Holded: {result}'}), 500
+        if success:
+            # Guardar holded_id en la DB
+            order.holded_id = result.get('id', '') if isinstance(result, dict) else str(result)
+            db.session.commit()
+            return jsonify({'success': True, 'holded_order': result})
+        else:
+            return jsonify({'error': f'Error creando pedido en Holded: {result}'}), 500
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
 
 
 @admin_panel_bp.route('/orders/<int:order_id>/invoice', methods=['POST'])
@@ -253,115 +261,120 @@ def create_invoice_in_holded(order_id):
     
     Guarda el ID del documento y número en la DB para no duplicar.
     """
-    from src.models.order import Order
-    order = Order.query.get(order_id)
+    try:
+        from src.models.order import Order
+        order = Order.query.get(order_id)
 
-    if not order:
-        return jsonify({'error': 'Pedido no encontrado'}), 404
-    
-    # Verificar si ya se facturó/ticketeó
-    if order.holded_invoice_id:
-        return jsonify({
-            'error': f'Este pedido ya tiene documento en Holded: {order.holded_doc_number or order.holded_invoice_id}',
-            'already_exists': True,
-            'doc_number': order.holded_doc_number
-        }), 409
-
-    # Determinar tipo de documento
-    doc_type = 'invoice' if (order.needs_invoice and order.fiscal_nif) else 'salesreceipt'
-    
-    # Buscar o crear contacto en Holded
-    # Si tiene datos fiscales, usar razón social; si no, nombre del cliente
-    contact_name = order.fiscal_name if (order.needs_invoice and order.fiscal_name) else order.customer_name
-    address_data = None
-    if order.needs_invoice and order.fiscal_address:
-        address_data = {
-            'address': order.fiscal_address,
-            'city': order.fiscal_city or order.shipping_city or '',
-            'postal_code': order.fiscal_postal_code or order.shipping_postal_code or '',
-            'country': 'España'
-        }
-    else:
-        address_data = {
-            'address': order.shipping_address or '',
-            'city': order.shipping_city or '',
-            'postal_code': order.shipping_postal_code or '',
-            'country': order.shipping_country or 'España'
-        }
-    
-    contact_id = holded_get_or_create_contact(
-        email=order.customer_email,
-        name=contact_name,
-        phone=order.customer_phone or '',
-        address_data=address_data
-    )
-
-    if not contact_id:
-        return jsonify({'error': 'No se pudo crear/encontrar el contacto en Holded'}), 500
-
-    # Si es factura y tiene NIF, actualizar el contacto con el NIF
-    if doc_type == 'invoice' and order.fiscal_nif:
-        try:
-            import requests as req
-            req.put(
-                f'{HOLDED_BASE_URL}/contacts/{contact_id}',
-                headers={'key': HOLDED_API_KEY, 'Content-Type': 'application/json'},
-                json={'vatnumber': order.fiscal_nif},
-                timeout=10
-            )
-        except Exception:
-            pass  # No bloquear si falla actualizar NIF
-
-    # Preparar items
-    items = []
-    if order.items:
-        order_items = json.loads(order.items) if isinstance(order.items, str) else order.items
-        for item in order_items:
-            items.append({
-                'name': item.get('name', ''),
-                'units': item.get('quantity', 1),
-                'subtotal': item.get('price', 0),
-                'tax': 's_iva_4',
-                'sku': item.get('sku', '')
-            })
-
-    # Crear documento según tipo
-    if doc_type == 'invoice':
-        notes = f'Factura pedido web #{order.order_number} | NIF: {order.fiscal_nif}'
-        success, result = holded_create_invoice(
-            contact_id=contact_id,
-            items=items,
-            notes=notes
-        )
-    else:
-        notes = f'Ticket pedido web #{order.order_number}'
-        success, result = holded_create_salesreceipt(
-            contact_id=contact_id,
-            items=items,
-            notes=notes
-        )
-
-    if success:
-        # Guardar referencia en la DB
-        doc_id = result.get('id', '')
-        doc_number = result.get('docNumber', '') or result.get('num', '')
-        order.holded_invoice_id = doc_id
-        order.holded_doc_number = doc_number
-        try:
-            db.session.commit()
-            print(f"✅ Order {order.order_number} - {doc_type} created in Holded: {doc_number}")
-        except Exception as db_err:
-            print(f"⚠️ Error saving holded ref to DB: {db_err}")
+        if not order:
+            return jsonify({'error': 'Pedido no encontrado'}), 404
         
-        return jsonify({
-            'success': True,
-            'doc_type': doc_type,
-            'doc_type_label': 'Factura' if doc_type == 'invoice' else 'Ticket',
-            'doc_number': doc_number,
-            'holded_id': doc_id
-        })
-    else:
-        return jsonify({'error': f'Error creando {"factura" if doc_type == "invoice" else "ticket"} en Holded: {result}'}), 500
+        # Verificar si ya se facturó/ticketó
+        if order.holded_invoice_id:
+            return jsonify({
+                'error': f'Este pedido ya tiene documento en Holded: {order.holded_doc_number or order.holded_invoice_id}',
+                'already_exists': True,
+                'doc_number': order.holded_doc_number
+            }), 409
+
+        # Determinar tipo de documento
+        doc_type = 'invoice' if (order.needs_invoice and order.fiscal_nif) else 'salesreceipt'
+        
+        # Buscar o crear contacto en Holded
+        # Si tiene datos fiscales, usar razón social; si no, nombre del cliente
+        contact_name = order.fiscal_name if (order.needs_invoice and order.fiscal_name) else order.customer_name
+        address_data = None
+        if order.needs_invoice and order.fiscal_address:
+            address_data = {
+                'address': order.fiscal_address,
+                'city': order.fiscal_city or order.shipping_city or '',
+                'postal_code': order.fiscal_postal_code or order.shipping_postal_code or '',
+                'country': 'España'
+            }
+        else:
+            address_data = {
+                'address': order.shipping_address or '',
+                'city': order.shipping_city or '',
+                'postal_code': order.shipping_postal_code or '',
+                'country': order.shipping_country or 'España'
+            }
+        
+        contact_id = holded_get_or_create_contact(
+            email=order.customer_email,
+            name=contact_name,
+            phone=order.customer_phone or '',
+            address_data=address_data
+        )
+
+        if not contact_id:
+            return jsonify({'error': 'No se pudo crear/encontrar el contacto en Holded'}), 500
+
+        # Si es factura y tiene NIF, actualizar el contacto con el NIF
+        if doc_type == 'invoice' and order.fiscal_nif:
+            try:
+                import requests as req
+                req.put(
+                    f'{HOLDED_BASE_URL}/contacts/{contact_id}',
+                    headers={'key': HOLDED_API_KEY, 'Content-Type': 'application/json'},
+                    json={'vatnumber': order.fiscal_nif},
+                    timeout=10
+                )
+            except Exception:
+                pass  # No bloquear si falla actualizar NIF
+
+        # Preparar items
+        items = []
+        if order.items:
+            order_items = json.loads(order.items) if isinstance(order.items, str) else order.items
+            for item in order_items:
+                items.append({
+                    'name': item.get('name', ''),
+                    'units': item.get('quantity', 1),
+                    'subtotal': item.get('price', 0),
+                    'tax': 's_iva_4',
+                    'sku': item.get('sku', '')
+                })
+
+        # Crear documento según tipo
+        if doc_type == 'invoice':
+            notes = f'Factura pedido web #{order.order_number} | NIF: {order.fiscal_nif}'
+            success, result = holded_create_invoice(
+                contact_id=contact_id,
+                items=items,
+                notes=notes
+            )
+        else:
+            notes = f'Ticket pedido web #{order.order_number}'
+            success, result = holded_create_salesreceipt(
+                contact_id=contact_id,
+                items=items,
+                notes=notes
+            )
+
+        if success:
+            # Guardar referencia en la DB
+            doc_id = result.get('id', '')
+            doc_number = result.get('docNumber', '') or result.get('num', '')
+            order.holded_invoice_id = doc_id
+            order.holded_doc_number = doc_number
+            try:
+                db.session.commit()
+                print(f"✅ Order {order.order_number} - {doc_type} created in Holded: {doc_number}")
+            except Exception as db_err:
+                print(f"⚠️ Error saving holded ref to DB: {db_err}")
+            
+            return jsonify({
+                'success': True,
+                'doc_type': doc_type,
+                'doc_type_label': 'Factura' if doc_type == 'invoice' else 'Ticket',
+                'doc_number': doc_number,
+                'holded_id': doc_id
+            })
+        else:
+            return jsonify({'error': f'Error creando {"factura" if doc_type == "invoice" else "ticket"} en Holded: {result}'}), 500
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
 
 
 # ============================================================

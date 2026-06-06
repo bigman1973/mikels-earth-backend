@@ -61,6 +61,21 @@ CORS(app, resources={
     }
 })
 
+# Error handler global para que los 500 incluyan CORS headers
+@app.errorhandler(500)
+def handle_500(e):
+    response = jsonify({'error': f'Error interno del servidor: {str(e)}'})
+    response.status_code = 500
+    return response
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    traceback.print_exc()
+    response = jsonify({'error': f'Error interno: {str(e)}'})
+    response.status_code = 500
+    return response
+
 # Mover creación de tablas a la primera solicitud para evitar timeout
 @app.before_request
 def create_tables():
