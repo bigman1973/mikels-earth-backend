@@ -659,6 +659,65 @@ def sync_stripe_refunds():
         return jsonify({'error': f'Error sincronizando: {str(e)}'}), 500
 
 
+@admin_panel_bp.route('/orders/fix-prices', methods=['POST'])
+@admin_required
+@role_required('admin')
+def fix_order_prices():
+    """
+    Recorre todos los pedidos con stripe_session_id y recalcula los precios unitarios
+    de los items consultando Stripe directamente.
+    Corrige el bug donde se guardaba amount_total en vez del precio unitario.
+    """
+    try:
+        import stripe
+        from src.models.order import Order
+        
+        orders = Order.query.filter(
+            Order.stripe_session_id.isnot(None),
+            Order.stripe_session_id != ''
+        ).all()
+        
+        fixed = 0
+        errors = []
+        
+        for order in orders:
+            try:
+                # Obtener line_items de Stripe
+                line_items = stripe.checkout.Session.list_line_items(
+                    order.stripe_session_id, limit=100
+                )
+                
+                new_items = []
+                for item in line_items.data:
+                    unit_price = (item.amount_total / 100) / item.quantity if item.quantity else item.amount_total / 100
+                    new_items.append({
+                        'name': item.description,
+                        'quantity': item.quantity,
+                        'price': round(unit_price, 2)
+                    })
+                
+                if new_items:
+                    order.items = new_items
+                    fixed += 1
+                    
+            except Exception as e:
+                errors.append({'order_number': order.order_number, 'error': str(e)})
+                continue
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'total_orders': len(orders),
+            'fixed': fixed,
+            'errors': errors
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 # ============================================================
 # CONTACTOS / CLIENTES
 # ============================================================
