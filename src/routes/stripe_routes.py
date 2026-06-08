@@ -267,10 +267,13 @@ def stripe_webhook():
                 line_items = stripe.checkout.Session.list_line_items(session['id'], limit=100)
                 items = []
                 for item in line_items.data:
+                    # amount_total es el total de la línea (precio × cantidad)
+                    # Guardamos el precio unitario para que el desglose sea correcto
+                    unit_price = (item.amount_total / 100) / item.quantity if item.quantity else item.amount_total / 100
                     items.append({
                         'name': item.description,
                         'quantity': item.quantity,
-                        'price': item.amount_total / 100
+                        'price': round(unit_price, 2)
                     })
                 
                 # Extraer dirección de envío de Stripe shipping_details (prioridad)

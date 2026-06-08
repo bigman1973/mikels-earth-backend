@@ -276,15 +276,20 @@ def create_order_in_holded(order_id):
             return jsonify({'error': 'No se pudo crear/encontrar el contacto en Holded'}), 500
 
         # Preparar items del pedido
+        # item['price'] es el precio unitario CON IVA (viene de Stripe)
+        # Holded espera el precio unitario SIN IVA en 'subtotal'
         items = []
         if order.items:
             order_items = json.loads(order.items) if isinstance(order.items, str) else order.items
             for item in order_items:
+                price_with_iva = item.get('price', 0)
+                # Quitar IVA (4% para AOVE/conservas)
+                price_without_iva = round(price_with_iva / 1.04, 2)
                 items.append({
                     'name': item.get('name', ''),
                     'description': item.get('description', ''),
                     'units': item.get('quantity', 1),
-                    'subtotal': item.get('price', 0),
+                    'subtotal': price_without_iva,
                     'tax': 's_iva_4',
                     'sku': item.get('sku', '')
                 })
@@ -380,14 +385,19 @@ def create_invoice_in_holded(order_id):
                 pass  # No bloquear si falla actualizar NIF
 
         # Preparar items
+        # item['price'] es el precio unitario CON IVA (viene de Stripe)
+        # Holded espera el precio unitario SIN IVA en 'subtotal'
         items = []
         if order.items:
             order_items = json.loads(order.items) if isinstance(order.items, str) else order.items
             for item in order_items:
+                price_with_iva = item.get('price', 0)
+                # Quitar IVA (4% para AOVE/conservas)
+                price_without_iva = round(price_with_iva / 1.04, 2)
                 items.append({
                     'name': item.get('name', ''),
                     'units': item.get('quantity', 1),
-                    'subtotal': item.get('price', 0),
+                    'subtotal': price_without_iva,
                     'tax': 's_iva_4',
                     'sku': item.get('sku', '')
                 })

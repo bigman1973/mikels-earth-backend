@@ -188,16 +188,18 @@ def holded_create_sales_order(contact_id, items, notes=''):
     """
     Crea un pedido de venta en Holded.
     items: lista de dicts con {name, units, subtotal, tax (ej: 's_iva_4')}
+    subtotal = precio unitario SIN IVA
     """
     try:
         order_items = []
         for item in items:
+            tax_id = item.get('tax', 's_iva_4')
             order_items.append({
                 'name': item.get('name', ''),
                 'desc': item.get('description', ''),
                 'units': item.get('units', 1),
                 'subtotal': item.get('subtotal', 0),
-                'tax': item.get('tax', 's_iva_4'),
+                'taxes': [tax_id],  # Holded espera array 'taxes', no string 'tax'
                 'sku': item.get('sku', '')
             })
 
@@ -232,16 +234,19 @@ def holded_create_invoice(contact_id, items, notes=''):
     """
     Crea una factura en Holded.
     items: lista de dicts con {name, units, subtotal, tax}
+    subtotal = precio unitario SIN IVA
+    tax = identificador del impuesto (ej: 's_iva_4')
     """
     try:
         invoice_items = []
         for item in items:
+            tax_id = item.get('tax', 's_iva_4')
             invoice_items.append({
                 'name': item.get('name', ''),
                 'desc': item.get('description', ''),
                 'units': item.get('units', 1),
                 'subtotal': item.get('subtotal', 0),
-                'tax': item.get('tax', 's_iva_4'),
+                'taxes': [tax_id],  # Holded espera array 'taxes', no string 'tax'
                 'sku': item.get('sku', '')
             })
 
@@ -249,7 +254,8 @@ def holded_create_invoice(contact_id, items, notes=''):
             'contactId': contact_id,
             'items': invoice_items,
             'notes': notes,
-            'date': int(datetime.now().timestamp())
+            'date': int(datetime.now().timestamp()),
+            'draft': False  # No crear como borrador, numerar directamente
         }
 
         response = requests.post(
@@ -273,16 +279,18 @@ def holded_create_salesreceipt(contact_id, items, notes=''):
     Crea un ticket (salesreceipt / T) en Holded.
     Se usa para clientes que NO solicitan factura formal.
     items: lista de dicts con {name, units, subtotal, tax}
+    subtotal = precio unitario SIN IVA
     """
     try:
         receipt_items = []
         for item in items:
+            tax_id = item.get('tax', 's_iva_4')
             receipt_items.append({
                 'name': item.get('name', ''),
                 'desc': item.get('description', ''),
                 'units': item.get('units', 1),
                 'subtotal': item.get('subtotal', 0),
-                'tax': item.get('tax', 's_iva_4'),
+                'taxes': [tax_id],  # Holded espera array 'taxes', no string 'tax'
                 'sku': item.get('sku', '')
             })
 
@@ -290,7 +298,8 @@ def holded_create_salesreceipt(contact_id, items, notes=''):
             'contactId': contact_id,
             'items': receipt_items,
             'notes': notes,
-            'date': int(datetime.now().timestamp())
+            'date': int(datetime.now().timestamp()),
+            'draft': False  # No crear como borrador
         }
 
         response = requests.post(
