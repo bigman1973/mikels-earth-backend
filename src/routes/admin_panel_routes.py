@@ -50,6 +50,9 @@ def get_products():
 
     # Leer precios web desde el archivo de productos del frontend
     web_prices = _get_web_prices()
+    
+    # Leer costes de portes y preparación
+    product_costs = _get_product_costs()
 
     result = []
     matched_web_skus = set()
@@ -75,6 +78,7 @@ def get_products():
                     elif '4' in str(tax_val):
                         iva_rate = 0.04
 
+        sku_costs = product_costs.get(sku, {})
         product_data = {
             'holded_id': p.get('id'),
             'name': p.get('name', ''),
@@ -91,7 +95,9 @@ def get_products():
             'web_name': web_match.get('name'),
             'web_category': web_match.get('category'),
             'synced': _is_price_synced(p, web_prices),
-            'source': 'holded'
+            'source': 'holded',
+            'shipping_cost': sku_costs.get('shipping_cost', 0),
+            'preparation_cost': sku_costs.get('preparation_cost', 0)
         }
         result.append(product_data)
 
@@ -107,6 +113,7 @@ def get_products():
             else:
                 iva_rate = 0.04  # Packs de aceite/conserva → 4% por defecto
 
+            sku_costs = product_costs.get(sku, {})
             product_data = {
                 'holded_id': None,
                 'name': wp.get('name', ''),
@@ -123,7 +130,9 @@ def get_products():
                 'web_name': wp.get('name'),
                 'web_category': wp.get('category'),
                 'synced': None,
-                'source': 'web_only'
+                'source': 'web_only',
+                'shipping_cost': sku_costs.get('shipping_cost', 0),
+                'preparation_cost': sku_costs.get('preparation_cost', 0)
             }
             result.append(product_data)
 
@@ -199,6 +208,119 @@ def sync_prices_from_holded():
         'total_compared': len([p for p in holded_products if p.get('sku', '') in web_prices]),
         'total_different': len(differences)
     })
+
+
+# ============================================================
+# COSTES DE PORTES Y PREPARACIÓN POR PRODUCTO
+# ============================================================
+
+def _get_product_costs():
+    """Lee los costes de portes y preparación por SKU."""
+    costs_file = os.environ.get('PRODUCT_COSTS_FILE', '/app/product_costs.json')
+    try:
+        if os.path.exists(costs_file):
+            with open(costs_file, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[Admin] Error leyendo costes: {e}")
+    return {}
+
+
+def _save_product_costs(costs):
+    """Guarda los costes de portes y preparación por SKU."""
+    costs_file = os.environ.get('PRODUCT_COSTS_FILE', '/app/product_costs.json')
+    try:
+        with open(costs_file, 'w') as f:
+            json.dump(costs, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"[Admin] Error guardando costes: {e}")
+        return False
+
+
+@admin_panel_bp.route('/products/costs', methods=['GET'])
+@admin_required
+def get_product_costs():
+    """Devuelve los costes de portes y preparación por producto."""
+    costs = _get_product_costs()
+    return jsonify({'costs': costs})
+
+
+@admin_panel_bp.route('/products/<sku>/costs', methods=['PUT'])
+@admin_required
+@role_required('admin')
+def update_product_costs(sku):
+    """
+    Actualiza los costes de portes y preparación de un producto.
+    Body: { shipping_cost: float, preparation_cost: float }
+    """
+    try:
+        data = request.get_json()
+        shipping_cost = float(data.get('shipping_cost', 0))
+        preparation_cost = float(data.get('preparation_cost', 0))
+
+        costs = _get_product_costs()
+        costs[sku] = {
+            'shipping_cost': shipping_cost,
+            'preparation_cost': preparation_cost
+        }
+
+        if _save_product_costs(costs):
+            return jsonify({
+                'success': True,
+                'sku': sku,
+                'shipping_cost': shipping_cost,
+                'preparation_cost': preparation_cost
+            })
+        else:
+            return jsonify({'error': 'Error guardando costes'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_panel_bp.route('/products/<sku>/web-price', methods=['PUT'])
+@admin_required
+@role_required('admin')
+def update_web_price(sku):
+    """
+    Actualiza el precio web de un producto.
+    Modifica el archivo web_products.json y el fallback del catálogo.
+    Body: { price: float }
+    """
+    try:
+        data = request.get_json()
+        new_price = float(data.get('price', 0))
+
+        if new_price <= 0:
+            return jsonify({'error': 'El precio debe ser mayor que 0'}), 400
+
+        # Actualizar en web_products.json si existe
+        products_file = os.environ.get('WEB_PRODUCTS_FILE', '/app/web_products.json')
+        updated = False
+
+        if os.path.exists(products_file):
+            try:
+                with open(products_file, 'r') as f:
+                    products = json.load(f)
+                for p in products:
+                    if p.get('sku') == sku:
+                        p['price'] = new_price
+                        updated = True
+                        break
+                if updated:
+                    with open(products_file, 'w') as f:
+                        json.dump(products, f, indent=2)
+            except Exception as e:
+                print(f"[Admin] Error actualizando web_products.json: {e}")
+
+        return jsonify({
+            'success': True,
+            'sku': sku,
+            'new_price': new_price,
+            'file_updated': updated
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ============================================================
