@@ -334,14 +334,25 @@ def get_pack_components():
                 })
             else:
                 comp_sku = comp.get('sku', '')
-                comp_cost = cost_by_sku.get(comp_sku, 0)
+                holded_cost = cost_by_sku.get(comp_sku, 0)
+                # Si Holded tiene coste > 0, usarlo. Si no, buscar coste manual.
+                if holded_cost > 0:
+                    comp_cost = holded_cost
+                    source = 'holded'
+                    editable = False
+                else:
+                    # Sin coste en Holded: permitir edición manual
+                    comp_cost = manual_costs.get(comp_sku, 0)
+                    source = 'manual' if comp_cost > 0 else 'sin_coste'
+                    editable = True
                 pack_detail.append({
+                    'id': comp_sku,  # Usar SKU como id para guardar coste manual
                     'sku': comp_sku,
                     'name': comp.get('name', ''),
                     'quantity': comp.get('quantity', 1),
                     'cost': comp_cost,
-                    'source': 'holded',
-                    'editable': False
+                    'source': source,
+                    'editable': editable
                 })
             total_cost += comp_cost * comp.get('quantity', 1)
         
@@ -1321,8 +1332,13 @@ def _calculate_pack_costs(holded_products):
                 comp_id = comp.get('id', '')
                 comp_cost = manual_costs.get(comp_id, 0)
             else:
-                # Componente con SKU: buscar en Holded
-                comp_cost = cost_by_sku.get(comp.get('sku', ''), 0)
+                # Componente con SKU: buscar en Holded, si es 0 buscar manual
+                comp_sku = comp.get('sku', '')
+                holded_cost = cost_by_sku.get(comp_sku, 0)
+                if holded_cost > 0:
+                    comp_cost = holded_cost
+                else:
+                    comp_cost = manual_costs.get(comp_sku, 0)
             total_cost += comp_cost * comp.get('quantity', 1)
         pack_costs[pack_sku] = round(total_cost, 2)
 
