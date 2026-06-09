@@ -54,6 +54,9 @@ def get_products():
     # Leer costes de portes y preparación
     product_costs = _get_product_costs()
 
+    # Calcular costes de packs basados en componentes
+    pack_costs = _calculate_pack_costs(holded_products)
+
     result = []
     matched_web_skus = set()
 
@@ -79,6 +82,13 @@ def get_products():
                         iva_rate = 0.04
 
         sku_costs = product_costs.get(sku, {})
+        # Para packs: usar coste calculado de componentes si es mayor que el coste de Holded
+        raw_cost = p.get('cost', 0) or 0
+        if sku in pack_costs and pack_costs[sku] > 0:
+            effective_cost = pack_costs[sku]
+        else:
+            effective_cost = raw_cost
+
         product_data = {
             'holded_id': p.get('id'),
             'name': p.get('name', ''),
@@ -88,7 +98,8 @@ def get_products():
             'holded_total': p.get('total', 0),  # Precio con IVA
             'stock': p.get('stock', 0),
             'has_stock': p.get('hasStock', False),
-            'cost': p.get('cost', 0),
+            'cost': effective_cost,
+            'cost_source': 'pack_components' if (sku in pack_costs and pack_costs[sku] > 0) else 'holded',
             'tax': taxes,
             'iva_rate': iva_rate,
             'web_price': web_match.get('price'),
@@ -114,6 +125,8 @@ def get_products():
                 iva_rate = 0.04  # Packs de aceite/conserva → 4% por defecto
 
             sku_costs = product_costs.get(sku, {})
+            # Para packs web_only: usar coste calculado de componentes
+            effective_cost = pack_costs.get(sku, 0) if sku in pack_costs else 0
             product_data = {
                 'holded_id': None,
                 'name': wp.get('name', ''),
@@ -123,7 +136,8 @@ def get_products():
                 'holded_total': None,
                 'stock': wp.get('stock', 0),
                 'has_stock': True,
-                'cost': 0,
+                'cost': effective_cost,
+                'cost_source': 'pack_components' if effective_cost > 0 else 'none',
                 'tax': [],
                 'iva_rate': iva_rate,
                 'web_price': wp.get('price'),
@@ -1137,6 +1151,60 @@ def get_dashboard():
 # ============================================================
 # UTILIDADES INTERNAS
 # ============================================================
+
+# Composición de packs: SKU del pack → lista de {sku, quantity} de sus componentes
+# Los costes de los componentes se obtienen de Holded (campo 'cost')
+PACK_COMPONENTS = {
+    'MIKPACK01': [  # Pack Degustación Premium (9€)
+        {'sku': 'MIKPARJ250', 'quantity': 1},  # Mermelada de Paraguayo 250g
+        # 4x botellas de aceite 14ml (muestras, coste despreciable ~0.50€ total estimado)
+    ],
+    'MIKEST01': [  # Estuche de Regalo Premium (5€)
+        # Solo el estuche cilíndrico de cartón, sin producto dentro
+    ],
+    'MIKPACKFR': [  # Pack Fruta Premium (35€)
+        {'sku': 'MIKPARA450', 'quantity': 1},  # Paraguayo en Almíbar
+        {'sku': 'MIKNECT450', 'quantity': 1},  # Nectarina en Almíbar
+        {'sku': 'MIKPARJ250', 'quantity': 1},  # Mermelada de Paraguayo
+        # + estuche de madera (coste incluido en product_costs como preparación)
+    ],
+    'MIKPACKTP': [  # Pack Temprano Premium (19€)
+        {'sku': 'MIKVET500', 'quantity': 1},  # Aceite Temprano 500ml
+        {'sku': 'MIKEST01', 'quantity': 1},   # Estuche premium temprano
+    ],
+    'MIKPACKCO': [  # Pack Completo Mikel's Earth (81.90€)
+        {'sku': 'MIKVE5LP', 'quantity': 1},   # Aceite 5L
+        {'sku': 'MIKVET500', 'quantity': 1},  # Aceite Temprano 500ml
+        {'sku': 'MIKPARA450', 'quantity': 1}, # Paraguayo en Almíbar
+        {'sku': 'MIKNECT450', 'quantity': 1}, # Nectarina en Almíbar
+        {'sku': 'MIKPARJ250', 'quantity': 1}, # Mermelada de Paraguayo
+        # + 4 botellas degustación + estuche kraft
+    ],
+}
+
+
+def _calculate_pack_costs(holded_products):
+    """
+    Calcula el coste de cada pack sumando los costes de sus componentes en Holded.
+    Devuelve un dict {pack_sku: coste_calculado}
+    """
+    # Crear mapa de costes por SKU desde Holded
+    cost_by_sku = {}
+    for p in holded_products:
+        sku = p.get('sku', '')
+        if sku:
+            cost_by_sku[sku] = p.get('cost', 0) or 0
+
+    pack_costs = {}
+    for pack_sku, components in PACK_COMPONENTS.items():
+        total_cost = 0
+        for comp in components:
+            comp_cost = cost_by_sku.get(comp['sku'], 0)
+            total_cost += comp_cost * comp.get('quantity', 1)
+        pack_costs[pack_sku] = round(total_cost, 2)
+
+    return pack_costs
+
 
 def _get_web_prices():
     """
