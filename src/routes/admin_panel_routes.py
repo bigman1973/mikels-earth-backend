@@ -673,8 +673,8 @@ def fix_order_prices():
         from src.models.order import Order
         
         orders = Order.query.filter(
-            Order.stripe_session_id.isnot(None),
-            Order.stripe_session_id != ''
+            Order.stripe_checkout_session_id.isnot(None),
+            Order.stripe_checkout_session_id != ''
         ).all()
         
         fixed = 0
@@ -684,7 +684,7 @@ def fix_order_prices():
             try:
                 # Obtener line_items de Stripe
                 line_items = stripe.checkout.Session.list_line_items(
-                    order.stripe_session_id, limit=100
+                    order.stripe_checkout_session_id, limit=100
                 )
                 
                 new_items = []
