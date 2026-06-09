@@ -255,7 +255,7 @@ def holded_create_invoice(contact_id, items, notes=''):
             'items': invoice_items,
             'notes': notes,
             'date': int(datetime.now().timestamp()),
-            'draft': False  # No crear como borrador, numerar directamente
+            'approveDoc': True  # Aprobar directamente (no borrador) según API Holded
         }
 
         response = requests.post(
@@ -299,7 +299,7 @@ def holded_create_salesreceipt(contact_id, items, notes=''):
             'items': receipt_items,
             'notes': notes,
             'date': int(datetime.now().timestamp()),
-            'draft': False  # No crear como borrador
+            'approveDoc': True  # Aprobar directamente (no borrador) según API Holded
         }
 
         response = requests.post(
