@@ -773,16 +773,19 @@ def send_order_document_email(order_id):
         # Subject y message por defecto con CTA de reseña
         default_subject = f'Tu factura de Mikel\'s Earth - Gracias por tu compra, {first_name} \U0001f33f'
         default_message = (
-            f'Hola {first_name},\n\n'
-            f'Te adjuntamos tu factura. Esperamos que disfrutes de nuestros productos '
-            f'tanto como nosotros disfrutamos elabor\u00e1ndolos.\n\n'
-            f'Si tienes un momento, nos encantar\u00eda conocer tu opini\u00f3n. '
-            f'Puedes dejarnos tu rese\u00f1a aqu\u00ed:\n'
-            f'https://www.mikels.es/opiniones\n\n'
-            f'Tu experiencia nos ayuda a seguir mejorando y a que m\u00e1s personas '
-            f'descubran nuestro aceite y conservas artesanales.\n\n'
-            f'\u00a1Gracias por confiar en Mikel\'s Earth!\n'
-            f'El equipo de Mikel\'s Earth'
+            f'<p>Hola {first_name},</p>'
+            f'<p>Te adjuntamos tu factura. Esperamos que disfrutes de nuestros productos '
+            f'tanto como nosotros disfrutamos elabor\u00e1ndolos.</p>'
+            f'<p>Si tienes un momento, nos encantar\u00eda conocer tu opini\u00f3n. '
+            f'Puedes dejarnos tu rese\u00f1a aqu\u00ed:</p>'
+            f'<p style="text-align:center;"><a href="https://www.mikels.es/opiniones" '
+            f'style="display:inline-block;padding:12px 24px;background-color:#4a7c59;color:#ffffff;'
+            f'text-decoration:none;border-radius:6px;font-weight:bold;">'
+            f'Dejar mi opini\u00f3n \U0001f33f</a></p>'
+            f'<p>Tu experiencia nos ayuda a seguir mejorando y a que m\u00e1s personas '
+            f'descubran nuestro aceite y conservas artesanales.</p>'
+            f'<p>\u00a1Gracias por confiar en Mikel\'s Earth!<br>'
+            f'El equipo de Mikel\'s Earth</p>'
         )
         
         subject = data.get('subject', None) or default_subject
