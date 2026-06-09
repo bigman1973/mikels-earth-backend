@@ -677,7 +677,24 @@ def create_invoice_in_holded(order_id):
         if success:
             # Guardar referencia en la DB
             doc_id = result.get('id', '')
-            doc_number = result.get('docNumber', '') or result.get('num', '')
+            doc_number = result.get('docNumber', '') or result.get('num', '') or result.get('invoiceNum', '')
+            
+            # Si no viene docNumber en la respuesta, obtenerlo con GET al documento
+            if not doc_number and doc_id:
+                try:
+                    import requests as req
+                    doc_detail = req.get(
+                        f'{HOLDED_BASE_URL}/documents/{doc_type}/{doc_id}',
+                        headers={'key': HOLDED_API_KEY, 'Content-Type': 'application/json'},
+                        timeout=10
+                    )
+                    if doc_detail.status_code == 200:
+                        detail_data = doc_detail.json()
+                        doc_number = detail_data.get('docNumber', '') or detail_data.get('invoiceNum', '') or detail_data.get('num', '')
+                        print(f"[Holded] DocNumber obtenido via GET: {doc_number}")
+                except Exception as detail_err:
+                    print(f"[Holded] No se pudo obtener docNumber: {detail_err}")
+            
             order.holded_invoice_id = doc_id
             order.holded_doc_number = doc_number
             try:
