@@ -922,6 +922,61 @@ def fix_order_prices():
         return jsonify({'error': str(e)}), 500
 
 
+@admin_panel_bp.route('/orders/sync-doc-numbers', methods=['POST'])
+@admin_required
+@role_required('admin')
+def sync_doc_numbers():
+    """
+    Sincroniza los números de documento (docNumber) desde Holded
+    para pedidos que tienen holded_invoice_id pero no tienen holded_doc_number.
+    """
+    try:
+        import requests as req
+        from src.models.order import Order
+        
+        orders = Order.query.filter(
+            Order.holded_invoice_id.isnot(None),
+            Order.holded_invoice_id != '',
+            (Order.holded_doc_number.is_(None) | (Order.holded_doc_number == ''))
+        ).all()
+        
+        updated = 0
+        errors = []
+        
+        for order in orders:
+            try:
+                doc_type = 'invoice' if (order.needs_invoice and order.fiscal_nif) else 'salesreceipt'
+                response = req.get(
+                    f'{HOLDED_BASE_URL}/documents/{doc_type}/{order.holded_invoice_id}',
+                    headers={'key': HOLDED_API_KEY, 'Content-Type': 'application/json'},
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    doc_number = data.get('docNumber', '') or data.get('invoiceNum', '') or data.get('num', '')
+                    if doc_number:
+                        order.holded_doc_number = doc_number
+                        updated += 1
+                else:
+                    errors.append({'order': order.order_number, 'error': f'HTTP {response.status_code}'})
+            except Exception as e:
+                errors.append({'order': order.order_number, 'error': str(e)})
+                continue
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'total_pending': len(orders),
+            'updated': updated,
+            'errors': errors
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 # ============================================================
 # CONTACTOS / CLIENTES
 # ============================================================
