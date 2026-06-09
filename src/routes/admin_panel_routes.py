@@ -509,18 +509,36 @@ def create_invoice_in_holded(order_id):
         # Preparar items
         # item['price'] es el precio unitario CON IVA (viene de Stripe)
         # Holded espera el precio unitario SIN IVA en 'subtotal'
+        # IVA por tipo de producto:
+        #   - Aceites AOVE → 4% (s_iva_4)
+        #   - Conservas (paraguayo, nectarina, mermelada) → 10% (s_iva_10)
+        #   - Estuches/packaging → 21% (s_iva_21)
+        #   - Packs mixtos → 4% (mayoría aceite)
         items = []
         if order.items:
             order_items = json.loads(order.items) if isinstance(order.items, str) else order.items
             for item in order_items:
                 price_with_iva = item.get('price', 0)
-                # Quitar IVA (4% para AOVE/conservas)
-                price_without_iva = round(price_with_iva / 1.04, 2)
+                item_name = (item.get('name', '') or '').lower()
+                
+                # Determinar IVA según producto
+                if any(kw in item_name for kw in ['paraguayo', 'nectarina', 'mermelada', 'almíbar', 'almibar', 'conserva']):
+                    iva_rate = 0.10
+                    tax_id = 's_iva_10'
+                elif any(kw in item_name for kw in ['estuche']):
+                    iva_rate = 0.21
+                    tax_id = 's_iva_21'
+                else:
+                    # Aceites y packs (mayoría aceite) → 4%
+                    iva_rate = 0.04
+                    tax_id = 's_iva_4'
+                
+                price_without_iva = round(price_with_iva / (1 + iva_rate), 2)
                 items.append({
                     'name': item.get('name', ''),
                     'units': item.get('quantity', 1),
                     'subtotal': price_without_iva,
-                    'tax': 's_iva_4',
+                    'tax': tax_id,
                     'sku': item.get('sku', '')
                 })
 
