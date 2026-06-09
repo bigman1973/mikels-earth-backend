@@ -22,6 +22,7 @@ from src.services.holded_service import (
     holded_get_contact_salesreceipts,
     holded_get_all_salesreceipts,
     holded_get_document,
+    holded_send_document_email,
     HOLDED_BASE_URL,
     HOLDED_API_KEY
 )
@@ -717,6 +718,59 @@ def reset_order_holded(order_id):
         return jsonify({'success': True, 'message': f'Pedido {order.order_number} reseteado de Holded'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@admin_panel_bp.route('/orders/<int:order_id>/send-email', methods=['POST'])
+@admin_required
+@role_required('admin', 'sales')
+def send_order_document_email(order_id):
+    """
+    Envía la factura/ticket del pedido por email al cliente.
+    Usa la API de Holded para enviar el documento.
+    """
+    try:
+        from src.models.order import Order
+        order = Order.query.get(order_id)
+
+        if not order:
+            return jsonify({'error': 'Pedido no encontrado'}), 404
+
+        if not order.holded_invoice_id:
+            return jsonify({'error': 'Este pedido no tiene documento en Holded. Genera la factura/ticket primero.'}), 400
+
+        # Determinar tipo de documento
+        doc_type = 'invoice' if (order.needs_invoice and order.fiscal_nif) else 'salesreceipt'
+
+        # Email del cliente
+        customer_email = order.customer_email
+        if not customer_email:
+            return jsonify({'error': 'El pedido no tiene email de cliente'}), 400
+
+        # Datos opcionales del body
+        data = request.get_json(silent=True) or {}
+        subject = data.get('subject', None)
+        message = data.get('message', None)
+
+        success, result = holded_send_document_email(
+            doc_type=doc_type,
+            doc_id=order.holded_invoice_id,
+            emails=[customer_email],
+            subject=subject,
+            message=message
+        )
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'Documento enviado por email a {customer_email}',
+                'email': customer_email
+            })
+        else:
+            return jsonify({'error': f'Error enviando email desde Holded: {result}'}), 500
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Error interno: {str(e)}'}), 500
 
 
 @admin_panel_bp.route('/orders/sync-stripe', methods=['POST'])

@@ -334,6 +334,41 @@ def holded_get_invoice_pdf(document_id):
         return None
 
 
+def holded_send_document_email(doc_type, doc_id, emails, subject=None, message=None):
+    """
+    Envía un documento (factura/ticket) por email a través de Holded.
+    doc_type: 'invoice' o 'salesreceipt'
+    doc_id: ID del documento en Holded
+    emails: lista de emails destinatarios
+    subject: asunto personalizado (opcional)
+    message: mensaje personalizado (opcional)
+    """
+    try:
+        payload = {
+            'emails': emails if isinstance(emails, list) else [emails]
+        }
+        if subject:
+            payload['subject'] = subject
+        if message:
+            payload['message'] = message
+
+        response = requests.post(
+            f'{HOLDED_BASE_URL}/documents/{doc_type}/{doc_id}/send',
+            headers=HEADERS,
+            json=payload,
+            timeout=15
+        )
+
+        if response.status_code in [200, 201]:
+            print(f"[Holded] Documento {doc_id} enviado por email a {emails}")
+            return True, response.json() if response.text else {}
+        print(f"[Holded] Error enviando documento por email: {response.status_code} - {response.text}")
+        return False, response.text
+    except Exception as e:
+        print(f"[Holded] Error enviando documento por email: {e}")
+        return False, str(e)
+
+
 # ============================================================
 # DOCUMENTOS DE UN CONTACTO
 # ============================================================
