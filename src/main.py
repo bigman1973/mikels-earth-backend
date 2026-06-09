@@ -103,6 +103,7 @@ def create_tables():
                 db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS holded_id VARCHAR(100)'))
                 db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS holded_invoice_id VARCHAR(100)'))
                 db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS holded_doc_number VARCHAR(50)'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS email_sent BOOLEAN DEFAULT FALSE'))
                 db.session.commit()
                 print("Migration: invoice/holded fields added to orders")
             except Exception as mig_err2:
