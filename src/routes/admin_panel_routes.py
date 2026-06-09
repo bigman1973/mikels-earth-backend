@@ -788,18 +788,28 @@ def send_order_document_email(order_id):
         subject = data.get('subject', None) or default_subject
         message = data.get('message', None) or default_message
 
+        # Enviar al cliente + copia a admin
+        all_emails = [customer_email, 'adm@farmsplanet.es']
+
         success, result = holded_send_document_email(
             doc_type=doc_type,
             doc_id=order.holded_invoice_id,
-            emails=[customer_email],
+            emails=all_emails,
             subject=subject,
             message=message
         )
 
         if success:
+            # Marcar como enviado en la DB
+            order.email_sent = True
+            try:
+                db.session.commit()
+            except Exception as db_err:
+                print(f"\u26a0\ufe0f Error guardando email_sent: {db_err}")
+            
             return jsonify({
                 'success': True,
-                'message': f'Documento enviado por email a {customer_email}',
+                'message': f'Documento enviado por email a {customer_email} (copia a adm@farmsplanet.es)',
                 'email': customer_email
             })
         else:

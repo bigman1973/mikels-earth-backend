@@ -46,6 +46,7 @@ class Order(db.Model):
     holded_id = db.Column(db.String(100))  # ID del documento creado en Holded (salesorder)
     holded_invoice_id = db.Column(db.String(100))  # ID de la factura/ticket en Holded
     holded_doc_number = db.Column(db.String(50))  # Número de documento (F260044 o T2600005)
+    email_sent = db.Column(db.Boolean, default=False)  # Si se ha enviado la factura/ticket por email
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -96,6 +97,7 @@ class Order(db.Model):
             'holded_id': self.holded_id,
             'holded_invoice_id': self.holded_invoice_id,
             'holded_doc_number': self.holded_doc_number,
+            'email_sent': self.email_sent or False,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'paid_at': self.paid_at.isoformat() if self.paid_at else None
