@@ -765,8 +765,28 @@ def send_order_document_email(order_id):
 
         # Datos opcionales del body
         data = request.get_json(silent=True) or {}
-        subject = data.get('subject', None)
-        message = data.get('message', None)
+        
+        # Nombre del cliente para personalizar
+        customer_name = order.customer_name or 'cliente'
+        first_name = customer_name.split()[0] if customer_name else 'cliente'
+        
+        # Subject y message por defecto con CTA de reseña
+        default_subject = f'Tu factura de Mikel\'s Earth - Gracias por tu compra, {first_name} \U0001f33f'
+        default_message = (
+            f'Hola {first_name},\n\n'
+            f'Te adjuntamos tu factura. Esperamos que disfrutes de nuestros productos '
+            f'tanto como nosotros disfrutamos elabor\u00e1ndolos.\n\n'
+            f'Si tienes un momento, nos encantar\u00eda conocer tu opini\u00f3n. '
+            f'Puedes dejarnos tu rese\u00f1a aqu\u00ed:\n'
+            f'https://www.mikels.es/opiniones\n\n'
+            f'Tu experiencia nos ayuda a seguir mejorando y a que m\u00e1s personas '
+            f'descubran nuestro aceite y conservas artesanales.\n\n'
+            f'\u00a1Gracias por confiar en Mikel\'s Earth!\n'
+            f'El equipo de Mikel\'s Earth'
+        )
+        
+        subject = data.get('subject', None) or default_subject
+        message = data.get('message', None) or default_message
 
         success, result = holded_send_document_email(
             doc_type=doc_type,
