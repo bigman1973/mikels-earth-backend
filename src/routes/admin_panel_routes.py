@@ -292,6 +292,96 @@ def update_product_costs(sku):
         return jsonify({'error': str(e)}), 500
 
 
+# ============================================================
+# COMPOSICIÓN DE PACKS Y COSTES DE COMPONENTES
+# ============================================================
+
+@admin_panel_bp.route('/products/pack-components', methods=['GET'])
+@admin_required
+def get_pack_components():
+    """
+    Devuelve la composición de todos los packs con sus costes.
+    Para componentes con SKU: coste de Holded.
+    Para componentes manuales: coste de pack_component_costs.json.
+    """
+    holded_products = holded_get_products()
+    
+    # Mapa de costes por SKU desde Holded
+    cost_by_sku = {}
+    for p in holded_products:
+        sku = p.get('sku', '')
+        if sku:
+            cost_by_sku[sku] = p.get('cost', 0) or 0
+
+    # Costes manuales
+    manual_costs = _get_pack_component_costs()
+
+    result = {}
+    for pack_sku, components in PACK_COMPONENTS.items():
+        pack_detail = []
+        total_cost = 0
+        for comp in components:
+            if comp.get('manual'):
+                comp_id = comp.get('id', '')
+                comp_cost = manual_costs.get(comp_id, 0)
+                pack_detail.append({
+                    'id': comp_id,
+                    'name': comp.get('name', ''),
+                    'quantity': comp.get('quantity', 1),
+                    'cost': comp_cost,
+                    'source': 'manual',
+                    'editable': True
+                })
+            else:
+                comp_sku = comp.get('sku', '')
+                comp_cost = cost_by_sku.get(comp_sku, 0)
+                pack_detail.append({
+                    'sku': comp_sku,
+                    'name': comp.get('name', ''),
+                    'quantity': comp.get('quantity', 1),
+                    'cost': comp_cost,
+                    'source': 'holded',
+                    'editable': False
+                })
+            total_cost += comp_cost * comp.get('quantity', 1)
+        
+        result[pack_sku] = {
+            'components': pack_detail,
+            'total_cost': round(total_cost, 2)
+        }
+
+    return jsonify({'packs': result})
+
+
+@admin_panel_bp.route('/products/pack-component-cost', methods=['PUT'])
+@admin_required
+@role_required('admin')
+def update_pack_component_cost():
+    """
+    Actualiza el coste manual de un componente de pack.
+    Body: { component_id: string, cost: float }
+    """
+    try:
+        data = request.get_json()
+        component_id = data.get('component_id', '')
+        cost = float(data.get('cost', 0))
+
+        if not component_id:
+            return jsonify({'error': 'component_id es obligatorio'}), 400
+
+        costs = _get_pack_component_costs()
+        costs[component_id] = cost
+        _save_pack_component_costs(costs)
+
+        return jsonify({
+            'success': True,
+            'component_id': component_id,
+            'cost': cost
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @admin_panel_bp.route('/products/<sku>/web-price', methods=['PUT'])
 @admin_required
 @role_required('admin')
@@ -1152,40 +1242,64 @@ def get_dashboard():
 # UTILIDADES INTERNAS
 # ============================================================
 
-# Composición de packs: SKU del pack → lista de {sku, quantity} de sus componentes
-# Los costes de los componentes se obtienen de Holded (campo 'cost')
+# Composición de packs: SKU del pack → lista de componentes
+# Cada componente tiene: sku (o id para manuales), name, quantity
+# Si 'manual': True → el coste se guarda en pack_component_costs.json
+# Si tiene 'sku' válido → el coste se obtiene de Holded automáticamente
 PACK_COMPONENTS = {
     'MIKPACK01': [  # Pack Degustación Premium (9€)
-        {'sku': 'MIKPARJ250', 'quantity': 1},  # Mermelada de Paraguayo 250g
-        # 4x botellas de aceite 14ml (muestras, coste despreciable ~0.50€ total estimado)
+        {'sku': 'MIKPARJ250', 'name': 'Mermelada de Paraguayo 250g', 'quantity': 1},
+        {'id': 'botellas_degustacion', 'name': '4x Botellas aceite 14ml (muestras)', 'quantity': 1, 'manual': True},
     ],
     'MIKEST01': [  # Estuche de Regalo Premium (5€)
-        # Solo el estuche cilíndrico de cartón, sin producto dentro
+        {'id': 'estuche_cilindrico', 'name': 'Estuche cilíndrico cartón', 'quantity': 1, 'manual': True},
     ],
     'MIKPACKFR': [  # Pack Fruta Premium (35€)
-        {'sku': 'MIKPARA450', 'quantity': 1},  # Paraguayo en Almíbar
-        {'sku': 'MIKNECT450', 'quantity': 1},  # Nectarina en Almíbar
-        {'sku': 'MIKPARJ250', 'quantity': 1},  # Mermelada de Paraguayo
-        # + estuche de madera (coste incluido en product_costs como preparación)
+        {'sku': 'MIKPARA450', 'name': 'Paraguayo en Almíbar 720g', 'quantity': 1},
+        {'sku': 'MIKNECT450', 'name': 'Nectarina en Almíbar 720g', 'quantity': 1},
+        {'sku': 'MIKPARJ250', 'name': 'Mermelada de Paraguayo 250g', 'quantity': 1},
+        {'id': 'estuche_madera', 'name': 'Estuche de madera premium', 'quantity': 1, 'manual': True},
     ],
     'MIKPACKTP': [  # Pack Temprano Premium (19€)
-        {'sku': 'MIKVET500', 'quantity': 1},  # Aceite Temprano 500ml
-        {'sku': 'MIKEST01', 'quantity': 1},   # Estuche premium temprano
+        {'sku': 'MIKVET500', 'name': 'Aceite Temprano 500ml sin filtrar', 'quantity': 1},
+        {'sku': 'MIKEST01', 'name': 'Estuche premium temprano', 'quantity': 1},
     ],
     'MIKPACKCO': [  # Pack Completo Mikel's Earth (81.90€)
-        {'sku': 'MIKVE5LP', 'quantity': 1},   # Aceite 5L
-        {'sku': 'MIKVET500', 'quantity': 1},  # Aceite Temprano 500ml
-        {'sku': 'MIKPARA450', 'quantity': 1}, # Paraguayo en Almíbar
-        {'sku': 'MIKNECT450', 'quantity': 1}, # Nectarina en Almíbar
-        {'sku': 'MIKPARJ250', 'quantity': 1}, # Mermelada de Paraguayo
-        # + 4 botellas degustación + estuche kraft
+        {'sku': 'MIKVE5LP', 'name': 'Aceite de Oliva Virgen Extra 5L', 'quantity': 1},
+        {'sku': 'MIKVET500', 'name': 'Aceite Temprano 500ml sin filtrar', 'quantity': 1},
+        {'sku': 'MIKPARA450', 'name': 'Paraguayo en Almíbar 720g', 'quantity': 1},
+        {'sku': 'MIKNECT450', 'name': 'Nectarina en Almíbar 720g', 'quantity': 1},
+        {'sku': 'MIKPARJ250', 'name': 'Mermelada de Paraguayo 250g', 'quantity': 1},
+        {'id': 'botellas_degustacion', 'name': '4x Botellas aceite 14ml (muestras)', 'quantity': 1, 'manual': True},
+        {'id': 'estuche_kraft', 'name': 'Estuche kraft premium', 'quantity': 1, 'manual': True},
     ],
 }
 
 
+def _get_pack_component_costs():
+    """Lee los costes manuales de componentes de pack desde JSON."""
+    costs_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'pack_component_costs.json')
+    try:
+        if os.path.exists(costs_file):
+            with open(costs_file, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_pack_component_costs(costs):
+    """Guarda los costes manuales de componentes de pack en JSON."""
+    costs_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'pack_component_costs.json')
+    with open(costs_file, 'w') as f:
+        json.dump(costs, f, indent=2)
+
+
 def _calculate_pack_costs(holded_products):
     """
-    Calcula el coste de cada pack sumando los costes de sus componentes en Holded.
+    Calcula el coste de cada pack sumando:
+    - Costes de componentes con SKU en Holded (automático)
+    - Costes manuales de componentes sin SKU (desde pack_component_costs.json)
     Devuelve un dict {pack_sku: coste_calculado}
     """
     # Crear mapa de costes por SKU desde Holded
@@ -1195,11 +1309,20 @@ def _calculate_pack_costs(holded_products):
         if sku:
             cost_by_sku[sku] = p.get('cost', 0) or 0
 
+    # Leer costes manuales de componentes
+    manual_costs = _get_pack_component_costs()
+
     pack_costs = {}
     for pack_sku, components in PACK_COMPONENTS.items():
         total_cost = 0
         for comp in components:
-            comp_cost = cost_by_sku.get(comp['sku'], 0)
+            if comp.get('manual'):
+                # Componente manual: buscar en pack_component_costs.json
+                comp_id = comp.get('id', '')
+                comp_cost = manual_costs.get(comp_id, 0)
+            else:
+                # Componente con SKU: buscar en Holded
+                comp_cost = cost_by_sku.get(comp.get('sku', ''), 0)
             total_cost += comp_cost * comp.get('quantity', 1)
         pack_costs[pack_sku] = round(total_cost, 2)
 
