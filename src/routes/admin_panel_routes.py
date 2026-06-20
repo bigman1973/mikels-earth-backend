@@ -399,43 +399,37 @@ def update_pack_component_cost():
 @role_required('admin')
 def update_web_price(sku):
     """
-    Actualiza el precio web de un producto.
-    Modifica el archivo web_products.json y el fallback del catálogo.
+    Actualiza el precio web de un producto en la base de datos.
+    El cambio se refleja inmediatamente en la web (el frontend lee de la API).
     Body: { price: float }
     """
     try:
+        from src.models.web_product import WebProduct
         data = request.get_json()
         new_price = float(data.get('price', 0))
 
         if new_price <= 0:
             return jsonify({'error': 'El precio debe ser mayor que 0'}), 400
 
-        # Actualizar en web_products.json si existe
-        products_file = os.environ.get('WEB_PRODUCTS_FILE', '/app/web_products.json')
-        updated = False
+        # Buscar producto por SKU en la DB
+        product = WebProduct.query.filter_by(sku=sku).first()
+        if not product:
+            return jsonify({'error': f'Producto con SKU {sku} no encontrado en la DB'}), 404
 
-        if os.path.exists(products_file):
-            try:
-                with open(products_file, 'r') as f:
-                    products = json.load(f)
-                for p in products:
-                    if p.get('sku') == sku:
-                        p['price'] = new_price
-                        updated = True
-                        break
-                if updated:
-                    with open(products_file, 'w') as f:
-                        json.dump(products, f, indent=2)
-            except Exception as e:
-                print(f"[Admin] Error actualizando web_products.json: {e}")
+        old_price = product.price
+        product.price = new_price
+        db.session.commit()
 
         return jsonify({
             'success': True,
             'sku': sku,
+            'old_price': old_price,
             'new_price': new_price,
-            'file_updated': updated
+            'product_name': product.name,
+            'db_updated': True
         })
     except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 

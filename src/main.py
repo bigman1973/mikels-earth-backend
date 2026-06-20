@@ -25,11 +25,13 @@ from src.routes.admin_klaviyo_routes import admin_klaviyo_bp  # Admin Klaviyo te
 from src.routes.product_notify_routes import product_notify_bp  # Avísame cuando esté disponible
 from src.routes.auth_routes import auth_bp  # Autenticación Microsoft Entra ID
 from src.routes.admin_panel_routes import admin_panel_bp  # Panel de administración
+from src.routes.product_routes import product_bp  # Catálogo público de productos
 from src.models.blog import BlogPost  # Modelo del blog
 from src.models.review import Review  # Modelo de reseñas
 from src.models.abandoned_cart import AbandonedCart  # Modelo de carrito abandonado
 from src.models.product_notification import ProductNotification  # Modelo notificación producto
 from src.models.admin_user import AdminUser  # Modelo usuarios admin
+from src.models.web_product import WebProduct  # Catálogo de productos web
 
 # Load environment variables
 load_dotenv()
@@ -109,6 +111,59 @@ def create_tables():
             except Exception as mig_err2:
                 db.session.rollback()
                 print(f"Migration invoice fields (non-critical): {mig_err2}")
+            # Seed de productos: solo si la tabla web_products está vacía
+            try:
+                product_count = WebProduct.query.count()
+                if product_count == 0:
+                    from seed_products import PRODUCTS
+                    for p_data in PRODUCTS:
+                        product = WebProduct(
+                            id=p_data['id'],
+                            name=p_data['name'],
+                            slug=p_data['slug'],
+                            sku=p_data.get('sku'),
+                            description=p_data.get('description'),
+                            long_description=p_data.get('long_description'),
+                            price=p_data['price'],
+                            original_price=p_data.get('original_price'),
+                            currency=p_data.get('currency', 'EUR'),
+                            image=p_data.get('image'),
+                            images=p_data.get('images'),
+                            category=p_data['category'],
+                            tags=p_data.get('tags'),
+                            stock=p_data.get('stock', 0),
+                            weight=p_data.get('weight'),
+                            sold_out=p_data.get('sold_out', False),
+                            sold_out_message=p_data.get('sold_out_message'),
+                            ingredients=p_data.get('ingredients'),
+                            nutritional_info=p_data.get('nutritional_info'),
+                            subscription_available=p_data.get('subscription_available', False),
+                            subscription_discount=p_data.get('subscription_discount'),
+                            subscription_frequencies=p_data.get('subscription_frequencies'),
+                            subscription_terms=p_data.get('subscription_terms'),
+                            volume_discount=p_data.get('volume_discount'),
+                            tiered_discount=p_data.get('tiered_discount'),
+                            addons=p_data.get('addons'),
+                            variants=p_data.get('variants'),
+                            includes=p_data.get('includes'),
+                            related_products=p_data.get('related_products'),
+                            claims=p_data.get('claims'),
+                            badges=p_data.get('badges'),
+                            featured=p_data.get('featured', False),
+                            free_shipping=p_data.get('free_shipping', False),
+                            limited_edition=p_data.get('limited_edition', False),
+                            award=p_data.get('award'),
+                            active=True,
+                            display_order=p_data.get('display_order', 0)
+                        )
+                        db.session.add(product)
+                    db.session.commit()
+                    print(f"Seed: {len(PRODUCTS)} productos insertados en web_products")
+                else:
+                    print(f"web_products ya tiene {product_count} productos, skip seed")
+            except Exception as seed_err:
+                db.session.rollback()
+                print(f"Seed products (non-critical): {seed_err}")
             app.tables_created = True
         except Exception as e:
             print(f"Error creating tables: {e}")
@@ -128,6 +183,7 @@ app.register_blueprint(admin_klaviyo_bp, url_prefix='/api')  # Admin Klaviyo
 app.register_blueprint(product_notify_bp, url_prefix='/api')  # Avísame cuando esté disponible
 app.register_blueprint(auth_bp, url_prefix='/api/auth')  # Auth Microsoft Entra ID
 app.register_blueprint(admin_panel_bp, url_prefix='/api/admin')  # Panel Admin
+app.register_blueprint(product_bp, url_prefix='/api')  # Catálogo público de productos
 
 # Database configuration for coupons and user management
 # Use DATABASE_URL from Railway (PostgreSQL) or fallback to SQLite for local dev
