@@ -111,6 +111,15 @@ def create_tables():
             except Exception as mig_err2:
                 db.session.rollback()
                 print(f"Migration invoice fields (non-critical): {mig_err2}")
+            # Migración: añadir campos de costes logísticos a web_products
+            try:
+                db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS shipping_cost FLOAT DEFAULT 0.0'))
+                db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS preparation_cost FLOAT DEFAULT 0.0'))
+                db.session.commit()
+                print("Migration: shipping_cost/preparation_cost added to web_products")
+            except Exception as mig_err3:
+                db.session.rollback()
+                print(f"Migration costs fields (non-critical): {mig_err3}")
             # Seed de productos: solo si la tabla web_products está vacía
             try:
                 product_count = WebProduct.query.count()

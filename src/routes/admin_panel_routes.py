@@ -92,6 +92,7 @@ def get_products():
 
         product_data = {
             'holded_id': p.get('id'),
+            'id': web_match.get('id'),  # ID de web_products para el editor
             'name': p.get('name', ''),
             'sku': sku,
             'barcode': p.get('barcode', ''),
@@ -108,8 +109,8 @@ def get_products():
             'web_category': web_match.get('category'),
             'synced': _is_price_synced(p, web_prices),
             'source': 'holded',
-            'shipping_cost': sku_costs.get('shipping_cost', 0),
-            'preparation_cost': sku_costs.get('preparation_cost', 0)
+            'shipping_cost': web_match.get('shipping_cost', sku_costs.get('shipping_cost', 0)),
+            'preparation_cost': web_match.get('preparation_cost', sku_costs.get('preparation_cost', 0))
         }
         result.append(product_data)
 
@@ -130,6 +131,7 @@ def get_products():
             effective_cost = pack_costs.get(sku, 0) if sku in pack_costs else 0
             product_data = {
                 'holded_id': None,
+                'id': wp.get('id'),  # ID de web_products para el editor
                 'name': wp.get('name', ''),
                 'sku': sku,
                 'barcode': '',
@@ -146,8 +148,8 @@ def get_products():
                 'web_category': wp.get('category'),
                 'synced': None,
                 'source': 'web_only',
-                'shipping_cost': sku_costs.get('shipping_cost', 0),
-                'preparation_cost': sku_costs.get('preparation_cost', 0)
+                'shipping_cost': wp.get('shipping_cost', 0),
+                'preparation_cost': wp.get('preparation_cost', 0)
             }
             result.append(product_data)
 
@@ -230,26 +232,37 @@ def sync_prices_from_holded():
 # ============================================================
 
 def _get_product_costs():
-    """Lee los costes de portes y preparación por SKU."""
-    costs_file = os.environ.get('PRODUCT_COSTS_FILE', '/app/product_costs.json')
+    """Lee los costes de portes y preparación por SKU desde la DB."""
+    from src.models.web_product import WebProduct
     try:
-        if os.path.exists(costs_file):
-            with open(costs_file, 'r') as f:
-                return json.load(f)
+        products = WebProduct.query.all()
+        costs = {}
+        for p in products:
+            if p.sku:
+                costs[p.sku] = {
+                    'shipping_cost': p.shipping_cost or 0,
+                    'preparation_cost': p.preparation_cost or 0
+                }
+        return costs
     except Exception as e:
-        print(f"[Admin] Error leyendo costes: {e}")
+        print(f"[Admin] Error leyendo costes de DB: {e}")
     return {}
 
 
 def _save_product_costs(costs):
-    """Guarda los costes de portes y preparación por SKU."""
-    costs_file = os.environ.get('PRODUCT_COSTS_FILE', '/app/product_costs.json')
+    """Guarda los costes de portes y preparación por SKU en la DB."""
+    from src.models.web_product import WebProduct
     try:
-        with open(costs_file, 'w') as f:
-            json.dump(costs, f, indent=2)
+        for sku, cost_data in costs.items():
+            product = WebProduct.query.filter_by(sku=sku).first()
+            if product:
+                product.shipping_cost = cost_data.get('shipping_cost', 0)
+                product.preparation_cost = cost_data.get('preparation_cost', 0)
+        db.session.commit()
         return True
     except Exception as e:
-        print(f"[Admin] Error guardando costes: {e}")
+        db.session.rollback()
+        print(f"[Admin] Error guardando costes en DB: {e}")
         return False
 
 
@@ -427,6 +440,324 @@ def update_web_price(sku):
             'new_price': new_price,
             'product_name': product.name,
             'db_updated': True
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================
+# CRUD COMPLETO DE PRODUCTOS WEB
+# ============================================================
+
+@admin_panel_bp.route('/web-products', methods=['GET'])
+@admin_required
+def get_web_products():
+    """Devuelve todos los productos web (activos e inactivos) para el panel admin."""
+    from src.models.web_product import WebProduct
+    products = WebProduct.query.order_by(WebProduct.display_order).all()
+    return jsonify({'products': [p.to_admin_dict() for p in products]})
+
+
+@admin_panel_bp.route('/web-products/<int:product_id>', methods=['GET'])
+@admin_required
+def get_web_product(product_id):
+    """Devuelve un producto web por ID para edición."""
+    from src.models.web_product import WebProduct
+    product = WebProduct.query.get(product_id)
+    if not product:
+        return jsonify({'error': 'Producto no encontrado'}), 404
+    return jsonify(product.to_admin_dict())
+
+
+@admin_panel_bp.route('/web-products', methods=['POST'])
+@admin_required
+@role_required('admin')
+def create_web_product():
+    """Crea un nuevo producto web."""
+    from src.models.web_product import WebProduct
+    try:
+        data = request.get_json()
+        
+        # Validaciones básicas
+        if not data.get('name') or not data.get('slug') or not data.get('category'):
+            return jsonify({'error': 'Nombre, slug y categoría son obligatorios'}), 400
+        
+        if not data.get('price') or float(data['price']) <= 0:
+            return jsonify({'error': 'El precio debe ser mayor que 0'}), 400
+        
+        # Verificar slug único
+        existing = WebProduct.query.filter_by(slug=data['slug']).first()
+        if existing:
+            return jsonify({'error': f'Ya existe un producto con slug "{data["slug"]}"'}), 409
+        
+        product = WebProduct(
+            name=data['name'],
+            slug=data['slug'],
+            sku=data.get('sku'),
+            description=data.get('description'),
+            long_description=data.get('longDescription'),
+            price=float(data['price']),
+            original_price=float(data['originalPrice']) if data.get('originalPrice') else None,
+            currency=data.get('currency', 'EUR'),
+            image=data.get('image'),
+            images=data.get('images'),
+            category=data['category'],
+            tags=data.get('tags'),
+            stock=int(data.get('stock', 0)),
+            weight=data.get('weight'),
+            sold_out=data.get('soldOut', False),
+            sold_out_message=data.get('soldOutMessage'),
+            ingredients=data.get('ingredients'),
+            nutritional_info=data.get('nutritionalInfo'),
+            subscription_available=data.get('subscriptionAvailable', False),
+            subscription_discount=data.get('subscriptionDiscount'),
+            subscription_frequencies=data.get('subscriptionFrequencies'),
+            subscription_terms=data.get('subscriptionTerms'),
+            volume_discount=data.get('volumeDiscount'),
+            tiered_discount=data.get('tieredDiscount'),
+            addons=data.get('addons'),
+            variants=data.get('variants'),
+            includes=data.get('includes'),
+            related_products=data.get('relatedProducts'),
+            claims=data.get('claims'),
+            badges=data.get('badges'),
+            featured=data.get('featured', False),
+            free_shipping=data.get('freeShipping', False),
+            limited_edition=data.get('limitedEdition', False),
+            award=data.get('award'),
+            active=data.get('active', True),
+            display_order=int(data.get('displayOrder', 0)),
+            shipping_cost=float(data.get('shippingCost', 0)),
+            preparation_cost=float(data.get('preparationCost', 0))
+        )
+        
+        db.session.add(product)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'product': product.to_admin_dict()
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_panel_bp.route('/web-products/<int:product_id>', methods=['PUT'])
+@admin_required
+@role_required('admin')
+def update_web_product(product_id):
+    """
+    Actualiza un producto web completo (nombre, descripción, precio, fotos, etc.).
+    El cambio se refleja inmediatamente en la web.
+    """
+    from src.models.web_product import WebProduct
+    try:
+        product = WebProduct.query.get(product_id)
+        if not product:
+            return jsonify({'error': 'Producto no encontrado'}), 404
+        
+        data = request.get_json()
+        
+        # Actualizar solo los campos que vienen en el body
+        if 'name' in data:
+            product.name = data['name']
+        if 'slug' in data:
+            # Verificar slug único (excepto el propio)
+            existing = WebProduct.query.filter(WebProduct.slug == data['slug'], WebProduct.id != product_id).first()
+            if existing:
+                return jsonify({'error': f'Ya existe otro producto con slug "{data["slug"]}"'}), 409
+            product.slug = data['slug']
+        if 'sku' in data:
+            product.sku = data['sku']
+        if 'description' in data:
+            product.description = data['description']
+        if 'longDescription' in data:
+            product.long_description = data['longDescription']
+        if 'price' in data:
+            product.price = float(data['price'])
+        if 'originalPrice' in data:
+            product.original_price = float(data['originalPrice']) if data['originalPrice'] else None
+        if 'image' in data:
+            product.image = data['image']
+        if 'images' in data:
+            product.images = data['images']
+        if 'category' in data:
+            product.category = data['category']
+        if 'tags' in data:
+            product.tags = data['tags']
+        if 'stock' in data:
+            product.stock = int(data['stock'])
+        if 'weight' in data:
+            product.weight = data['weight']
+        if 'soldOut' in data:
+            product.sold_out = data['soldOut']
+        if 'soldOutMessage' in data:
+            product.sold_out_message = data['soldOutMessage']
+        if 'ingredients' in data:
+            product.ingredients = data['ingredients']
+        if 'nutritionalInfo' in data:
+            product.nutritional_info = data['nutritionalInfo']
+        if 'subscriptionAvailable' in data:
+            product.subscription_available = data['subscriptionAvailable']
+        if 'subscriptionDiscount' in data:
+            product.subscription_discount = data['subscriptionDiscount']
+        if 'subscriptionFrequencies' in data:
+            product.subscription_frequencies = data['subscriptionFrequencies']
+        if 'subscriptionTerms' in data:
+            product.subscription_terms = data['subscriptionTerms']
+        if 'volumeDiscount' in data:
+            product.volume_discount = data['volumeDiscount']
+        if 'tieredDiscount' in data:
+            product.tiered_discount = data['tieredDiscount']
+        if 'addons' in data:
+            product.addons = data['addons']
+        if 'variants' in data:
+            product.variants = data['variants']
+        if 'includes' in data:
+            product.includes = data['includes']
+        if 'relatedProducts' in data:
+            product.related_products = data['relatedProducts']
+        if 'claims' in data:
+            product.claims = data['claims']
+        if 'badges' in data:
+            product.badges = data['badges']
+        if 'featured' in data:
+            product.featured = data['featured']
+        if 'freeShipping' in data:
+            product.free_shipping = data['freeShipping']
+        if 'limitedEdition' in data:
+            product.limited_edition = data['limitedEdition']
+        if 'award' in data:
+            product.award = data['award']
+        if 'active' in data:
+            product.active = data['active']
+        if 'displayOrder' in data:
+            product.display_order = int(data['displayOrder'])
+        if 'shippingCost' in data:
+            product.shipping_cost = float(data['shippingCost'])
+        if 'preparationCost' in data:
+            product.preparation_cost = float(data['preparationCost'])
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'product': product.to_admin_dict()
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_panel_bp.route('/web-products/<int:product_id>', methods=['DELETE'])
+@admin_required
+@role_required('admin')
+def delete_web_product(product_id):
+    """Desactiva un producto (soft delete). No lo borra físicamente."""
+    from src.models.web_product import WebProduct
+    try:
+        product = WebProduct.query.get(product_id)
+        if not product:
+            return jsonify({'error': 'Producto no encontrado'}), 404
+        
+        product.active = False
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Producto "{product.name}" desactivado',
+            'product_id': product_id
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_panel_bp.route('/web-products/<int:product_id>/toggle-active', methods=['POST'])
+@admin_required
+@role_required('admin')
+def toggle_web_product_active(product_id):
+    """Activa/desactiva un producto."""
+    from src.models.web_product import WebProduct
+    try:
+        product = WebProduct.query.get(product_id)
+        if not product:
+            return jsonify({'error': 'Producto no encontrado'}), 404
+        
+        product.active = not product.active
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'active': product.active,
+            'message': f'Producto "{product.name}" {"activado" if product.active else "desactivado"}'
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_panel_bp.route('/web-products/<int:product_id>/image', methods=['POST'])
+@admin_required
+@role_required('admin')
+def upload_product_image(product_id):
+    """
+    Sube una imagen para un producto.
+    Acepta multipart/form-data con campo 'image'.
+    Guarda en /app/static/products/ y actualiza la DB.
+    """
+    from src.models.web_product import WebProduct
+    import uuid
+    try:
+        product = WebProduct.query.get(product_id)
+        if not product:
+            return jsonify({'error': 'Producto no encontrado'}), 404
+        
+        if 'image' not in request.files:
+            return jsonify({'error': 'No se envió ninguna imagen'}), 400
+        
+        file = request.files['image']
+        if file.filename == '':
+            return jsonify({'error': 'Nombre de archivo vacío'}), 400
+        
+        # Validar extensión
+        allowed_extensions = {'png', 'jpg', 'jpeg', 'webp', 'avif'}
+        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+        if ext not in allowed_extensions:
+            return jsonify({'error': f'Extensión no permitida. Usa: {allowed_extensions}'}), 400
+        
+        # Generar nombre único
+        filename = f"{product.slug}_{uuid.uuid4().hex[:8]}.{ext}"
+        
+        # Guardar archivo
+        upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'products')
+        os.makedirs(upload_dir, exist_ok=True)
+        filepath = os.path.join(upload_dir, filename)
+        file.save(filepath)
+        
+        # URL pública
+        image_url = f"/static/products/{filename}"
+        
+        # Actualizar DB según el campo 'field' del form
+        field = request.form.get('field', 'main')  # 'main' o 'gallery'
+        
+        if field == 'main':
+            product.image = image_url
+        else:
+            # Añadir a la galería
+            current_images = product.images or []
+            current_images.append(image_url)
+            product.images = current_images
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'image_url': image_url,
+            'field': field,
+            'product_name': product.name
         })
     except Exception as e:
         db.session.rollback()
@@ -1500,36 +1831,41 @@ def _calculate_pack_costs(holded_products):
 
 def _get_web_prices():
     """
-    Lee los precios actuales de la web desde el archivo de productos.
-    Devuelve un dict con SKU como clave.
+    Lee los precios actuales de la web desde la base de datos.
+    Devuelve un dict con SKU como clave, incluyendo el id de la DB.
     """
-    # Intentar leer del archivo de productos del frontend
-    # Esto se mejorará cuando los precios estén en base de datos
     try:
-        products_file = os.environ.get(
-            'WEB_PRODUCTS_FILE',
-            '/app/web_products.json'
-        )
-        if os.path.exists(products_file):
-            with open(products_file, 'r') as f:
-                products = json.load(f)
-                return {p.get('sku', ''): p for p in products if p.get('sku')}
+        from src.models.web_product import WebProduct
+        products = WebProduct.query.all()
+        if products:
+            result = {}
+            for p in products:
+                if p.sku:
+                    result[p.sku] = {
+                        'id': p.id,
+                        'name': p.name,
+                        'price': p.price,
+                        'sku': p.sku,
+                        'category': p.category,
+                        'stock': p.stock,
+                        'active': p.active,
+                        'shipping_cost': p.shipping_cost or 0,
+                        'preparation_cost': p.preparation_cost or 0
+                    }
+            if result:
+                return result
     except Exception as e:
-        print(f"[Admin] Error leyendo precios web: {e}")
+        print(f"[Admin] Error leyendo productos de DB: {e}")
 
-    # Fallback: catálogo completo de mikels.es (precios con IVA incluido)
-    # SKU → datos del producto web
+    # Fallback: catálogo hardcodeado (solo se usa si la DB está vacía)
     return {
-        # Aceites (IVA 4%)
         'MIKVE5LP': {'name': 'Aceite de Oliva Virgen Extra 5L', 'price': 33.00, 'sku': 'MIKVE5LP', 'category': 'Aceites'},
         'MIKVET500': {'name': 'Aceite de Oliva Virgen Extra Temprano 500ml sin filtrar', 'price': 14.90, 'sku': 'MIKVET500', 'category': 'Aceites'},
         'MIKVE500': {'name': 'Aceite de Oliva Virgen Extra Mikel\'s Fruit (Equilibrado)', 'price': 10.00, 'sku': 'MIKVE500', 'category': 'Aceites'},
         'MIKBIO19': {'name': 'Aceite de Oliva Virgen Extra Ecológico Mikel\'s Fruit', 'price': 13.50, 'sku': 'MIKBIO19', 'category': 'Aceites'},
-        # Conservas (IVA 10%)
         'MIKPARA450': {'name': 'Paraguayo en Almíbar', 'price': 14.90, 'sku': 'MIKPARA450', 'category': 'Conservas'},
         'MIKNECT450': {'name': 'Nectarina en Almíbar', 'price': 14.90, 'sku': 'MIKNECT450', 'category': 'Conservas'},
         'MIKPARJ250': {'name': 'Mermelada de Paraguayo Artesanal', 'price': 6.50, 'sku': 'MIKPARJ250', 'category': 'Conservas'},
-        # Packs (IVA 4% - mayoría aceite)
         'MIKPACK01': {'name': 'Pack Degustación Premium', 'price': 9.00, 'sku': 'MIKPACK01', 'category': 'Packs'},
         'MIKEST01': {'name': 'Estuche de Regalo Premium', 'price': 5.00, 'sku': 'MIKEST01', 'category': 'Packs'},
         'MIKPACKFR': {'name': 'Pack Fruta Premium', 'price': 35.00, 'sku': 'MIKPACKFR', 'category': 'Packs'},

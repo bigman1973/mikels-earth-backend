@@ -69,6 +69,10 @@ class WebProduct(db.Model):
     award = db.Column(db.String(200))
     active = db.Column(db.Boolean, default=True)  # Para ocultar sin borrar
     
+    # Costes logísticos (para cálculo de margen en panel admin)
+    shipping_cost = db.Column(db.Float, default=0.0)  # Coste de portes por unidad
+    preparation_cost = db.Column(db.Float, default=0.0)  # Coste de preparación por unidad
+    
     # Orden de visualización
     display_order = db.Column(db.Integer, default=0)
     
@@ -147,6 +151,8 @@ class WebProduct(db.Model):
         d['sku'] = self.sku
         d['active'] = self.active
         d['displayOrder'] = self.display_order
+        d['shippingCost'] = self.shipping_cost or 0
+        d['preparationCost'] = self.preparation_cost or 0
         d['createdAt'] = self.created_at.isoformat() if self.created_at else None
         d['updatedAt'] = self.updated_at.isoformat() if self.updated_at else None
         return d
