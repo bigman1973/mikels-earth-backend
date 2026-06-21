@@ -110,7 +110,8 @@ def get_products():
             'synced': _is_price_synced(p, web_prices),
             'source': 'holded',
             'shipping_cost': web_match.get('shipping_cost', sku_costs.get('shipping_cost', 0)),
-            'preparation_cost': web_match.get('preparation_cost', sku_costs.get('preparation_cost', 0))
+            'preparation_cost': web_match.get('preparation_cost', sku_costs.get('preparation_cost', 0)),
+            'active': web_match.get('active', True)
         }
         result.append(product_data)
 
@@ -149,7 +150,8 @@ def get_products():
                 'synced': None,
                 'source': 'web_only',
                 'shipping_cost': wp.get('shipping_cost', 0),
-                'preparation_cost': wp.get('preparation_cost', 0)
+                'preparation_cost': wp.get('preparation_cost', 0),
+                'active': wp.get('active', True)
             }
             result.append(product_data)
 
@@ -706,10 +708,14 @@ def upload_product_image(product_id):
     """
     Sube una imagen para un producto.
     Acepta multipart/form-data con campo 'image'.
-    Guarda en /app/static/products/ y actualiza la DB.
+    Sube al repo del frontend en GitHub (public/images/products/) para que
+    Vercel lo sirva como CDN. También actualiza la DB.
     """
     from src.models.web_product import WebProduct
     import uuid
+    import base64
+    import requests as http_requests
+    
     try:
         product = WebProduct.query.get(product_id)
         if not product:
@@ -728,37 +734,81 @@ def upload_product_image(product_id):
         if ext not in allowed_extensions:
             return jsonify({'error': f'Extensión no permitida. Usa: {allowed_extensions}'}), 400
         
-        # Generar nombre único
+        # Generar nombre único basado en el slug del producto
         filename = f"{product.slug}_{uuid.uuid4().hex[:8]}.{ext}"
         
-        # Guardar archivo
-        upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'products')
-        os.makedirs(upload_dir, exist_ok=True)
-        filepath = os.path.join(upload_dir, filename)
-        file.save(filepath)
+        # Leer contenido del archivo
+        file_content = file.read()
+        file_b64 = base64.b64encode(file_content).decode('utf-8')
         
-        # URL pública
-        image_url = f"/static/products/{filename}"
+        # Subir al repo del frontend via GitHub API
+        github_token = os.environ.get('GITHUB_TOKEN', '')
+        repo = 'bigman1973/mikels-earth-frontend'
+        path_in_repo = f'public/images/products/{filename}'
         
-        # Actualizar DB según el campo 'field' del form
-        field = request.form.get('field', 'main')  # 'main' o 'gallery'
+        github_url = f'https://api.github.com/repos/{repo}/contents/{path_in_repo}'
+        headers = {
+            'Authorization': f'token {github_token}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        payload = {
+            'message': f'feat: add product image {filename}',
+            'content': file_b64,
+            'branch': 'main'
+        }
         
-        if field == 'main':
-            product.image = image_url
+        gh_response = http_requests.put(github_url, json=payload, headers=headers)
+        
+        if gh_response.status_code in (200, 201):
+            # URL pública servida por Vercel
+            image_url = f'/images/products/{filename}'
+            
+            # Actualizar DB según el campo 'field' del form
+            field = request.form.get('field', 'main')  # 'main' o 'gallery'
+            
+            if field == 'main':
+                product.image = image_url
+            else:
+                # Añadir a la galería
+                current_images = product.images or []
+                current_images.append(image_url)
+                product.images = current_images
+            
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'image_url': image_url,
+                'field': field,
+                'product_name': product.name
+            })
         else:
-            # Añadir a la galería
-            current_images = product.images or []
-            current_images.append(image_url)
-            product.images = current_images
-        
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'image_url': image_url,
-            'field': field,
-            'product_name': product.name
-        })
+            # Si falla GitHub, guardar localmente como fallback
+            upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'products')
+            os.makedirs(upload_dir, exist_ok=True)
+            filepath = os.path.join(upload_dir, filename)
+            with open(filepath, 'wb') as f:
+                f.write(file_content)
+            
+            image_url = f'/static/products/{filename}'
+            field = request.form.get('field', 'main')
+            
+            if field == 'main':
+                product.image = image_url
+            else:
+                current_images = product.images or []
+                current_images.append(image_url)
+                product.images = current_images
+            
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'image_url': image_url,
+                'field': field,
+                'product_name': product.name,
+                'warning': 'Imagen guardada localmente (GitHub no disponible). Se perderá en el próximo despliegue.'
+            })
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
