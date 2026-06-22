@@ -414,8 +414,9 @@ def update_pack_component_cost():
 @role_required('admin')
 def update_web_price(sku):
     """
-    Actualiza el precio web de un producto en la base de datos.
-    El cambio se refleja inmediatamente en la web (el frontend lee de la API).
+    Actualiza el precio web de un producto en la base de datos Y en Holded.
+    El cambio se refleja inmediatamente en la web (el frontend lee de la API)
+    y también se sincroniza con la tarifa 'tienda online' de Holded.
     Body: { price: float }
     """
     try:
@@ -435,17 +436,77 @@ def update_web_price(sku):
         product.price = new_price
         db.session.commit()
 
+        # Sincronizar precio con Holded
+        holded_updated = False
+        holded_error = None
+        try:
+            holded_updated = _sync_price_to_holded(sku, new_price)
+        except Exception as he:
+            holded_error = str(he)
+
         return jsonify({
             'success': True,
             'sku': sku,
             'old_price': old_price,
             'new_price': new_price,
             'product_name': product.name,
-            'db_updated': True
+            'db_updated': True,
+            'holded_updated': holded_updated,
+            'holded_error': holded_error
         })
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+# Mapeo SKU → ID de producto en Holded
+HOLDED_PRODUCT_IDS = {
+    'MIKBIO19': '61c0f47e28ef0825ef14d130',
+    'MIKVE500': '678d68dd797fed41420fa32f',
+    'MIKVE5LP': '678d6b131ed596b63c07b503',
+    'MIKPACKYPO': '67ac6644e1d1c0404801c340',
+    'MIKPARJ250': '67b05a158d784f8805024aea',
+    'MIKVET500': '68d56a35492a53699a0bf531',
+    'MIKPARA450': '6a0578a83bccc347bd0bb32a',
+    'MIKNECT450': '6a057b1c8111f9de8e0f0ab8',
+}
+
+# IVA por tipo de producto para calcular precio base (sin IVA) desde precio web (con IVA)
+IVA_RATES_BY_SKU = {
+    'MIKBIO19': 0.04,    # Aceite ecológico → 4%
+    'MIKVE500': 0.04,    # Aceite equilibrado → 4%
+    'MIKVE5LP': 0.04,    # Aceite 5L → 4%
+    'MIKVET500': 0.04,   # Aceite temprano → 4%
+    'MIKPARA450': 0.10,  # Paraguayo conserva → 10%
+    'MIKNECT450': 0.10,  # Nectarina conserva → 10%
+    'MIKPARJ250': 0.10,  # Mermelada → 10%
+    'MIKPACKYPO': 0.04,  # Pack degustación → 4%
+}
+
+def _sync_price_to_holded(sku, web_price_with_iva):
+    """
+    Actualiza el precio del producto en Holded.
+    web_price_with_iva: precio que se muestra en la web (IVA incluido)
+    Holded espera el precio SIN IVA (base imponible).
+    """
+    import requests as req
+    holded_id = HOLDED_PRODUCT_IDS.get(sku)
+    if not holded_id:
+        return False  # Producto no está en Holded (ej: packs sin SKU en Holded)
+
+    iva_rate = IVA_RATES_BY_SKU.get(sku, 0.04)
+    price_without_iva = round(web_price_with_iva / (1 + iva_rate), 5)
+
+    response = req.put(
+        f'https://api.holded.com/api/invoicing/v1/products/{holded_id}',
+        headers={'key': HOLDED_API_KEY, 'Content-Type': 'application/json'},
+        json={'price': price_without_iva}
+    )
+
+    if response.status_code == 200:
+        result = response.json()
+        return result.get('status') == 1
+    return False
 
 
 # ============================================================
