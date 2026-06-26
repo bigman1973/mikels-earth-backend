@@ -237,6 +237,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'service': 'mikels-earth-backend',
+        'version': 'v2.4-coupons',
         'timestamp': datetime.now().isoformat()
     }), 200
 
