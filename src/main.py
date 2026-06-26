@@ -138,6 +138,26 @@ def create_tables():
             except Exception as mig_err4:
                 db.session.rollback()
                 print(f"Migration coupons fields (non-critical): {mig_err4}")
+            # Seed: crear cupón test dr.gemmavalls si no existe
+            try:
+                from src.models.coupon import Coupon
+                existing_coupon = Coupon.query.filter(db.func.lower(Coupon.code) == 'dr.gemmavalls').first()
+                if not existing_coupon:
+                    test_coupon = Coupon(
+                        code='dr.gemmavalls',
+                        description='Cupón para Dr. Gemma Valls - 10% descuento',
+                        discount_type='percentage',
+                        discount_value=10,
+                        active=True
+                    )
+                    db.session.add(test_coupon)
+                    db.session.commit()
+                    print("Seed: cupón dr.gemmavalls creado")
+                else:
+                    print("Seed: cupón dr.gemmavalls ya existe")
+            except Exception as seed_coupon_err:
+                db.session.rollback()
+                print(f"Seed coupon (non-critical): {seed_coupon_err}")
             # Seed de productos: solo si la tabla web_products está vacía
             try:
                 product_count = WebProduct.query.count()
