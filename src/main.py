@@ -286,32 +286,75 @@ def health_check():
 
 @app.route('/api/manual-coupons-info', methods=['GET'])
 def manual_coupons_info():
-    """Endpoint temporal para ver datos detallados de cupones manuales."""
+    """Endpoint temporal para ver datos detallados de cupones manuales incluyendo datos de Stripe."""
     try:
+        import stripe
+        import os
+        stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
         from src.models.coupon import Coupon
         codes = ['dr.gemmavalls', 'ME2025', 'MIKELSFRIENDS', 'MIKELSFAMILY', 'BIENVENIDA10', 'IRVIANCESTRAL']
         results = []
+        
+        # Get all Stripe promotion codes
+        stripe_promos = {}
+        stripe_coupons = {}
+        try:
+            # List all promotion codes from Stripe
+            promos = stripe.PromotionCode.list(limit=100)
+            for promo in promos.auto_paging_iter():
+                stripe_promos[promo.code.upper()] = {
+                    'id': promo.id,
+                    'code': promo.code,
+                    'times_redeemed': promo.times_redeemed,
+                    'active': promo.active,
+                    'coupon_id': promo.coupon.id if promo.coupon else None,
+                    'coupon_percent_off': promo.coupon.percent_off if promo.coupon else None,
+                    'coupon_amount_off': promo.coupon.amount_off if promo.coupon else None,
+                    'coupon_times_redeemed': promo.coupon.times_redeemed if promo.coupon else 0,
+                    'created': promo.created,
+                    'max_redemptions': promo.max_redemptions,
+                }
+        except Exception as stripe_err:
+            stripe_promos = {'error': str(stripe_err)}
+        
+        # Also check Stripe coupons directly (some might be coupons not promo codes)
+        try:
+            coupons_list = stripe.Coupon.list(limit=100)
+            for coup in coupons_list.auto_paging_iter():
+                stripe_coupons[coup.id.upper()] = {
+                    'id': coup.id,
+                    'percent_off': coup.percent_off,
+                    'amount_off': coup.amount_off,
+                    'times_redeemed': coup.times_redeemed,
+                    'valid': coup.valid,
+                    'created': coup.created,
+                    'max_redemptions': coup.max_redemptions,
+                }
+        except Exception as stripe_err2:
+            stripe_coupons = {'error': str(stripe_err2)}
+        
         for code in codes:
             c = Coupon.query.filter(db.func.lower(Coupon.code) == code.lower()).first()
+            entry = {
+                'code': code,
+                'db_data': None,
+                'stripe_promo_data': stripe_promos.get(code.upper(), None),
+                'stripe_coupon_data': stripe_coupons.get(code.upper(), None),
+            }
             if c:
-                results.append({
-                    'code': c.code,
+                entry['db_data'] = {
                     'id': c.id,
                     'discount_type': c.discount_type if hasattr(c, 'discount_type') else 'percentage',
-                    'discount_value': c.discount_value if hasattr(c, 'discount_value') else (c.discount_percent if hasattr(c, 'discount_percent') else None),
+                    'discount_value': c.discount_value if hasattr(c, 'discount_value') else None,
                     'active': c.active if hasattr(c, 'active') else True,
                     'current_uses': c.current_uses if hasattr(c, 'current_uses') else 0,
                     'max_uses': c.max_uses if hasattr(c, 'max_uses') else None,
                     'used': c.used if hasattr(c, 'used') else False,
-                    'used_at': c.used_at.isoformat() if hasattr(c, 'used_at') and c.used_at else None,
-                    'expires_at': c.expires_at.isoformat() if hasattr(c, 'expires_at') and c.expires_at else None,
                     'created_at': c.created_at.isoformat() if hasattr(c, 'created_at') and c.created_at else None,
                     'description': c.description if hasattr(c, 'description') else None,
-                    'email': c.email if hasattr(c, 'email') else None,
-                })
-            else:
-                results.append({'code': code, 'status': 'not_found'})
-        return jsonify({'success': True, 'coupons': results}), 200
+                }
+            results.append(entry)
+        return jsonify({'success': True, 'coupons': results, 'all_stripe_promos': list(stripe_promos.keys()), 'all_stripe_coupons': list(stripe_coupons.keys())}), 200
     except Exception as e:
         import traceback
         return jsonify({'success': False, 'error': str(e), 'trace': traceback.format_exc()}), 500
