@@ -414,20 +414,25 @@ def stripe_webhook():
                 except Exception as coupon_post_err:
                     print(f"⚠️ Error dispatching post-purchase event: {coupon_post_err}")
                 
-                # Marcar cupón como usado si se usó uno
+                # Marcar cupón como usado si se usó uno (todos los tipos)
                 discount_code = session['metadata'].get('discount_code')
-                if discount_code and (discount_code.startswith('MIKELS10-') or discount_code.startswith('VUELVE10-') or discount_code.startswith('GRACIAS10-')):
+                if discount_code:
                     try:
                         # Marcar cupón como usado usando el modelo Coupon (PostgreSQL)
                         from src.models.coupon import Coupon
-                        is_valid, result = Coupon.validate_coupon(discount_code, order_data['customer_email'])
-                        if is_valid:
-                            result.mark_as_used()
+                        from src.models.user import db as coupon_db
+                        coupon_obj = Coupon.query.filter(
+                            coupon_db.func.lower(Coupon.code) == discount_code.lower().strip()
+                        ).first()
+                        if coupon_obj:
+                            coupon_obj.mark_as_used()
                             print(f"Coupon {discount_code} marked as used for {order_data['customer_email']}")
                         else:
-                            print(f"Coupon validation failed: {result}")
+                            print(f"Coupon {discount_code} not found in DB (may be legacy)")
                     except Exception as coupon_error:
                         print(f"Error marking coupon as used: {str(coupon_error)}")
+                        import traceback
+                        traceback.print_exc()
                 
                 # Marcar carritos abandonados de este email como convertidos
                 try:

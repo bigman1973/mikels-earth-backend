@@ -138,26 +138,7 @@ def create_tables():
             except Exception as mig_err4:
                 db.session.rollback()
                 print(f"Migration coupons fields (non-critical): {mig_err4}")
-            # Seed: crear cupón test dr.gemmavalls si no existe
-            try:
-                from src.models.coupon import Coupon
-                existing_coupon = Coupon.query.filter(db.func.lower(Coupon.code) == 'dr.gemmavalls').first()
-                if not existing_coupon:
-                    test_coupon = Coupon(
-                        code='dr.gemmavalls',
-                        description='Cupón para Dr. Gemma Valls - 10% descuento',
-                        discount_type='percentage',
-                        discount_value=10,
-                        active=True
-                    )
-                    db.session.add(test_coupon)
-                    db.session.commit()
-                    print("Seed: cupón dr.gemmavalls creado")
-                else:
-                    print("Seed: cupón dr.gemmavalls ya existe")
-            except Exception as seed_coupon_err:
-                db.session.rollback()
-                print(f"Seed coupon (non-critical): {seed_coupon_err}")
+            # (Seed de cupones manuales movido fuera del guard para ejecutarse siempre)
             # Seed de productos: solo si la tabla web_products está vacía
             try:
                 product_count = WebProduct.query.count()
@@ -249,6 +230,45 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 
 # Las tablas se crean en la primera solicitud (ver @app.before_request)
+
+# Seed de cupones manuales: se ejecuta al arrancar (idempotente)
+def seed_manual_coupons():
+    """Crear cupones manuales si no existen en la DB. Es idempotente."""
+    with app.app_context():
+        try:
+            from src.models.coupon import Coupon
+            manual_coupons = [
+                {'code': 'dr.gemmavalls', 'description': 'Cupón colaborador - Dr. Gemma Valls', 'discount_value': 10},
+                {'code': 'ME2025', 'description': 'Cupón manual - Evento ME2025', 'discount_value': 10},
+                {'code': 'MIKELSFRIENDS', 'description': 'Cupón manual - Friends & Family (amigos)', 'discount_value': 10},
+                {'code': 'MIKELSFAMILY', 'description': 'Cupón manual - Friends & Family (familia)', 'discount_value': 20},
+                {'code': 'BIENVENIDA10', 'description': 'Cupón manual - Bienvenida genérica', 'discount_value': 10},
+                {'code': 'IRVIANCESTRAL', 'description': 'Cupón colaborador - Irvi Ancestral', 'discount_value': 10},
+            ]
+            created = 0
+            for mc in manual_coupons:
+                existing = Coupon.query.filter(db.func.lower(Coupon.code) == mc['code'].lower()).first()
+                if not existing:
+                    new_coupon = Coupon(
+                        code=mc['code'],
+                        description=mc['description'],
+                        discount_type='percentage',
+                        discount_value=mc['discount_value'],
+                        active=True
+                    )
+                    db.session.add(new_coupon)
+                    created += 1
+            if created > 0:
+                db.session.commit()
+                print(f"Seed: {created} cupones manuales creados")
+            else:
+                print("Seed: todos los cupones manuales ya existen")
+        except Exception as e:
+            db.session.rollback()
+            print(f"Seed manual coupons (non-critical): {e}")
+
+# Ejecutar seed al importar (cuando gunicorn carga la app)
+seed_manual_coupons()
 
 # Health check endpoint para Railway
 @app.route('/api/health', methods=['GET'])

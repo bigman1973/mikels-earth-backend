@@ -10,8 +10,8 @@ coupon_bp = Blueprint('coupon', __name__)
 @coupon_bp.route('/validate', methods=['POST'])
 def validate_coupon():
     """
-    Validar si un cupón es válido
-    Body: { "code": "MIKELS10-XXXXXXXX", "email": "user@example.com" (opcional) }
+    Validar si un cupón es válido (universal - funciona para todos los tipos)
+    Body: { "code": "CODIGO", "email": "user@example.com" (opcional) }
     """
     try:
         data = request.get_json()
@@ -21,7 +21,7 @@ def validate_coupon():
         if not code:
             return jsonify({'error': 'Coupon code is required'}), 400
         
-        # Validar cupón
+        # Validar cupón (busca por código case-insensitive)
         is_valid, result = Coupon.validate_coupon(code, email)
         
         if not is_valid:
@@ -36,7 +36,8 @@ def validate_coupon():
             'valid': True,
             'coupon': {
                 'code': coupon.code,
-                'discount_percentage': coupon.discount_percent,
+                'discount_percentage': coupon.discount_value,  # Siempre devolver el valor
+                'discount_type': coupon.discount_type,
                 'email': coupon.email
             }
         }), 200
