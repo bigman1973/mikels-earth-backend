@@ -120,6 +120,14 @@ def create_tables():
             except Exception as mig_err3:
                 db.session.rollback()
                 print(f"Migration costs fields (non-critical): {mig_err3}")
+            # Migración: quitar NOT NULL de email en coupons (para cupones públicos sin email)
+            try:
+                db.session.execute(db.text('ALTER TABLE coupons ALTER COLUMN email DROP NOT NULL'))
+                db.session.commit()
+                print("Migration: email column now nullable in coupons")
+            except Exception as mig_err_email:
+                db.session.rollback()
+                print(f"Migration email nullable (non-critical): {mig_err_email}")
             # Migración: añadir nuevos campos a coupons para sistema completo de cupones
             try:
                 db.session.execute(db.text('ALTER TABLE coupons ADD COLUMN IF NOT EXISTS description VARCHAR(500)'))
