@@ -86,11 +86,18 @@ class Coupon(db.Model):
         return 0
     
     def mark_as_used(self):
-        """Incrementar uso del cupón"""
+        """Incrementar uso del cupón. Si es de un solo uso, desactivarlo."""
         self.current_uses += 1
-        if self.max_uses and self.max_uses == 1:
+        # Desactivar si alcanzó el máximo de usos
+        if self.max_uses and self.current_uses >= self.max_uses:
             self.used = True
             self.used_at = datetime.utcnow()
+            self.active = False  # Ya no se puede usar más
+        # Cupones con email (personalizados) son de un solo uso implícito
+        elif self.email and not self.max_uses:
+            self.used = True
+            self.used_at = datetime.utcnow()
+            self.active = False
         db.session.commit()
     
     def to_dict(self):

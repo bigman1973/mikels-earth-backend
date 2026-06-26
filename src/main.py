@@ -178,6 +178,33 @@ def create_tables():
             except Exception as seed_mc_err:
                 db.session.rollback()
                 print(f"Seed manual coupons (non-critical): {seed_mc_err}")
+            
+            # Fix: desactivar cupones que ya fueron usados pero siguen como active=True
+            try:
+                used_but_active = Coupon.query.filter(
+                    Coupon.active == True,
+                    Coupon.used == True
+                ).all()
+                fixed_count = 0
+                for c in used_but_active:
+                    c.active = False
+                    fixed_count += 1
+                # También desactivar los que tienen max_uses alcanzado
+                maxed_out = Coupon.query.filter(
+                    Coupon.active == True,
+                    Coupon.max_uses != None,
+                    Coupon.current_uses >= Coupon.max_uses
+                ).all()
+                for c in maxed_out:
+                    c.active = False
+                    c.used = True
+                    fixed_count += 1
+                if fixed_count > 0:
+                    db.session.commit()
+                    print(f"Fix: {fixed_count} cupones usados desactivados")
+            except Exception as fix_err:
+                db.session.rollback()
+                print(f"Fix used coupons (non-critical): {fix_err}")
             # Seed de productos: solo si la tabla web_products está vacía
             try:
                 product_count = WebProduct.query.count()
