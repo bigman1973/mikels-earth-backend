@@ -1851,8 +1851,10 @@ def get_dashboard():
 @admin_panel_bp.route('/coupons', methods=['GET'])
 @admin_required
 def get_coupons():
-    """Listar todos los cupones"""
+    """Listar todos los cupones con clasificación, estadísticas y datos de uso"""
     from src.models.coupon import Coupon
+    from src.models.order import Order
+    from collections import defaultdict
     
     show_all = request.args.get('all', 'true').lower() == 'true'
     
@@ -1861,9 +1863,99 @@ def get_coupons():
     else:
         coupons = Coupon.query.filter_by(active=True).order_by(Coupon.created_at.desc()).all()
     
+    # Clasificar cupones por tipo basándose en prefijo/email/contexto
+    def classify_coupon(c):
+        code_lower = c.code.lower() if c.code else ''
+        email = (c.email or '').lower()
+        desc = (c.description or '').lower()
+        if code_lower.startswith('mikels10-') or code_lower.startswith('mikels-'):
+            if 'newsletter' in desc or (email and 'review' not in email):
+                return 'newsletter'
+            return 'newsletter'
+        if code_lower.startswith('vuelve10-') or code_lower.startswith('vuelve-'):
+            return 'post_compra'
+        if code_lower.startswith('gracias10-') or code_lower.startswith('gracias-'):
+            return 'post_compra'
+        if email and email.startswith('review-'):
+            return 'resena'
+        if 'review' in desc or 'reseña' in desc or 'rese' in desc:
+            return 'resena'
+        if 'newsletter' in desc or 'bienvenida' in desc:
+            return 'newsletter'
+        if 'post-compra' in desc or 'post compra' in desc or 'vuelve' in desc:
+            return 'post_compra'
+        return 'manual'
+    
+    # Enriquecer datos de cada cupón
+    enriched_coupons = []
+    stats_by_month = defaultdict(lambda: {'count': 0, 'estimated_savings': 0})
+    total_savings = 0
+    category_stats = defaultdict(lambda: {'total': 0, 'used': 0, 'active': 0, 'savings': 0})
+    
+    for c in coupons:
+        data = c.to_dict()
+        category = classify_coupon(c)
+        data['category'] = category
+        
+        # Estimar ahorro basado en usos
+        # Para porcentaje, estimamos con un pedido medio de 45€
+        avg_order = 45.0
+        if c.discount_type == 'percentage':
+            estimated_per_use = round(avg_order * (c.discount_value / 100), 2)
+        else:
+            estimated_per_use = c.discount_value
+        
+        uses = c.current_uses or 0
+        if c.used and uses == 0:
+            uses = 1  # Cupón de un solo uso marcado como usado
+        
+        estimated_total_savings = round(estimated_per_use * uses, 2)
+        data['estimated_savings'] = estimated_total_savings
+        data['estimated_per_use'] = estimated_per_use
+        data['total_uses'] = uses
+        
+        # Determinar si es de un solo uso
+        data['single_use'] = (c.max_uses == 1) or (c.email is not None and c.max_uses is None)
+        
+        # Acumular estadísticas
+        total_savings += estimated_total_savings
+        category_stats[category]['total'] += 1
+        category_stats[category]['savings'] += estimated_total_savings
+        if c.active:
+            category_stats[category]['active'] += 1
+        if uses > 0:
+            category_stats[category]['used'] += 1
+        
+        # Stats por mes (basado en created_at)
+        if c.created_at:
+            month_key = c.created_at.strftime('%Y-%m')
+            if uses > 0:
+                stats_by_month[month_key]['count'] += uses
+                stats_by_month[month_key]['estimated_savings'] += estimated_total_savings
+        
+        enriched_coupons.append(data)
+    
+    # Ordenar stats por mes
+    monthly_stats = []
+    for month, stats in sorted(stats_by_month.items(), reverse=True):
+        monthly_stats.append({
+            'month': month,
+            'uses': stats['count'],
+            'estimated_savings': round(stats['estimated_savings'], 2)
+        })
+    
     return jsonify({
-        'coupons': [c.to_dict() for c in coupons],
-        'total': len(coupons)
+        'coupons': enriched_coupons,
+        'total': len(enriched_coupons),
+        'stats': {
+            'total_coupons': len(coupons),
+            'active_coupons': sum(1 for c in coupons if c.active),
+            'used_coupons': sum(1 for c in coupons if (c.current_uses or 0) > 0 or c.used),
+            'total_estimated_savings': round(total_savings, 2),
+            'avg_order_estimate': 45.0,
+            'by_category': dict(category_stats),
+            'by_month': monthly_stats
+        }
     })
 
 
