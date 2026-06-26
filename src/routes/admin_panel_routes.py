@@ -1851,10 +1851,11 @@ def get_dashboard():
 @admin_panel_bp.route('/coupons', methods=['GET'])
 @admin_required
 def get_coupons():
-    """Listar todos los cupones con clasificación, estadísticas y datos de uso"""
+    """Listar todos los cupones con clasificación, estadísticas y datos de uso (incluye Stripe)"""
     from src.models.coupon import Coupon
     from src.models.order import Order
     from collections import defaultdict
+    import stripe
     
     show_all = request.args.get('all', 'true').lower() == 'true'
     
@@ -1863,14 +1864,31 @@ def get_coupons():
     else:
         coupons = Coupon.query.filter_by(active=True).order_by(Coupon.created_at.desc()).all()
     
+    # Obtener datos históricos de Stripe para cupones manuales
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+    stripe_usage_by_name = {}
+    try:
+        coupons_list = stripe.Coupon.list(limit=100)
+        for coup in coupons_list.auto_paging_iter():
+            coup_name = (coup.name or '').upper()
+            if coup_name:
+                if coup_name not in stripe_usage_by_name:
+                    stripe_usage_by_name[coup_name] = {
+                        'total_redeemed': 0,
+                        'total_amount_off_cents': 0,
+                    }
+                stripe_usage_by_name[coup_name]['total_redeemed'] += coup.times_redeemed
+                if coup.amount_off:
+                    stripe_usage_by_name[coup_name]['total_amount_off_cents'] += coup.amount_off * coup.times_redeemed
+    except Exception:
+        pass  # Si falla Stripe, seguimos con datos locales
+    
     # Clasificar cupones por tipo basándose en prefijo/email/contexto
     def classify_coupon(c):
         code_lower = c.code.lower() if c.code else ''
         email = (c.email or '').lower()
         desc = (c.description or '').lower()
         if code_lower.startswith('mikels10-') or code_lower.startswith('mikels-'):
-            if 'newsletter' in desc or (email and 'review' not in email):
-                return 'newsletter'
             return 'newsletter'
         if code_lower.startswith('vuelve10-') or code_lower.startswith('vuelve-'):
             return 'post_compra'
@@ -1880,7 +1898,7 @@ def get_coupons():
             return 'resena'
         if 'review' in desc or 'reseña' in desc or 'rese' in desc:
             return 'resena'
-        if 'newsletter' in desc or 'bienvenida' in desc:
+        if 'newsletter' in desc and 'bienvenida' not in code_lower:
             return 'newsletter'
         if 'post-compra' in desc or 'post compra' in desc or 'vuelve' in desc:
             return 'post_compra'
@@ -1897,19 +1915,36 @@ def get_coupons():
         category = classify_coupon(c)
         data['category'] = category
         
-        # Estimar ahorro basado en usos
-        # Para porcentaje, estimamos con un pedido medio de 45€
-        avg_order = 45.0
-        if c.discount_type == 'percentage':
-            estimated_per_use = round(avg_order * (c.discount_value / 100), 2)
-        else:
-            estimated_per_use = c.discount_value
+        # Obtener usos: priorizar datos de Stripe para cupones manuales
+        code_upper = (c.code or '').upper()
+        stripe_data = stripe_usage_by_name.get(code_upper)
         
         uses = c.current_uses or 0
         if c.used and uses == 0:
-            uses = 1  # Cupón de un solo uso marcado como usado
+            uses = 1
         
-        estimated_total_savings = round(estimated_per_use * uses, 2)
+        # Para cupones manuales, usar datos de Stripe si tienen más usos
+        real_savings = 0
+        if stripe_data and stripe_data['total_redeemed'] > uses:
+            uses = stripe_data['total_redeemed']
+            real_savings = stripe_data['total_amount_off_cents'] / 100  # cents to euros
+        
+        # Calcular ahorro
+        avg_order = 45.0
+        if real_savings > 0:
+            # Datos reales de Stripe
+            estimated_total_savings = round(real_savings, 2)
+            estimated_per_use = round(real_savings / uses, 2) if uses > 0 else 0
+            data['savings_source'] = 'stripe'
+        else:
+            # Estimación
+            if c.discount_type == 'percentage':
+                estimated_per_use = round(avg_order * (c.discount_value / 100), 2)
+            else:
+                estimated_per_use = c.discount_value
+            estimated_total_savings = round(estimated_per_use * uses, 2)
+            data['savings_source'] = 'estimated'
+        
         data['estimated_savings'] = estimated_total_savings
         data['estimated_per_use'] = estimated_per_use
         data['total_uses'] = uses
