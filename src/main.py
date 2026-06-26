@@ -284,6 +284,39 @@ def health_check():
 
 
 
+@app.route('/api/manual-coupons-info', methods=['GET'])
+def manual_coupons_info():
+    """Endpoint temporal para ver datos detallados de cupones manuales."""
+    try:
+        from src.models.coupon import Coupon
+        codes = ['dr.gemmavalls', 'ME2025', 'MIKELSFRIENDS', 'MIKELSFAMILY', 'BIENVENIDA10', 'IRVIANCESTRAL']
+        results = []
+        for code in codes:
+            c = Coupon.query.filter(db.func.lower(Coupon.code) == code.lower()).first()
+            if c:
+                results.append({
+                    'code': c.code,
+                    'id': c.id,
+                    'discount_type': c.discount_type if hasattr(c, 'discount_type') else 'percentage',
+                    'discount_value': c.discount_value if hasattr(c, 'discount_value') else (c.discount_percent if hasattr(c, 'discount_percent') else None),
+                    'active': c.active if hasattr(c, 'active') else True,
+                    'current_uses': c.current_uses if hasattr(c, 'current_uses') else 0,
+                    'max_uses': c.max_uses if hasattr(c, 'max_uses') else None,
+                    'used': c.used if hasattr(c, 'used') else False,
+                    'used_at': c.used_at.isoformat() if hasattr(c, 'used_at') and c.used_at else None,
+                    'expires_at': c.expires_at.isoformat() if hasattr(c, 'expires_at') and c.expires_at else None,
+                    'created_at': c.created_at.isoformat() if hasattr(c, 'created_at') and c.created_at else None,
+                    'description': c.description if hasattr(c, 'description') else None,
+                    'email': c.email if hasattr(c, 'email') else None,
+                })
+            else:
+                results.append({'code': code, 'status': 'not_found'})
+        return jsonify({'success': True, 'coupons': results}), 200
+    except Exception as e:
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
 @app.route('/api/seed-manual-coupons', methods=['POST'])
 def seed_manual_coupons_endpoint():
     """Endpoint temporal para crear cupones manuales. Eliminar después de usar."""
