@@ -1845,6 +1845,207 @@ def get_dashboard():
 
 
 # ============================================================
+# CUPONES
+# ============================================================
+
+@admin_panel_bp.route('/coupons', methods=['GET'])
+@admin_required
+def get_coupons():
+    """Listar todos los cupones"""
+    from src.models.coupon import Coupon
+    
+    show_all = request.args.get('all', 'true').lower() == 'true'
+    
+    if show_all:
+        coupons = Coupon.query.order_by(Coupon.created_at.desc()).all()
+    else:
+        coupons = Coupon.query.filter_by(active=True).order_by(Coupon.created_at.desc()).all()
+    
+    return jsonify({
+        'coupons': [c.to_dict() for c in coupons],
+        'total': len(coupons)
+    })
+
+
+@admin_panel_bp.route('/coupons', methods=['POST'])
+@admin_required
+def create_coupon():
+    """Crear un nuevo cupón"""
+    from src.models.coupon import Coupon
+    
+    data = request.json
+    code = data.get('code', '').strip()
+    
+    if not code:
+        return jsonify({'error': 'El código del cupón es obligatorio'}), 400
+    
+    # Verificar que no exista
+    existing = Coupon.query.filter(db.func.lower(Coupon.code) == code.lower()).first()
+    if existing:
+        return jsonify({'error': f'Ya existe un cupón con el código "{code}"'}), 409
+    
+    # Parsear fecha de caducidad
+    expires_at = None
+    if data.get('expires_at'):
+        try:
+            expires_at = datetime.fromisoformat(data['expires_at'].replace('Z', '+00:00'))
+        except (ValueError, AttributeError):
+            try:
+                expires_at = datetime.strptime(data['expires_at'], '%Y-%m-%d')
+            except:
+                pass
+    
+    coupon = Coupon(
+        code=code,
+        description=data.get('description', ''),
+        discount_type=data.get('discount_type', 'percentage'),
+        discount_value=float(data.get('discount_value', 10)),
+        min_order_amount=float(data.get('min_order_amount', 0)),
+        max_uses=data.get('max_uses'),  # None = ilimitado
+        max_uses_per_customer=data.get('max_uses_per_customer'),
+        active=data.get('active', True),
+        expires_at=expires_at,
+        email=data.get('email'),  # None = cupón público
+    )
+    
+    db.session.add(coupon)
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': f'Cupón "{code}" creado correctamente',
+        'coupon': coupon.to_dict()
+    }), 201
+
+
+@admin_panel_bp.route('/coupons/<int:coupon_id>', methods=['PUT'])
+@admin_required
+def update_coupon(coupon_id):
+    """Actualizar un cupón existente"""
+    from src.models.coupon import Coupon
+    
+    coupon = Coupon.query.get(coupon_id)
+    if not coupon:
+        return jsonify({'error': 'Cupón no encontrado'}), 404
+    
+    data = request.json
+    
+    if 'code' in data:
+        new_code = data['code'].strip()
+        existing = Coupon.query.filter(
+            db.func.lower(Coupon.code) == new_code.lower(),
+            Coupon.id != coupon_id
+        ).first()
+        if existing:
+            return jsonify({'error': f'Ya existe otro cupón con el código "{new_code}"'}), 409
+        coupon.code = new_code
+    
+    if 'description' in data:
+        coupon.description = data['description']
+    if 'discount_type' in data:
+        coupon.discount_type = data['discount_type']
+    if 'discount_value' in data:
+        coupon.discount_value = float(data['discount_value'])
+    if 'min_order_amount' in data:
+        coupon.min_order_amount = float(data['min_order_amount'])
+    if 'max_uses' in data:
+        coupon.max_uses = data['max_uses']
+    if 'max_uses_per_customer' in data:
+        coupon.max_uses_per_customer = data['max_uses_per_customer']
+    if 'active' in data:
+        coupon.active = data['active']
+    if 'expires_at' in data:
+        if data['expires_at']:
+            try:
+                coupon.expires_at = datetime.fromisoformat(data['expires_at'].replace('Z', '+00:00'))
+            except (ValueError, AttributeError):
+                try:
+                    coupon.expires_at = datetime.strptime(data['expires_at'], '%Y-%m-%d')
+                except:
+                    pass
+        else:
+            coupon.expires_at = None
+    
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': f'Cupón "{coupon.code}" actualizado',
+        'coupon': coupon.to_dict()
+    })
+
+
+@admin_panel_bp.route('/coupons/<int:coupon_id>/toggle', methods=['POST'])
+@admin_required
+def toggle_coupon(coupon_id):
+    """Activar/desactivar un cupón"""
+    from src.models.coupon import Coupon
+    
+    coupon = Coupon.query.get(coupon_id)
+    if not coupon:
+        return jsonify({'error': 'Cupón no encontrado'}), 404
+    
+    coupon.active = not coupon.active
+    db.session.commit()
+    
+    status = 'activado' if coupon.active else 'desactivado'
+    return jsonify({
+        'success': True,
+        'message': f'Cupón "{coupon.code}" {status}',
+        'coupon': coupon.to_dict()
+    })
+
+
+@admin_panel_bp.route('/coupons/<int:coupon_id>', methods=['DELETE'])
+@admin_required
+def delete_coupon(coupon_id):
+    """Eliminar un cupón"""
+    from src.models.coupon import Coupon
+    
+    coupon = Coupon.query.get(coupon_id)
+    if not coupon:
+        return jsonify({'error': 'Cupón no encontrado'}), 404
+    
+    code = coupon.code
+    db.session.delete(coupon)
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': f'Cupón "{code}" eliminado'
+    })
+
+
+@admin_panel_bp.route('/coupons/validate', methods=['POST'])
+@admin_required
+def admin_validate_coupon():
+    """Validar un cupón (para testing desde el admin)"""
+    from src.models.coupon import Coupon
+    
+    data = request.json
+    code = data.get('code', '').strip()
+    order_amount = float(data.get('order_amount', 0))
+    email = data.get('email')
+    
+    is_valid, result = Coupon.validate_coupon(code, email)
+    
+    if is_valid:
+        coupon = result
+        discount = coupon.calculate_discount(order_amount)
+        return jsonify({
+            'valid': True,
+            'coupon': coupon.to_dict(),
+            'discount_amount': discount,
+            'final_amount': order_amount - discount
+        })
+    else:
+        return jsonify({
+            'valid': False,
+            'error': result
+        })
+
+
+# ============================================================
 # UTILIDADES INTERNAS
 # ============================================================
 

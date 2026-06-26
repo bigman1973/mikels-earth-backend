@@ -120,6 +120,24 @@ def create_tables():
             except Exception as mig_err3:
                 db.session.rollback()
                 print(f"Migration costs fields (non-critical): {mig_err3}")
+            # Migración: añadir nuevos campos a coupons para sistema completo de cupones
+            try:
+                db.session.execute(db.text('ALTER TABLE coupons ADD COLUMN IF NOT EXISTS description VARCHAR(500)'))
+                db.session.execute(db.text('ALTER TABLE coupons ADD COLUMN IF NOT EXISTS discount_type VARCHAR(20) DEFAULT \'percentage\''))
+                db.session.execute(db.text('ALTER TABLE coupons ADD COLUMN IF NOT EXISTS discount_value FLOAT DEFAULT 10'))
+                db.session.execute(db.text('ALTER TABLE coupons ADD COLUMN IF NOT EXISTS min_order_amount FLOAT DEFAULT 0'))
+                db.session.execute(db.text('ALTER TABLE coupons ADD COLUMN IF NOT EXISTS max_uses INTEGER'))
+                db.session.execute(db.text('ALTER TABLE coupons ADD COLUMN IF NOT EXISTS current_uses INTEGER DEFAULT 0'))
+                db.session.execute(db.text('ALTER TABLE coupons ADD COLUMN IF NOT EXISTS max_uses_per_customer INTEGER'))
+                db.session.execute(db.text('ALTER TABLE coupons ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE'))
+                db.session.execute(db.text('ALTER TABLE coupons ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP'))
+                # Migrar datos existentes: copiar discount_percent a discount_value
+                db.session.execute(db.text('UPDATE coupons SET discount_value = discount_percent WHERE discount_value IS NULL AND discount_percent IS NOT NULL'))
+                db.session.commit()
+                print("Migration: coupon management fields added")
+            except Exception as mig_err4:
+                db.session.rollback()
+                print(f"Migration coupons fields (non-critical): {mig_err4}")
             # Seed de productos: solo si la tabla web_products está vacía
             try:
                 product_count = WebProduct.query.count()
