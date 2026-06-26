@@ -317,21 +317,35 @@ def manual_coupons_info():
         except Exception as stripe_err:
             stripe_promos = {'error': str(stripe_err)}
         
-        # Also check Stripe coupons directly (some might be coupons not promo codes)
+        # Search Stripe coupons by 'name' field (the original discount code is stored as name)
+        # Group by name and sum times_redeemed
+        stripe_usage_by_name = {}  # {code_name: {total_redeemed, total_amount_off, coupons_count, details}}
         try:
             coupons_list = stripe.Coupon.list(limit=100)
             for coup in coupons_list.auto_paging_iter():
-                stripe_coupons[coup.id.upper()] = {
-                    'id': coup.id,
-                    'percent_off': coup.percent_off,
-                    'amount_off': coup.amount_off,
-                    'times_redeemed': coup.times_redeemed,
-                    'valid': coup.valid,
-                    'created': coup.created,
-                    'max_redemptions': coup.max_redemptions,
-                }
+                coup_name = (coup.name or '').upper()
+                if coup_name:
+                    if coup_name not in stripe_usage_by_name:
+                        stripe_usage_by_name[coup_name] = {
+                            'total_redeemed': 0,
+                            'total_amount_off_cents': 0,
+                            'coupons_count': 0,
+                            'details': []
+                        }
+                    stripe_usage_by_name[coup_name]['total_redeemed'] += coup.times_redeemed
+                    stripe_usage_by_name[coup_name]['coupons_count'] += 1
+                    if coup.amount_off:
+                        stripe_usage_by_name[coup_name]['total_amount_off_cents'] += coup.amount_off * coup.times_redeemed
+                    stripe_usage_by_name[coup_name]['details'].append({
+                        'id': coup.id,
+                        'times_redeemed': coup.times_redeemed,
+                        'amount_off': coup.amount_off,
+                        'percent_off': coup.percent_off,
+                        'created': coup.created,
+                        'valid': coup.valid,
+                    })
         except Exception as stripe_err2:
-            stripe_coupons = {'error': str(stripe_err2)}
+            stripe_usage_by_name = {'error': str(stripe_err2)}
         
         for code in codes:
             c = Coupon.query.filter(db.func.lower(Coupon.code) == code.lower()).first()
@@ -339,7 +353,7 @@ def manual_coupons_info():
                 'code': code,
                 'db_data': None,
                 'stripe_promo_data': stripe_promos.get(code.upper(), None),
-                'stripe_coupon_data': stripe_coupons.get(code.upper(), None),
+                'stripe_usage': stripe_usage_by_name.get(code.upper(), None),
             }
             if c:
                 entry['db_data'] = {
@@ -354,7 +368,9 @@ def manual_coupons_info():
                     'description': c.description if hasattr(c, 'description') else None,
                 }
             results.append(entry)
-        return jsonify({'success': True, 'coupons': results, 'all_stripe_promos': list(stripe_promos.keys()), 'all_stripe_coupons': list(stripe_coupons.keys())}), 200
+        # Also list all unique coupon names found in Stripe
+        all_names = [k for k in stripe_usage_by_name.keys() if k != 'error'] if isinstance(stripe_usage_by_name, dict) else []
+        return jsonify({'success': True, 'coupons': results, 'all_stripe_coupon_names': all_names}), 200
     except Exception as e:
         import traceback
         return jsonify({'success': False, 'error': str(e), 'trace': traceback.format_exc()}), 500
