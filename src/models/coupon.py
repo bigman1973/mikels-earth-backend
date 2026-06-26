@@ -2,7 +2,7 @@
 Modelo de Cupón para descuentos - Sistema completo de gestión
 """
 from datetime import datetime
-from src.database.db import db
+from src.models.user import db
 
 
 class Coupon(db.Model):
