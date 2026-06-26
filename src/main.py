@@ -276,6 +276,46 @@ def health_check():
 
 
 
+@app.route('/api/seed-manual-coupons', methods=['POST'])
+def seed_manual_coupons_endpoint():
+    """Endpoint temporal para crear cupones manuales. Eliminar después de usar."""
+    try:
+        from src.models.coupon import Coupon
+        manual_coupons = [
+            {'code': 'dr.gemmavalls', 'description': 'Cupón colaborador - Dr. Gemma Valls', 'discount_value': 10},
+            {'code': 'ME2025', 'description': 'Cupón manual - Evento ME2025', 'discount_value': 10},
+            {'code': 'MIKELSFRIENDS', 'description': 'Cupón manual - Friends & Family (amigos)', 'discount_value': 10},
+            {'code': 'MIKELSFAMILY', 'description': 'Cupón manual - Friends & Family (familia)', 'discount_value': 20},
+            {'code': 'BIENVENIDA10', 'description': 'Cupón manual - Bienvenida genérica', 'discount_value': 10},
+            {'code': 'IRVIANCESTRAL', 'description': 'Cupón colaborador - Irvi Ancestral', 'discount_value': 10},
+        ]
+        results = []
+        for mc in manual_coupons:
+            existing = Coupon.query.filter(db.func.lower(Coupon.code) == mc['code'].lower()).first()
+            if existing:
+                results.append({'code': mc['code'], 'status': 'already_exists', 'id': existing.id})
+            else:
+                try:
+                    new_coupon = Coupon(
+                        code=mc['code'],
+                        discount_type='percentage',
+                        discount_value=mc['discount_value'],
+                        active=True
+                    )
+                    db.session.add(new_coupon)
+                    db.session.flush()
+                    results.append({'code': mc['code'], 'status': 'created', 'id': new_coupon.id})
+                except Exception as inner_err:
+                    db.session.rollback()
+                    results.append({'code': mc['code'], 'status': 'error', 'error': str(inner_err)})
+        db.session.commit()
+        return jsonify({'success': True, 'results': results}), 200
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
 @app.route('/api/debug-clients', methods=['GET'])
 def debug_clients():
     """Endpoint temporal de diagnóstico para clientes"""
