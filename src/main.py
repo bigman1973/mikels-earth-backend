@@ -258,6 +258,14 @@ def create_tables():
             except Exception as seed_err:
                 db.session.rollback()
                 print(f"Seed products (non-critical): {seed_err}")
+            # Fix: resetear secuencia de IDs de web_products para evitar conflictos
+            try:
+                db.session.execute(db.text("SELECT setval('web_products_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM web_products), false)"))
+                db.session.commit()
+            except Exception as seq_err:
+                db.session.rollback()
+                print(f"Sequence fix (non-critical): {seq_err}")
+
             app.tables_created = True
         except Exception as e:
             print(f"Error creating tables: {e}")
