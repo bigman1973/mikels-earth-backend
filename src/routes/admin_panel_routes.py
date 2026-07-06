@@ -767,15 +767,14 @@ def toggle_web_product_active(product_id):
 @role_required('admin')
 def upload_product_image(product_id):
     """
-    Sube una imagen para un producto.
+    Sube una imagen para un producto a Cloudinary (almacenamiento permanente).
     Acepta multipart/form-data con campo 'image'.
-    Sube al repo del frontend en GitHub (public/images/products/) para que
-    Vercel lo sirva como CDN. También actualiza la DB.
+    Las imágenes se almacenan en Cloudinary CDN y nunca se pierden entre deploys.
     """
     from src.models.web_product import WebProduct
     import uuid
-    import base64
-    import requests as http_requests
+    import cloudinary
+    import cloudinary.uploader
     
     try:
         product = WebProduct.query.get(product_id)
@@ -795,81 +794,52 @@ def upload_product_image(product_id):
         if ext not in allowed_extensions:
             return jsonify({'error': f'Extensión no permitida. Usa: {allowed_extensions}'}), 400
         
-        # Generar nombre único basado en el slug del producto
-        filename = f"{product.slug}_{uuid.uuid4().hex[:8]}.{ext}"
+        # Configurar Cloudinary
+        cloudinary.config(
+            cloud_name=os.environ.get('CLOUDINARY_CLOUD_NAME', 'fe9u3inr'),
+            api_key=os.environ.get('CLOUDINARY_API_KEY', ''),
+            api_secret=os.environ.get('CLOUDINARY_API_SECRET', ''),
+            secure=True
+        )
         
-        # Leer contenido del archivo
-        file_content = file.read()
-        file_b64 = base64.b64encode(file_content).decode('utf-8')
+        # Generar public_id único basado en el slug del producto
+        public_id = f"mikels-products/{product.slug}_{uuid.uuid4().hex[:8]}"
         
-        # Subir al repo del frontend via GitHub API
-        github_token = os.environ.get('GITHUB_TOKEN', '')
-        repo = 'bigman1973/mikels-earth-frontend'
-        path_in_repo = f'public/images/products/{filename}'
+        # Subir a Cloudinary
+        upload_result = cloudinary.uploader.upload(
+            file,
+            public_id=public_id,
+            folder='mikels-products',
+            overwrite=True,
+            resource_type='image',
+            transformation=[
+                {'quality': 'auto', 'fetch_format': 'auto'}
+            ]
+        )
         
-        github_url = f'https://api.github.com/repos/{repo}/contents/{path_in_repo}'
-        headers = {
-            'Authorization': f'token {github_token}',
-            'Accept': 'application/vnd.github.v3+json'
-        }
-        payload = {
-            'message': f'feat: add product image {filename}',
-            'content': file_b64,
-            'branch': 'main'
-        }
+        # URL permanente de Cloudinary (con optimización automática)
+        image_url = upload_result['secure_url']
         
-        gh_response = http_requests.put(github_url, json=payload, headers=headers)
+        # Actualizar DB según el campo 'field' del form
+        field = request.form.get('field', 'main')  # 'main' o 'gallery'
         
-        if gh_response.status_code in (200, 201):
-            # URL pública servida por Vercel
-            image_url = f'/images/products/{filename}'
-            
-            # Actualizar DB según el campo 'field' del form
-            field = request.form.get('field', 'main')  # 'main' o 'gallery'
-            
-            if field == 'main':
-                product.image = image_url
-            else:
-                # Añadir a la galería
-                current_images = product.images or []
-                current_images.append(image_url)
-                product.images = current_images
-            
-            db.session.commit()
-            
-            return jsonify({
-                'success': True,
-                'image_url': image_url,
-                'field': field,
-                'product_name': product.name
-            })
+        if field == 'main':
+            product.image = image_url
         else:
-            # Si falla GitHub, guardar localmente como fallback
-            upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'products')
-            os.makedirs(upload_dir, exist_ok=True)
-            filepath = os.path.join(upload_dir, filename)
-            with open(filepath, 'wb') as f:
-                f.write(file_content)
-            
-            image_url = f'/static/products/{filename}'
-            field = request.form.get('field', 'main')
-            
-            if field == 'main':
-                product.image = image_url
-            else:
-                current_images = product.images or []
-                current_images.append(image_url)
-                product.images = current_images
-            
-            db.session.commit()
-            
-            return jsonify({
-                'success': True,
-                'image_url': image_url,
-                'field': field,
-                'product_name': product.name,
-                'warning': 'Imagen guardada localmente (GitHub no disponible). Se perderá en el próximo despliegue.'
-            })
+            # Añadir a la galería
+            current_images = product.images or []
+            current_images.append(image_url)
+            product.images = current_images
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'image_url': image_url,
+            'field': field,
+            'product_name': product.name,
+            'storage': 'cloudinary'
+        })
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
