@@ -319,6 +319,56 @@ def health_check():
 
 
 
+@app.route('/api/test-cloudinary', methods=['GET'])
+def test_cloudinary():
+    """Test endpoint para verificar configuración de Cloudinary."""
+    import cloudinary
+    import cloudinary.uploader
+    try:
+        cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME', '')
+        api_key = os.environ.get('CLOUDINARY_API_KEY', '')
+        api_secret = os.environ.get('CLOUDINARY_API_SECRET', '')
+        
+        if not all([cloud_name, api_key, api_secret]):
+            return jsonify({
+                'error': 'Cloudinary no configurado',
+                'cloud_name': bool(cloud_name),
+                'api_key': bool(api_key),
+                'api_secret': bool(api_secret)
+            }), 500
+        
+        cloudinary.config(
+            cloud_name=cloud_name,
+            api_key=api_key,
+            api_secret=api_secret,
+            secure=True
+        )
+        
+        # Test upload with a tiny 1x1 pixel
+        import io
+        from PIL import Image
+        img = Image.new('RGB', (10, 10), color='green')
+        buffer = io.BytesIO()
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+        
+        result = cloudinary.uploader.upload(
+            buffer,
+            public_id='test/connection_test',
+            overwrite=True,
+            resource_type='image'
+        )
+        
+        return jsonify({
+            'success': True,
+            'url': result['secure_url'],
+            'cloud_name': cloud_name,
+            'message': 'Cloudinary funciona correctamente'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/manual-coupons-info', methods=['GET'])
 def manual_coupons_info():
     """Endpoint temporal para ver datos detallados de cupones manuales incluyendo datos de Stripe."""
