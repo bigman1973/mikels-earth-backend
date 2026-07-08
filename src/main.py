@@ -344,13 +344,11 @@ def test_cloudinary():
             secure=True
         )
         
-        # Test upload with a tiny 1x1 pixel
-        import io
-        from PIL import Image
-        img = Image.new('RGB', (10, 10), color='green')
-        buffer = io.BytesIO()
-        img.save(buffer, format='PNG')
-        buffer.seek(0)
+        # Test upload with a tiny 1x1 PNG (raw bytes, no PIL needed)
+        import base64, io
+        # Minimal valid 1x1 PNG
+        png_1x1 = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==')
+        buffer = io.BytesIO(png_1x1)
         
         result = cloudinary.uploader.upload(
             buffer,
