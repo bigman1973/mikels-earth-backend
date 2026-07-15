@@ -45,6 +45,43 @@ def create_checkout_session():
         discount_code = data.get('discount_code')
         discount_amount = data.get('discount_amount', 0)
         
+        # ===== VALIDACIÓN DE PRECIOS CONTRA LA BASE DE DATOS =====
+        # Evita que se pueda comprar a un precio desactualizado
+        from src.models.web_product import WebProduct
+        price_errors = []
+        for item in items:
+            product_id = item.get('id')
+            item_slug = item.get('slug')
+            item_price = item.get('price', 0)
+            
+            # Buscar el producto en la DB por ID o slug
+            db_product = None
+            if product_id:
+                db_product = WebProduct.query.get(product_id)
+            if not db_product and item_slug:
+                db_product = WebProduct.query.filter_by(slug=item_slug).first()
+            
+            if db_product:
+                # Comparar precio (tolerancia de 0.01€ por redondeos)
+                if abs(float(item_price) - float(db_product.price)) > 0.01:
+                    price_errors.append({
+                        'product': item.get('name', db_product.name),
+                        'sent_price': item_price,
+                        'current_price': db_product.price
+                    })
+                    # Corregir el precio al actual de la DB
+                    item['price'] = float(db_product.price)
+            # Si no se encuentra el producto, se permite (puede ser envío, etc.)
+        
+        if price_errors:
+            # Devolver error con los precios actualizados para que el frontend actualice el carrito
+            return jsonify({
+                'error': 'PRICE_MISMATCH',
+                'message': 'Algunos precios han cambiado. Tu carrito se ha actualizado con los precios actuales.',
+                'price_updates': price_errors
+            }), 409
+        # ===== FIN VALIDACIÓN DE PRECIOS =====
+        
         # Generate order number
         order_number = generate_order_number()
         
