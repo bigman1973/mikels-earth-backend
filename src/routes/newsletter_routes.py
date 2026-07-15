@@ -10,6 +10,7 @@ def subscribe_newsletter():
     """
     Endpoint para suscribirse al newsletter.
     Acepta: email (obligatorio), first_name, last_name (obligatorios desde frontend), phone (opcional)
+    PROTECCIÓN: Un email solo puede suscribirse UNA vez. Si ya tiene cupón (usado o no), se rechaza.
     """
     try:
         data = request.get_json()
@@ -23,11 +24,27 @@ def subscribe_newsletter():
         if not email:
             return jsonify({'error': 'Email is required'}), 400
         
+        # ===== PROTECCIÓN CONTRA SUSCRIPCIONES DUPLICADAS =====
+        # Verificar si este email ya tiene CUALQUIER cupón de newsletter (usado o no)
+        existing_coupon = Coupon.query.filter(
+            Coupon.email == email.lower().strip()
+        ).first()
+        
+        if existing_coupon:
+            # Ya se suscribió antes - NO generar nuevo cupón
+            print(f"⚠️ Email {email} ya tiene cupón newsletter: {existing_coupon.code} (used={existing_coupon.used})")
+            return jsonify({
+                'success': False,
+                'already_subscribed': True,
+                'message': '¡Ya estás suscrito/a! Revisa tu email original para encontrar tu cupón de bienvenida.'
+            }), 200
+        # ===== FIN PROTECCIÓN =====
+        
         # Si no viene cupón del frontend, generar uno usando PostgreSQL
         if not coupon_code:
             try:
                 # Crear cupón único usando el modelo Coupon (PostgreSQL)
-                coupon = Coupon.create_coupon(email, discount_percent=10)
+                coupon = Coupon.create_coupon(email.lower().strip(), discount_percent=10)
                 coupon_code = coupon.code
                 print(f"Coupon created successfully: {coupon_code} for {email}")
             except Exception as e:

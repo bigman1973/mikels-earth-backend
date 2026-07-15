@@ -452,7 +452,8 @@ def stripe_webhook():
                     print(f"⚠️ Error dispatching post-purchase event: {coupon_post_err}")
                 
                 # Marcar cupón como usado si se usó uno (todos los tipos)
-                discount_code = session['metadata'].get('discount_code')
+                discount_code = session['metadata'].get('discount_code', '').strip()
+                print(f"📌 [WEBHOOK] Order {order_number} - discount_code in metadata: '{discount_code}'")
                 if discount_code:
                     try:
                         # Marcar cupón como usado usando el modelo Coupon (PostgreSQL)
@@ -463,13 +464,27 @@ def stripe_webhook():
                         ).first()
                         if coupon_obj:
                             coupon_obj.mark_as_used()
-                            print(f"Coupon {discount_code} marked as used for {order_data['customer_email']}")
+                            print(f"✅ [WEBHOOK] Coupon '{discount_code}' marked as used for {order_data['customer_email']} (id={coupon_obj.id}, active={coupon_obj.active}, used={coupon_obj.used})")
                         else:
-                            print(f"Coupon {discount_code} not found in DB (may be legacy)")
+                            print(f"⚠️ [WEBHOOK] Coupon '{discount_code}' NOT FOUND in DB - checking all similar codes...")
+                            # Intentar búsqueda más flexible (por si hay diferencias de formato)
+                            similar = Coupon.query.filter(
+                                Coupon.code.ilike(f"%{discount_code}%")
+                            ).all()
+                            if similar:
+                                print(f"   Similar codes found: {[c.code for c in similar]}")
+                                # Usar el primer match exacto (case-insensitive)
+                                for s in similar:
+                                    if s.code.lower().strip() == discount_code.lower().strip():
+                                        s.mark_as_used()
+                                        print(f"   ✅ Matched and marked: {s.code}")
+                                        break
                     except Exception as coupon_error:
-                        print(f"Error marking coupon as used: {str(coupon_error)}")
+                        print(f"❌ [WEBHOOK] Error marking coupon as used: {str(coupon_error)}")
                         import traceback
                         traceback.print_exc()
+                else:
+                    print(f"ℹ️ [WEBHOOK] Order {order_number} - No discount code used")
                 
                 # Marcar carritos abandonados de este email como convertidos
                 try:

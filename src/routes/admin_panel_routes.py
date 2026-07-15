@@ -2142,6 +2142,72 @@ def admin_validate_coupon():
         })
 
 
+@admin_panel_bp.route('/coupons/sync-used', methods=['POST'])
+@admin_required
+def sync_coupons_used():
+    """
+    Sincroniza el estado de cupones usados recorriendo las sesiones de Stripe recientes.
+    Detecta cupones que se usaron en compras pero no se marcaron como usados en la DB
+    (por ejemplo, si el webhook falló).
+    """
+    import stripe
+    from src.models.coupon import Coupon
+    
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+    
+    try:
+        # Recorrer las sesiones de checkout completadas recientes (últimos 100)
+        sessions = stripe.checkout.Session.list(
+            limit=100,
+            status='complete'
+        )
+        
+        synced = []
+        already_used = []
+        not_found = []
+        
+        for session in sessions.auto_paging_iter():
+            metadata = session.get('metadata', {})
+            discount_code = (metadata.get('discount_code', '') or '').strip()
+            
+            if not discount_code:
+                continue
+            
+            # Buscar el cupón en la DB
+            coupon_obj = Coupon.query.filter(
+                db.func.lower(Coupon.code) == discount_code.lower().strip()
+            ).first()
+            
+            if not coupon_obj:
+                not_found.append(discount_code)
+                continue
+            
+            # Si ya está marcado como usado, skip
+            if coupon_obj.used or not coupon_obj.active:
+                already_used.append(discount_code)
+                continue
+            
+            # Marcar como usado
+            coupon_obj.mark_as_used()
+            synced.append({
+                'code': discount_code,
+                'email': coupon_obj.email,
+                'session_id': session['id']
+            })
+        
+        return jsonify({
+            'success': True,
+            'synced': synced,
+            'already_used': len(already_used),
+            'not_found': not_found,
+            'total_sessions_checked': len(sessions.data)
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Error sincronizando cupones: {str(e)}'}), 500
+
+
 # ============================================================
 # UTILIDADES INTERNAS
 # ============================================================
