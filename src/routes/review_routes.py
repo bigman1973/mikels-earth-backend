@@ -378,6 +378,12 @@ def update_review(review_id):
             review.product_slug = data['product_slug']
         if 'product_name' in data:
             review.product_name = data['product_name']
+        if 'comment' in data:
+            review.comment = data['comment']
+        if 'rating' in data:
+            review.rating = data['rating']
+        if 'customer_name' in data:
+            review.customer_name = data['customer_name']
         
         db.session.commit()
         
