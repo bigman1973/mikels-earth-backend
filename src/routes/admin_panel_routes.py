@@ -2149,6 +2149,7 @@ def sync_coupons_used():
     Sincroniza el estado de cupones usados recorriendo las sesiones de Stripe recientes.
     Detecta cupones que se usaron en compras pero no se marcaron como usados en la DB
     (por ejemplo, si el webhook falló).
+    También cruza con los cupones de Stripe (amount_off) para detectar usos por nombre.
     """
     import stripe
     from src.models.coupon import Coupon
@@ -2156,7 +2157,7 @@ def sync_coupons_used():
     stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
     
     try:
-        # Recorrer las sesiones de checkout completadas recientes (últimos 100)
+        # === FASE 1: Recorrer sesiones de checkout con discount_code en metadata ===
         sessions = stripe.checkout.Session.list(
             limit=100,
             status='complete'
@@ -2195,12 +2196,38 @@ def sync_coupons_used():
                 'session_id': session['id']
             })
         
+        # === FASE 2: Cruzar cupones de Stripe (por nombre) con DB ===
+        # Stripe crea un coupon temporal con name=discount_code para cada checkout con descuento
+        stripe_synced = []
+        try:
+            stripe_coupons = stripe.Coupon.list(limit=100)
+            for sc in stripe_coupons.auto_paging_iter():
+                if sc.times_redeemed > 0 and sc.name:
+                    code_name = sc.name.strip()
+                    # Buscar en DB
+                    coupon_obj = Coupon.query.filter(
+                        db.func.lower(Coupon.code) == code_name.lower()
+                    ).first()
+                    if coupon_obj and coupon_obj.active and not coupon_obj.used:
+                        coupon_obj.mark_as_used()
+                        stripe_synced.append({
+                            'code': code_name,
+                            'email': coupon_obj.email,
+                            'stripe_coupon_id': sc.id,
+                            'times_redeemed': sc.times_redeemed
+                        })
+        except Exception as stripe_err:
+            print(f"\u26a0\ufe0f Error syncing from Stripe coupons list: {stripe_err}")
+        
+        all_synced = synced + stripe_synced
+        
         return jsonify({
             'success': True,
-            'synced': synced,
+            'synced': all_synced,
             'already_used': len(already_used),
             'not_found': not_found,
-            'total_sessions_checked': len(sessions.data)
+            'total_sessions_checked': len(sessions.data),
+            'stripe_coupons_synced': len(stripe_synced)
         })
     except Exception as e:
         import traceback
