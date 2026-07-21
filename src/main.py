@@ -26,6 +26,7 @@ from src.routes.product_notify_routes import product_notify_bp  # Avísame cuand
 from src.routes.auth_routes import auth_bp  # Autenticación Microsoft Entra ID
 from src.routes.admin_panel_routes import admin_panel_bp  # Panel de administración
 from src.routes.product_routes import product_bp  # Catálogo público de productos
+from src.routes.translate_routes import translate_bp  # Traducción de reseñas
 from src.models.blog import BlogPost  # Modelo del blog
 from src.models.review import Review  # Modelo de reseñas
 from src.models.abandoned_cart import AbandonedCart  # Modelo de carrito abandonado
@@ -323,6 +324,7 @@ app.register_blueprint(product_notify_bp, url_prefix='/api')  # Avísame cuando 
 app.register_blueprint(auth_bp, url_prefix='/api/auth')  # Auth Microsoft Entra ID
 app.register_blueprint(admin_panel_bp, url_prefix='/api/admin')  # Panel Admin
 app.register_blueprint(product_bp, url_prefix='/api')  # Catálogo público de productos
+app.register_blueprint(translate_bp, url_prefix='/api/translate')  # Traducción de reseñas
 
 # Database configuration for coupons and user management
 # Use DATABASE_URL from Railway (PostgreSQL) or fallback to SQLite for local dev
