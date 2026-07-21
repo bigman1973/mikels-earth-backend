@@ -2398,7 +2398,7 @@ def _get_stock_status(stock):
         return 'alto'
 
 
-@admin_panel_bp.route('/api/admin/run-translations-migration', methods=['POST'])
+@admin_panel_bp.route('/run-translations-migration', methods=['POST'])
 @admin_required
 def run_translations_migration():
     """Endpoint temporal para poblar las traducciones EN de los productos"""
