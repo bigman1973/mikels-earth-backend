@@ -138,7 +138,8 @@ def create_checkout_session():
                 'fiscal_nif': (data.get('invoice_data') or {}).get('nif', ''),
                 'fiscal_address': (data.get('invoice_data') or {}).get('fiscalAddress', ''),
                 'fiscal_city': (data.get('invoice_data') or {}).get('fiscalCity', ''),
-                'fiscal_postal_code': (data.get('invoice_data') or {}).get('fiscalPostalCode', '')
+                'fiscal_postal_code': (data.get('invoice_data') or {}).get('fiscalPostalCode', ''),
+                'locale': data.get('locale', 'es')
             }
         }
         
@@ -378,7 +379,8 @@ def stripe_webhook():
                     'discount_amount': discount_amount,
                     'customer_notes': session['metadata'].get('customer_notes', ''),
                     'stripe_checkout_session_id': session['id'],
-                    'stripe_payment_intent_id': session.get('payment_intent', '')
+                    'stripe_payment_intent_id': session.get('payment_intent', ''),
+                    'locale': session['metadata'].get('locale', 'es')
                 }
                 
                 # Extraer datos de facturación de metadata

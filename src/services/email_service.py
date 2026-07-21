@@ -393,20 +393,143 @@ def format_customer_order_confirmation(order_data):
 
 def send_customer_order_confirmation(order_data):
     """
-    Envía email de confirmación al cliente
+    Envía email de confirmación al cliente (bilingüe ES/EN)
     """
     customer_email = order_data.get('customer_email')
+    locale = order_data.get('locale', 'es')
     
     if not customer_email or customer_email == 'N/A':
         print("⚠️ No se puede enviar email al cliente: email no disponible")
         return False
     
-    subject = f"✅ Pedido Confirmado #{order_data.get('order_number', 'N/A')} - Mikel's Earth"
-    html_content = format_customer_order_confirmation(order_data)
+    if locale == 'en':
+        subject = f"✅ Order Confirmed #{order_data.get('order_number', 'N/A')} - Mikel's Earth"
+        html_content = format_customer_order_confirmation_en(order_data)
+    else:
+        subject = f"✅ Pedido Confirmado #{order_data.get('order_number', 'N/A')} - Mikel's Earth"
+        html_content = format_customer_order_confirmation(order_data)
     
     return send_email(customer_email, subject, html_content)
 
 
+
+
+def format_customer_order_confirmation_en(order_data):
+    """
+    English version of the order confirmation email for the customer
+    """
+    items_html = ""
+    for item in order_data.get('items', []):
+        items_html += f"""
+        <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #eee;">{item['name']}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">{item['quantity']}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">{item['price']:.2f}€</td>
+        </tr>
+        """
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #2d5016; color: white; padding: 30px 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .header h1 {{ margin: 0; font-size: 28px; }}
+            .content {{ background-color: #f9f9f9; padding: 20px; }}
+            .section {{ background-color: white; padding: 20px; margin-bottom: 15px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+            .section h3 {{ color: #2d5016; margin-top: 0; }}
+            table {{ width: 100%; border-collapse: collapse; }}
+            .total {{ font-size: 1.3em; font-weight: bold; color: #2d5016; text-align: right; padding: 15px 0; border-top: 2px solid #2d5016; }}
+            .highlight-box {{ background-color: #f0f7e9; padding: 15px; border-left: 4px solid #2d5016; margin: 15px 0; }}
+            .footer {{ text-align: center; padding: 20px; color: #666; font-size: 0.9em; }}
+            .contact-info {{ background-color: #f0f7e9; padding: 15px; border-radius: 5px; margin-top: 15px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>✅ Order Confirmed!</h1>
+                <p style="margin: 10px 0 0 0; font-size: 16px;">Thank you for your purchase</p>
+            </div>
+            
+            <div class="content">
+                <div class="section">
+                    <p style="font-size: 16px; margin-top: 0;">Hello <strong>{order_data.get('customer_name', 'Customer')}</strong>,</p>
+                    <p>Thank you for choosing Mikel's Earth! We have received your order and are preparing it with great care.</p>
+                    
+                    <div class="highlight-box">
+                        <p style="margin: 0;"><strong>📋 Order Number:</strong> {order_data.get('order_number', 'N/A')}</p>
+                        <p style="margin: 5px 0 0 0;"><strong>📅 Date:</strong> {datetime.now().strftime('%d/%m/%Y')}</p>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h3>📦 Order Summary</h3>
+                    <table>
+                        <thead>
+                            <tr style="background-color: #f0f0f0;">
+                                <th style="padding: 10px; text-align: left;">Product</th>
+                                <th style="padding: 10px; text-align: center;">Qty</th>
+                                <th style="padding: 10px; text-align: right;">Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {items_html}
+                        </tbody>
+                    </table>
+                    <table style="margin-top: 15px;">
+                        <tr>
+                            <td style="text-align: right; padding: 5px; color: #666;">Subtotal:</td>
+                            <td style="text-align: right; padding: 5px; width: 100px;">{order_data.get('subtotal', order_data.get('total', 0)):.2f}€</td>
+                        </tr>
+                        {f'''<tr>
+                            <td style="text-align: right; padding: 5px; color: #16a34a; font-weight: bold;">Discount {order_data.get('discount_code', '')}:</td>
+                            <td style="text-align: right; padding: 5px; color: #16a34a; font-weight: bold;">-{order_data.get('discount_amount', 0):.2f}€</td>
+                        </tr>''' if order_data.get('discount_code') else ''}
+                        <tr>
+                            <td style="text-align: right; padding: 5px; color: #666;">Shipping:</td>
+                            <td style="text-align: right; padding: 5px; color: #16a34a; font-weight: bold;">FREE</td>
+                        </tr>
+                    </table>
+                    <div class="total">
+                        Total: {order_data.get('total', 0):.2f}€
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h3>📍 Shipping Address</h3>
+                    <p>{order_data.get('shipping_address', 'N/A')}</p>
+                </div>
+                
+                <div class="section">
+                    <h3>🚚 What's Next?</h3>
+                    <p>1. <strong>Preparation:</strong> We are preparing your order with fresh products from the field</p>
+                    <p>2. <strong>Shipping:</strong> We will send you an email when your order is on its way</p>
+                    <p>3. <strong>Delivery:</strong> You will receive your order in 3-5 business days</p>
+                </div>
+                
+                <div class="contact-info">
+                    <h4 style="margin-top: 0; color: #2d5016;">Need help?</h4>
+                    <p style="margin: 5px 0;">📧 Email: info@mikels.es</p>
+                    <p style="margin: 5px 0;">📱 WhatsApp: +43 6789 0700 62172</p>
+                    <p style="margin: 5px 0;">🌐 Web: www.mikels.es</p>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <p><strong>Mikel's Earth</strong></p>
+                <p>From the field, straight to your table</p>
+                <p style="font-size: 0.8em; color: #999; margin-top: 15px;">This email was sent to {order_data.get('customer_email', '')} because you made a purchase in our shop.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html
 
 
 def send_product_notification_request(product_name, customer_name, customer_email, customer_phone=''):

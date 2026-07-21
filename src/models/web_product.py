@@ -21,6 +21,11 @@ class WebProduct(db.Model):
     description = db.Column(db.Text)  # Descripción corta
     long_description = db.Column(db.Text)  # Descripción larga (markdown)
     
+    # Traducciones (inglés)
+    name_en = db.Column(db.String(200))
+    description_en = db.Column(db.Text)
+    long_description_en = db.Column(db.Text)
+    
     # Precios
     price = db.Column(db.Float, nullable=False)  # Precio con IVA
     original_price = db.Column(db.Float)  # Precio original (tachado)
@@ -83,17 +88,23 @@ class WebProduct(db.Model):
     def __repr__(self):
         return f'<WebProduct {self.name}>'
     
-    def to_frontend_dict(self):
+    def to_frontend_dict(self, lang='es'):
         """
         Devuelve el producto en el formato exacto que espera el frontend (products.js).
         Esto garantiza compatibilidad total con el carrito, la tienda y las páginas de producto.
+        Si lang='en' y hay traducción disponible, devuelve el contenido en inglés.
         """
+        # Seleccionar nombre y descripciones según idioma
+        name = (self.name_en if lang == 'en' and self.name_en else self.name)
+        description = (self.description_en if lang == 'en' and self.description_en else self.description)
+        long_description = (self.long_description_en if lang == 'en' and self.long_description_en else self.long_description)
+        
         result = {
             'id': self.id,
-            'name': self.name,
+            'name': name,
             'slug': self.slug,
-            'description': self.description,
-            'longDescription': self.long_description,
+            'description': description,
+            'longDescription': long_description,
             'price': self.price,
             'currency': self.currency,
             'image': self.image,
