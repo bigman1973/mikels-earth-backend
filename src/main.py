@@ -146,6 +146,16 @@ def create_tables():
             except Exception as mig_err4:
                 db.session.rollback()
                 print(f"Migration coupons fields (non-critical): {mig_err4}")
+            # Migración: añadir campos de traducción EN a web_products
+            try:
+                db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS name_en VARCHAR(200)'))
+                db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS description_en TEXT'))
+                db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS long_description_en TEXT'))
+                db.session.commit()
+                print("Migration: translation fields (name_en, description_en, long_description_en) added to web_products")
+            except Exception as mig_err_i18n:
+                db.session.rollback()
+                print(f"Migration i18n fields (non-critical): {mig_err_i18n}")
             # Seed de cupones manuales (idempotente - no duplica)
             try:
                 from src.models.coupon import Coupon
