@@ -762,6 +762,145 @@ def toggle_web_product_active(product_id):
         return jsonify({'error': str(e)}), 500
 
 
+@admin_panel_bp.route('/web-products/<int:product_id>/auto-translate', methods=['POST'])
+@admin_required
+@role_required('admin')
+def auto_translate_product(product_id):
+    """
+    Traduce automáticamente nombre, descripción y descripción larga al inglés usando OpenAI.
+    Guarda el resultado en los campos name_en, description_en, long_description_en.
+    """
+    from src.models.web_product import WebProduct
+    import requests as http_requests
+    try:
+        product = WebProduct.query.get(product_id)
+        if not product:
+            return jsonify({'error': 'Producto no encontrado'}), 404
+        
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            return jsonify({'error': 'OPENAI_API_KEY no configurada en el servidor'}), 500
+        
+        api_base = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
+        
+        # Build the text to translate
+        parts = []
+        if product.name:
+            parts.append(f"Name: {product.name}")
+        if product.description:
+            parts.append(f"Short description: {product.description}")
+        if product.long_description:
+            parts.append(f"Long description: {product.long_description}")
+        
+        if not parts:
+            return jsonify({'error': 'El producto no tiene contenido para traducir'}), 400
+        
+        prompt_text = "\n\n".join(parts)
+        
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a professional translator for a premium artisanal food brand (olive oils, fruit preserves). Translate the following product information from Spanish to English. Maintain the premium, artisanal tone. Return the translation in the exact same format with the labels 'Name:', 'Short description:', and 'Long description:'. Keep it natural and appealing for English-speaking customers."
+            },
+            {"role": "user", "content": prompt_text}
+        ]
+        
+        response = http_requests.post(
+            f"{api_base}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": messages,
+                "temperature": 0.3,
+                "max_tokens": 1000
+            },
+            timeout=20
+        )
+        
+        if response.status_code != 200:
+            return jsonify({'error': f'Error de OpenAI: {response.text}'}), 500
+        
+        result = response.json()['choices'][0]['message']['content'].strip()
+        
+        # Parse the response
+        name_en = ''
+        description_en = ''
+        long_description_en = ''
+        
+        lines = result.split('\n')
+        current_field = None
+        current_content = []
+        
+        for line in lines:
+            if line.startswith('Name:'):
+                if current_field and current_content:
+                    if current_field == 'name':
+                        name_en = '\n'.join(current_content).strip()
+                    elif current_field == 'short':
+                        description_en = '\n'.join(current_content).strip()
+                    elif current_field == 'long':
+                        long_description_en = '\n'.join(current_content).strip()
+                current_field = 'name'
+                current_content = [line.replace('Name:', '').strip()]
+            elif line.startswith('Short description:'):
+                if current_field and current_content:
+                    if current_field == 'name':
+                        name_en = '\n'.join(current_content).strip()
+                    elif current_field == 'short':
+                        description_en = '\n'.join(current_content).strip()
+                    elif current_field == 'long':
+                        long_description_en = '\n'.join(current_content).strip()
+                current_field = 'short'
+                current_content = [line.replace('Short description:', '').strip()]
+            elif line.startswith('Long description:'):
+                if current_field and current_content:
+                    if current_field == 'name':
+                        name_en = '\n'.join(current_content).strip()
+                    elif current_field == 'short':
+                        description_en = '\n'.join(current_content).strip()
+                    elif current_field == 'long':
+                        long_description_en = '\n'.join(current_content).strip()
+                current_field = 'long'
+                current_content = [line.replace('Long description:', '').strip()]
+            else:
+                current_content.append(line)
+        
+        # Save last field
+        if current_field and current_content:
+            if current_field == 'name':
+                name_en = '\n'.join(current_content).strip()
+            elif current_field == 'short':
+                description_en = '\n'.join(current_content).strip()
+            elif current_field == 'long':
+                long_description_en = '\n'.join(current_content).strip()
+        
+        # Update product
+        if name_en:
+            product.name_en = name_en
+        if description_en:
+            product.description_en = description_en
+        if long_description_en:
+            product.long_description_en = long_description_en
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'translations': {
+                'name_en': name_en,
+                'description_en': description_en,
+                'long_description_en': long_description_en
+            },
+            'message': f'Producto "{product.name}" traducido al inglés correctamente'
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
 @admin_panel_bp.route('/web-products/<int:product_id>/image', methods=['POST'])
 @admin_required
 @role_required('admin')
