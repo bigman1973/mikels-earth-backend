@@ -156,6 +156,33 @@ def create_tables():
             except Exception as mig_err_i18n:
                 db.session.rollback()
                 print(f"Migration i18n fields (non-critical): {mig_err_i18n}")
+            # Seed de traducciones EN (idempotente - solo actualiza si name_en es NULL)
+            try:
+                translations_data = {
+                    'paraguayo-almibar': ('Flat Peach in Syrup', 'Artisanal flat peach in light syrup, handpicked from our orchards in Lleida.', 'Our flat peaches are carefully selected at their optimal ripeness point and preserved in a light syrup that enhances their natural sweetness. A family recipe passed down through seven generations since 1819.'),
+                    'nectarina-almibar': ('Nectarine in Syrup', 'Artisanal nectarine in light syrup, handpicked from our orchards in Lleida. Sweet, juicy and full of flavour.', 'Our nectarines are harvested at their peak ripeness and preserved in a delicate light syrup. Each jar captures the essence of Mediterranean summer fruit.'),
+                    'aceite-temprano-sin-filtrar': ('Unfiltered Early Harvest Extra Virgin Olive Oil 500ml', 'Premium unfiltered early harvest EVOO with intense green colour and robust flavour.', 'Our early harvest olive oil is pressed from green olives collected in October-November, before full ripeness. Higher polyphenol content and intense flavour.'),
+                    'aceite-oliva-ecologico': ('Award-Winning Organic Extra Virgin Olive Oil', 'Certified organic EVOO, internationally awarded. Cold-pressed from organically grown olives.', 'Our organic extra virgin olive oil comes from certified organic olive groves in C\u00f3rdoba. Produced using sustainable farming practices.'),
+                    'aceite-5l-caja-3': ('Extra Virgin Olive Oil 5L', 'Family-size 5L container of premium EVOO. Perfect for daily cooking and generous use.', 'Our 5-litre format is designed for families and professionals who appreciate quality olive oil for everyday use.'),
+                    'pack-mermelada-aceites': ('Premium Tasting Pack', 'A curated selection of our finest products. The perfect introduction to Mikels Earth.', 'Our Premium Tasting Pack brings together a carefully curated selection of our best products.'),
+                    'pack-navidad-completo': ('Mikels Earth Complete Pack', 'The complete Mikels Earth experience. All our signature products in one exclusive pack.', 'Our Complete Pack includes every signature product from our range.'),
+                    'pack-fruta-premium': ('Premium Fruit Pack', 'A selection of our finest fruit preserves. Artisanal flat peach and nectarine in syrup.', 'Our Premium Fruit Pack combines our signature fruit preserves: flat peach and nectarine in syrup.'),
+                    'pack-temprano-premium': ('Premium Early Harvest Pack', 'Our finest early harvest olive oils together. The ultimate olive oil experience.', 'The Premium Early Harvest Pack features our most exclusive olive oils from the first green olives of the season.'),
+                    'pack-aceite-ecologico-premium-estuche-regalo': ('Premium Organic Olive Oil Gift Box', 'Award-winning organic EVOO in an elegant gift box. The perfect present.', 'Our Premium Organic Olive Oil comes beautifully presented in an elegant gift box.')
+                }
+                seed_count = 0
+                for slug, (name_en, desc_en, long_desc_en) in translations_data.items():
+                    result = db.session.execute(db.text(
+                        "UPDATE web_products SET name_en = :n, description_en = :d, long_description_en = :ld WHERE slug = :s AND name_en IS NULL"
+                    ), {'n': name_en, 'd': desc_en, 'ld': long_desc_en, 's': slug})
+                    if result.rowcount > 0:
+                        seed_count += 1
+                db.session.commit()
+                if seed_count > 0:
+                    print(f"Seed: {seed_count} product translations added")
+            except Exception as mig_err_seed:
+                db.session.rollback()
+                print(f"Seed translations (non-critical): {mig_err_seed}")
             # Seed de cupones manuales (idempotente - no duplica)
             try:
                 from src.models.coupon import Coupon
