@@ -97,7 +97,7 @@ def create_checkout_session():
                     'currency': 'eur',
                     'product_data': {
                         'name': item['name'],
-                        'description': f"{item.get('weight', '')}",
+                        **(({'description': item['weight']} if item.get('weight') else {})),
                     },
                     'unit_amount': int(item['price'] * 100),  # Convert to cents
                 },
