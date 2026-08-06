@@ -11,12 +11,34 @@ from src.models.order import Order
 from src.models.coupon import Coupon
 from src.services.klaviyo_service import send_klaviyo_event
 from datetime import datetime
+from collections import defaultdict
 import os
 import re
 import random
 import string
+import time
 
 review_bp = Blueprint('review', __name__)
+
+# Anti-spam
+_review_rate_store = defaultdict(list)
+
+
+def _is_gibberish(text):
+    if not text or len(text) < 4:
+        return False
+    clean = re.sub(r'[\s\-\'\.]', '', text.lower())
+    if re.findall(r'[bcdfghjklmnpqrstvwxyz]{5,}', clean):
+        return True
+    if len(clean) > 6:
+        vowels = sum(1 for c in clean if c in 'aeiou\u00e1\u00e9\u00ed\u00f3\u00fa')
+        if vowels / len(clean) < 0.15:
+            return True
+    if len(text) > 6:
+        upper_count = sum(1 for c in text[1:] if c.isupper())
+        if upper_count > len(text) * 0.35:
+            return True
+    return False
 
 
 @review_bp.route('/init-db', methods=['GET'])
@@ -46,6 +68,15 @@ def _validate_email(email):
 
 @review_bp.route('', methods=['POST'])
 def create_review():
+    # Anti-spam: rate limiting
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if client_ip:
+        client_ip = client_ip.split(',')[0].strip()
+    now = time.time()
+    _review_rate_store[client_ip] = [t for t in _review_rate_store[client_ip] if now - t < 3600]
+    if len(_review_rate_store[client_ip]) >= 3:
+        return jsonify({'error': 'Demasiados intentos. Inténtalo más tarde.'}), 429
+    _review_rate_store[client_ip].append(now)
     """
     Crear una nueva reseña.
     Genera un cupón de agradecimiento del 10% y envía un email de agradecimiento via Klaviyo.
@@ -78,6 +109,11 @@ def create_review():
         email = data['customer_email'].strip().lower()
         if not _validate_email(email):
             return jsonify({'error': 'Email no válido'}), 400
+        
+        # Anti-spam: gibberish check on name and comment
+        if _is_gibberish(data.get('customer_name', '')) or _is_gibberish(data.get('comment', '')):
+            print(f"\ud83d\udeab Review spam blocked: {data.get('customer_name')} / {email}")
+            return jsonify({'error': 'Contenido no v\u00e1lido'}), 400
         
         # Validar rating
         rating = int(data['rating'])

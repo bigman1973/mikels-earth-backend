@@ -2,19 +2,53 @@ from flask import Blueprint, request, jsonify
 from src.models.user import db
 from src.models.product_notification import ProductNotification
 from src.services.email_dispatcher import dispatch_product_notify_subscribe, dispatch_product_back_in_stock
+import re
+import time
+from collections import defaultdict
 
 product_notify_bp = Blueprint('product_notify', __name__)
+
+# Anti-spam
+_notify_rate_store = defaultdict(list)
+
+
+def _is_gibberish(text):
+    if not text or len(text) < 4:
+        return False
+    clean = re.sub(r'[\s\-\'\.]', '', text.lower())
+    if re.findall(r'[bcdfghjklmnpqrstvwxyz]{5,}', clean):
+        return True
+    if len(clean) > 6:
+        vowels = sum(1 for c in clean if c in 'aeiou\u00e1\u00e9\u00ed\u00f3\u00fa')
+        if vowels / len(clean) < 0.15:
+            return True
+    return False
 
 
 @product_notify_bp.route('/product-notify/subscribe', methods=['POST'])
 def subscribe_product_notification():
-    """Registra interés de un cliente en un producto agotado y envía evento a Klaviyo"""
+    """Registra inter\u00e9s de un cliente en un producto agotado y env\u00eda evento a Klaviyo"""
     try:
+        # Rate limiting
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+        now = time.time()
+        _notify_rate_store[client_ip] = [t for t in _notify_rate_store[client_ip] if now - t < 3600]
+        if len(_notify_rate_store[client_ip]) >= 5:
+            return jsonify({'success': True, 'message': 'Te avisaremos cuando est\u00e9 disponible'}), 200
+        _notify_rate_store[client_ip].append(now)
+
         data = request.get_json()
         email = data.get('email', '').strip().lower()
         name = data.get('name', '').strip()
         product_name = data.get('product_name', '').strip()
         product_id = data.get('product_id', '').strip()
+
+        # Gibberish check
+        if _is_gibberish(name):
+            print(f"\ud83d\udeab Product notify spam blocked: {name} / {email}")
+            return jsonify({'success': True, 'message': 'Te avisaremos cuando est\u00e9 disponible'}), 200
 
         if not email or not product_name or not product_id:
             return jsonify({'error': 'Email, product_name y product_id son obligatorios'}), 400

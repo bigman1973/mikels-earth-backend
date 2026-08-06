@@ -2,8 +2,41 @@
 from flask import Blueprint, request, jsonify
 from src.services.email_dispatcher import dispatch_newsletter_subscription_notification, dispatch_newsletter_welcome, dispatch_add_contact
 from src.models.coupon import Coupon
+import re
+import time
+from collections import defaultdict
 
 newsletter_bp = Blueprint('newsletter', __name__)
+
+# Anti-spam
+_newsletter_rate_store = defaultdict(list)
+
+
+def _is_gibberish(text):
+    if not text or len(text) < 4:
+        return False
+    clean = re.sub(r'[\s\-\'\.]', '', text.lower())
+    if re.findall(r'[bcdfghjklmnpqrstvwxyz]{5,}', clean):
+        return True
+    if len(clean) > 6:
+        vowels = sum(1 for c in clean if c in 'aeiou\u00e1\u00e9\u00ed\u00f3\u00fa\u00e0\u00e8\u00ec\u00f2\u00f9')
+        if vowels / len(clean) < 0.15:
+            return True
+    if len(text) > 6:
+        upper_count = sum(1 for c in text[1:] if c.isupper())
+        if upper_count > len(text) * 0.35:
+            return True
+    return False
+
+
+def _is_newsletter_rate_limited(ip):
+    now = time.time()
+    _newsletter_rate_store[ip] = [t for t in _newsletter_rate_store[ip] if now - t < 3600]
+    if len(_newsletter_rate_store[ip]) >= 5:
+        return True
+    _newsletter_rate_store[ip].append(now)
+    return False
+
 
 @newsletter_bp.route('/subscribe', methods=['POST'])
 def subscribe_newsletter():
@@ -13,6 +46,14 @@ def subscribe_newsletter():
     PROTECCIÓN: Un email solo puede suscribirse UNA vez. Si ya tiene cupón (usado o no), se rechaza.
     """
     try:
+        # Anti-spam: rate limiting
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+        if _is_newsletter_rate_limited(client_ip):
+            print(f"\u26a0\ufe0f Newsletter rate limited: {client_ip}")
+            return jsonify({'success': True, 'message': 'Subscription successful', 'coupon_code': 'BIENVENIDA10'}), 200
+
         data = request.get_json()
         email = data.get('email')
         first_name = data.get('first_name', '').strip()
@@ -23,6 +64,11 @@ def subscribe_newsletter():
         
         if not email:
             return jsonify({'error': 'Email is required'}), 400
+
+        # Anti-spam: gibberish name check
+        if _is_gibberish(first_name) or _is_gibberish(last_name):
+            print(f"\ud83d\udeab Newsletter spam blocked (gibberish): {first_name} {last_name} / {email} / IP={client_ip}")
+            return jsonify({'success': True, 'message': 'Subscription successful', 'coupon_code': 'BIENVENIDA10'}), 200
         
         # ===== PROTECCIÓN CONTRA SUSCRIPCIONES DUPLICADAS =====
         # Verificar si este email ya tiene CUALQUIER cupón de newsletter (usado o no)
