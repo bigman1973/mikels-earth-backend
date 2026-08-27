@@ -6,6 +6,7 @@ para que el frontend funcione sin cambios en el carrito ni en la tienda.
 from flask import Blueprint, jsonify, request
 from src.models.user import db
 from src.models.web_product import WebProduct
+from src.services.pricing_service import catalog_version
 
 product_bp = Blueprint('products', __name__)
 
@@ -48,7 +49,8 @@ def get_products():
     return jsonify({
         'products': products_list,
         'categories': categories,
-        'tags': tags
+        'tags': tags,
+        'catalog_version': catalog_version(products)
     })
 
 
@@ -59,4 +61,6 @@ def get_product_by_slug(slug):
     product = WebProduct.query.filter_by(slug=slug, active=True).first()
     if not product:
         return jsonify({'error': 'Producto no encontrado'}), 404
-    return jsonify(product.to_frontend_dict(lang=lang))
+    payload = product.to_frontend_dict(lang=lang)
+    payload['catalog_version'] = catalog_version([product])
+    return jsonify(payload)
