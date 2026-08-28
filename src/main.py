@@ -59,7 +59,7 @@ CORS(app, resources={
     r"/api/*": {
         "origins": "*",
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Checkout-Pricing-Version"],
         "supports_credentials": True
     }
 })
@@ -78,6 +78,24 @@ def handle_exception(e):
     response = jsonify({'error': f'Error interno: {str(e)}'})
     response.status_code = 500
     return response
+
+
+@app.after_request
+def prevent_stale_commerce_responses(response):
+    """Never reuse cached catalog or checkout responses for commerce decisions."""
+    commerce_paths = (
+        '/api/products',
+        '/api/admin/products',
+        '/api/admin/web-products',
+        '/api/coupon',
+        '/api/stripe',
+    )
+    if request.path.startswith(commerce_paths):
+        response.headers['Cache-Control'] = 'no-store, max-age=0, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
 
 # Mover creación de tablas a la primera solicitud para evitar timeout
 @app.before_request

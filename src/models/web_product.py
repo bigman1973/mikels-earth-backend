@@ -101,6 +101,7 @@ class WebProduct(db.Model):
         
         result = {
             'id': self.id,
+            'sku': self.sku,
             'name': name,
             'slug': self.slug,
             'description': description,

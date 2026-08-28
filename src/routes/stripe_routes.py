@@ -5,6 +5,13 @@ from datetime import datetime
 import secrets
 from src.services.whatsapp_service import notify_new_order, notify_new_subscription
 from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification, dispatch_started_checkout_event
+from src.services.pricing_service import (
+    PricingError,
+    catalog_version,
+    price_coupon,
+    price_one_time_item,
+    price_subscription_item,
+)
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
@@ -30,83 +37,128 @@ def get_config():
         'publishableKey': os.getenv('STRIPE_PUBLISHABLE_KEY')
     })
 
+@stripe_bp.route('/quote', methods=['POST'])
+def create_checkout_quote():
+    """Return current DB prices without creating Stripe objects."""
+    try:
+        data = request.get_json(silent=True) or {}
+        if not data.get('items'):
+            return jsonify({'error': 'MISSING_REQUIRED_FIELDS'}), 400
+
+        customer_info = data.get('customer_info') or {}
+        locale = data.get('locale', 'es')
+        priced_items = [price_one_time_item(item, locale) for item in data['items']]
+        subtotal_cents = sum(item['line_total'] for item in priced_items)
+        _, discount_cents = price_coupon(
+            data.get('discount_code'),
+            customer_info.get('email'),
+            subtotal_cents,
+        )
+        version = catalog_version([item['product'] for item in priced_items])
+
+        return jsonify({
+            'currency': 'eur',
+            'catalog_version': version,
+            'pricing_source': 'server',
+            'items': [{
+                'product_id': item['product_id'],
+                'sku': item['sku'],
+                'slug': item['slug'],
+                'name': item['name'],
+                'image': item['image'],
+                'weight': item['weight'],
+                'quantity': item['quantity'],
+                'base_unit_amount': item['base_unit_amount'],
+                'unit_amount': item['unit_amount'],
+                'discount_percent': item['discount_percent'],
+                'volume_discount': item['volume_discount'],
+                'tiered_discount': item['tiered_discount'],
+                'line_total': item['line_total'],
+            } for item in priced_items],
+            'subtotal': subtotal_cents,
+            'discount_amount': discount_cents,
+            'total': subtotal_cents - discount_cents,
+        })
+    except PricingError as error:
+        return jsonify(error.to_dict()), error.status_code
+
+
 @stripe_bp.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
-    """Create Stripe Checkout session for one-time purchase"""
+    """Create a one-time Checkout Session using current database prices only."""
     try:
-        data = request.json
-        
-        # Validate required fields
+        data = request.get_json(silent=True) or {}
         if not data.get('items') or not data.get('customer_info'):
-            return jsonify({'error': 'Missing required fields'}), 400
-        
-        items = data['items']
+            return jsonify({'error': 'MISSING_REQUIRED_FIELDS'}), 400
+
         customer_info = data['customer_info']
-        discount_code = data.get('discount_code')
-        discount_amount = data.get('discount_amount', 0)
-        
-        # ===== VALIDACIÓN DE PRECIOS CONTRA LA BASE DE DATOS =====
-        # Evita que se pueda comprar a un precio desactualizado
-        from src.models.web_product import WebProduct
-        price_errors = []
-        for item in items:
-            product_id = item.get('id')
-            item_slug = item.get('slug')
-            item_price = item.get('price', 0)
-            
-            # Buscar el producto en la DB por ID o slug
-            db_product = None
-            if product_id:
-                db_product = WebProduct.query.get(product_id)
-            if not db_product and item_slug:
-                db_product = WebProduct.query.filter_by(slug=item_slug).first()
-            
-            if db_product:
-                # Comparar precio (tolerancia de 0.01€ por redondeos)
-                if abs(float(item_price) - float(db_product.price)) > 0.01:
-                    price_errors.append({
-                        'product': item.get('name', db_product.name),
-                        'sent_price': item_price,
-                        'current_price': db_product.price
+        locale = data.get('locale', 'es')
+        priced_items = [price_one_time_item(item, locale) for item in data['items']]
+
+        # Compatibilidad con bundles antiguos todavía abiertos o cacheados.
+        # Esos clientes necesitan una advertencia antes de continuar; el cliente v2
+        # ya obtuvo /quote y autoriza el importe canónico mediante este header.
+        if request.headers.get('X-Checkout-Pricing-Version') != '2':
+            price_updates = []
+            for submitted, current in zip(data['items'], priced_items):
+                try:
+                    submitted_cents = int(round(float(submitted.get('price', 0)) * 100))
+                except (TypeError, ValueError):
+                    submitted_cents = 0
+                if abs(submitted_cents - current['unit_amount']) > 1:
+                    price_updates.append({
+                        'product': current['name'],
+                        'slug': current['slug'],
+                        'sent_price': submitted.get('price'),
+                        # El frontend antiguo guarda el precio base y vuelve a aplicar
+                        # la regla de volumen; devolver el precio final lo duplicaría.
+                        'current_price': current['base_unit_amount'] / 100,
                     })
-                    # Corregir el precio al actual de la DB
-                    item['price'] = float(db_product.price)
-            # Si no se encuentra el producto, se permite (puede ser envío, etc.)
-        
-        if price_errors:
-            # Devolver error con los precios actualizados para que el frontend actualice el carrito
-            return jsonify({
-                'error': 'PRICE_MISMATCH',
-                'message': 'Algunos precios han cambiado. Tu carrito se ha actualizado con los precios actuales.',
-                'price_updates': price_errors
-            }), 409
-        # ===== FIN VALIDACIÓN DE PRECIOS =====
-        
-        # Generate order number
+
+            if price_updates:
+                return jsonify({
+                    'error': 'PRICE_MISMATCH',
+                    'message': 'Los precios han cambiado. Tu carrito se ha actualizado con los precios actuales.',
+                    'price_updates': price_updates,
+                }), 409
+
+        subtotal_cents = sum(item['line_total'] for item in priced_items)
+
+        discount_code = data.get('discount_code')
+        _, discount_cents = price_coupon(
+            discount_code,
+            customer_info.get('email'),
+            subtotal_cents,
+        )
+        total_cents = subtotal_cents - discount_cents
         order_number = generate_order_number()
-        
-        # Calculate subtotal and total
-        subtotal = sum(item['price'] * item['quantity'] for item in items)
-        total = subtotal - discount_amount
-        
-        # Create line items
+        version = catalog_version([item['product'] for item in priced_items])
+
         line_items = []
-        for item in items:
+        canonical_items = []
+        for item in priced_items:
+            product_data = {'name': item['name']}
+            if item.get('weight'):
+                product_data['description'] = item['weight']
             line_items.append({
                 'price_data': {
                     'currency': 'eur',
-                    'product_data': {
-                        'name': item['name'],
-                        **(({'description': item['weight']} if item.get('weight') else {})),
-                    },
-                    'unit_amount': int(item['price'] * 100),  # Convert to cents
+                    'product_data': product_data,
+                    'unit_amount': item['unit_amount'],
                 },
                 'quantity': item['quantity'],
             })
-        
-        # Create Stripe Checkout Session
+            canonical_items.append({
+                'id': item['product_id'],
+                'sku': item['sku'],
+                'slug': item['slug'],
+                'name': item['name'],
+                'price': item['unit_amount'] / 100,
+                'quantity': item['quantity'],
+                'weight': item.get('weight'),
+            })
+
         frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
-        
         session_params = {
             'payment_method_types': ['card'],
             'line_items': line_items,
@@ -117,9 +169,7 @@ def create_checkout_session():
             'shipping_address_collection': {
                 'allowed_countries': ['ES', 'PT', 'FR', 'DE', 'IT', 'GB', 'AT', 'BE', 'NL', 'IE']
             },
-            'phone_number_collection': {
-                'enabled': True
-            },
+            'phone_number_collection': {'enabled': True},
             'metadata': {
                 'order_number': order_number,
                 'customer_name': customer_info['name'],
@@ -130,117 +180,97 @@ def create_checkout_session():
                 'shipping_country': customer_info.get('country', 'España'),
                 'customer_notes': customer_info.get('notes', ''),
                 'discount_code': discount_code or '',
-                'discount_amount': str(discount_amount),
-                'subtotal': str(subtotal),
-                'total': str(total),
+                'discount_amount': f'{discount_cents / 100:.2f}',
+                'subtotal': f'{subtotal_cents / 100:.2f}',
+                'total': f'{total_cents / 100:.2f}',
+                'catalog_version': version,
+                'pricing_source': 'server',
                 'needs_invoice': str(data.get('needs_invoice', False)),
                 'fiscal_name': (data.get('invoice_data') or {}).get('fiscalName', ''),
                 'fiscal_nif': (data.get('invoice_data') or {}).get('nif', ''),
                 'fiscal_address': (data.get('invoice_data') or {}).get('fiscalAddress', ''),
                 'fiscal_city': (data.get('invoice_data') or {}).get('fiscalCity', ''),
                 'fiscal_postal_code': (data.get('invoice_data') or {}).get('fiscalPostalCode', ''),
-                'locale': data.get('locale', 'es')
+                'locale': locale,
             }
         }
-        
-        # Apply discount if exists
-        if discount_code and discount_amount > 0:
-            # Create a coupon in Stripe for this specific checkout
+
+        if discount_code and discount_cents > 0:
             coupon = stripe.Coupon.create(
-                amount_off=int(discount_amount * 100),  # Convert to cents
+                amount_off=discount_cents,
                 currency='eur',
                 duration='once',
-                name=discount_code
+                name=discount_code,
             )
             session_params['discounts'] = [{'coupon': coupon.id}]
-        
+
         session = stripe.checkout.Session.create(**session_params)
-        
-        # Track "Started Checkout" en Klaviyo para el Flow de carrito abandonado
+
         try:
-            checkout_data = {
-                'customer_email': customer_info['email'],
-                'customer_name': customer_info.get('name', ''),
-                'customer_phone': customer_info.get('phone', ''),
-                'items': items,
-                'subtotal': subtotal,
-                'total': total,
-                'discount_code': discount_code or '',
-                'discount_amount': discount_amount,
-                'order_number': order_number,
-                'checkout_url': f"{frontend_url}/checkout"
-            }
             dispatch_started_checkout_event(
-                email=checkout_data['customer_email'],
-                customer_name=checkout_data['customer_name'],
-                items=checkout_data['items'],
-                total=checkout_data['total'],
-                checkout_url=checkout_data['checkout_url'],
+                email=customer_info['email'],
+                customer_name=customer_info.get('name', ''),
+                items=canonical_items,
+                total=total_cents / 100,
+                checkout_url=f'{frontend_url}/checkout',
                 items_html='',
-                cart_token=checkout_data.get('order_number', '')
+                cart_token=order_number,
             )
         except Exception as checkout_err:
-            print(f"\u26a0\ufe0f Error tracking started checkout: {checkout_err}")
-            # No bloquear el checkout si falla el tracking
-        
+            print(f'Checkout tracking error (non-blocking): {checkout_err}')
+
         return jsonify({
             'sessionId': session.id,
             'url': session.url,
-            'order_number': order_number
+            'order_number': order_number,
+            'catalog_version': version,
+            'pricing_source': 'server',
         })
-        
-    except Exception as e:
-        print(f"Error creating checkout session: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+
+    except PricingError as error:
+        return jsonify(error.to_dict()), error.status_code
+    except Exception as error:
+        print(f'Error creating checkout session: {str(error)}')
+        return jsonify({'error': 'CHECKOUT_SESSION_ERROR'}), 500
 
 
 @stripe_bp.route('/create-subscription-checkout', methods=['POST'])
 def create_subscription_checkout():
-    """Create Stripe Checkout session for subscription"""
+    """Create a subscription Checkout Session using current database prices only."""
     try:
-        data = request.json
-        
-        # Validate required fields
+        data = request.get_json(silent=True) or {}
         if not data.get('item') or not data.get('customer_info'):
-            return jsonify({'error': 'Missing required fields'}), 400
-        
-        item = data['item']
+            return jsonify({'error': 'MISSING_REQUIRED_FIELDS'}), 400
+
         customer_info = data['customer_info']
-        frequency = item.get('subscription_frequency')
-        
-        if not frequency:
-            return jsonify({'error': 'Subscription frequency is required'}), 400
-        
-        # Generate subscription number
-        subscription_number = generate_subscription_number()
-        
-        # Map frequency to Stripe interval
+        locale = data.get('locale', 'es')
+        item = price_subscription_item(data['item'], locale)
         interval_mapping = {
             'weekly': {'interval': 'week', 'interval_count': 1},
             'biweekly': {'interval': 'week', 'interval_count': 2},
             'monthly': {'interval': 'month', 'interval_count': 1},
             'quarterly': {'interval': 'month', 'interval_count': 3},
-            'semiannual': {'interval': 'month', 'interval_count': 6}
+            'semiannual': {'interval': 'month', 'interval_count': 6},
         }
-        
-        if frequency not in interval_mapping:
-            return jsonify({'error': 'Invalid subscription frequency'}), 400
-        
-        interval_config = interval_mapping[frequency]
-        
-        # Create Stripe Price for subscription
+        interval_config = interval_mapping.get(item['frequency'])
+        if interval_config is None:
+            raise PricingError(
+                'INVALID_SUBSCRIPTION_FREQUENCY',
+                'Frecuencia de suscripción no válida.',
+            )
+
+        subscription_number = generate_subscription_number()
+        version = catalog_version([item['product']])
         price = stripe.Price.create(
-            unit_amount=int(item['price'] * 100),
+            unit_amount=item['unit_amount'],
             currency='eur',
             recurring=interval_config,
             product_data={
-                'name': f"{item['name']} - Suscripción {frequency}",
+                'name': f"{item['name']} - Suscripción {item['frequency']}",
             },
         )
-        
-        # Create Stripe Checkout Session for subscription
+
         frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
-        
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -253,23 +283,31 @@ def create_subscription_checkout():
             customer_email=customer_info['email'],
             metadata={
                 'subscription_number': subscription_number,
-                'product_id': item['id'],
+                'product_id': str(item['product_id']),
                 'product_name': item['name'],
                 'product_slug': item['slug'],
-                'frequency': frequency,
-                'customer_name': customer_info['name']
-            }
+                'frequency': item['frequency'],
+                'customer_name': customer_info['name'],
+                'catalog_version': version,
+                'pricing_source': 'server',
+                'unit_amount': str(item['unit_amount']),
+                'locale': locale,
+            },
         )
-        
+
         return jsonify({
             'sessionId': session.id,
             'url': session.url,
-            'subscription_number': subscription_number
+            'subscription_number': subscription_number,
+            'catalog_version': version,
+            'pricing_source': 'server',
         })
-        
-    except Exception as e:
-        print(f"Error creating subscription checkout: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+
+    except PricingError as error:
+        return jsonify(error.to_dict()), error.status_code
+    except Exception as error:
+        print(f'Error creating subscription checkout: {str(error)}')
+        return jsonify({'error': 'SUBSCRIPTION_CHECKOUT_ERROR'}), 500
 
 
 @stripe_bp.route('/webhook', methods=['POST'])
