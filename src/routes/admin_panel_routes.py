@@ -27,6 +27,7 @@ from src.services.holded_service import (
     HOLDED_API_KEY
 )
 from src.models.user import db
+from src.services.pricing_service import PricingError, as_money, catalog_version, to_cents
 from datetime import datetime
 import json
 import os
@@ -155,10 +156,14 @@ def get_products():
             }
             result.append(product_data)
 
+    from src.models.web_product import WebProduct
+    active_products = WebProduct.query.filter_by(active=True).all()
     return jsonify({
         'products': result,
         'total_holded': len(holded_products),
-        'total_web': len(web_prices)
+        'total_web': len(web_prices),
+        'pricing_source': 'database',
+        'catalog_version': catalog_version(active_products)
     })
 
 
@@ -409,48 +414,94 @@ def update_pack_component_cost():
         return jsonify({'error': str(e)}), 500
 
 
+@admin_panel_bp.route('/products/<sku>/web-price', methods=['GET'])
+@admin_required
+def get_web_price(sku):
+    """Devuelve el precio canónico persistido para verificar guardados del panel."""
+    from src.models.web_product import WebProduct
+
+    product = WebProduct.query.filter_by(sku=sku).first()
+    if not product:
+        return jsonify({'error': f'Producto con SKU {sku} no encontrado en la DB'}), 404
+
+    active_products = WebProduct.query.filter_by(active=True).all()
+    return jsonify({
+        'success': True,
+        'sku': product.sku,
+        'price': float(as_money(product.price)),
+        'price_cents': to_cents(product.price),
+        'updated_at': product.updated_at.isoformat() if product.updated_at else None,
+        'catalog_version': catalog_version(active_products),
+        'product': product.to_admin_dict(),
+        'pricing_source': 'database'
+    })
+
+
 @admin_panel_bp.route('/products/<sku>/web-price', methods=['PUT'])
 @admin_required
 @role_required('admin')
 def update_web_price(sku):
     """
-    Actualiza el precio web de un producto en la base de datos Y en Holded.
-    El cambio se refleja inmediatamente en la web (el frontend lee de la API)
-    y también se sincroniza con la tarifa 'tienda online' de Holded.
+    Actualiza el precio web y confirma el valor persistido antes de responder éxito.
+    Holded se sincroniza después; un fallo de Holded no revierte la fuente web canónica.
     Body: { price: float }
     """
     try:
         from src.models.web_product import WebProduct
-        data = request.get_json()
-        new_price = float(data.get('price', 0))
+        data = request.get_json(silent=True) or {}
 
-        if new_price <= 0:
+        try:
+            requested_price = as_money(data.get('price'))
+        except PricingError:
+            return jsonify({'error': 'El precio no es válido'}), 400
+
+        if requested_price <= 0:
             return jsonify({'error': 'El precio debe ser mayor que 0'}), 400
 
-        # Buscar producto por SKU en la DB
         product = WebProduct.query.filter_by(sku=sku).first()
         if not product:
             return jsonify({'error': f'Producto con SKU {sku} no encontrado en la DB'}), 404
 
-        old_price = product.price
-        product.price = new_price
+        old_price = as_money(product.price)
+        product.price = float(requested_price)
+        product.updated_at = datetime.utcnow()
         db.session.commit()
 
-        # Sincronizar precio con Holded
+        # Forzar una lectura nueva después del commit; no confirmar desde el objeto en memoria.
+        db.session.expire_all()
+        persisted = WebProduct.query.filter_by(sku=sku).first()
+        requested_cents = to_cents(requested_price)
+        persisted_cents = to_cents(persisted.price) if persisted else None
+        if persisted is None or persisted_cents != requested_cents:
+            return jsonify({
+                'error': 'PRICE_VERIFICATION_FAILED',
+                'message': 'El precio no pudo verificarse después de guardarlo.',
+                'sku': sku,
+                'requested_price_cents': requested_cents,
+                'persisted_price_cents': persisted_cents
+            }), 500
+
         holded_updated = False
         holded_error = None
         try:
-            holded_updated = _sync_price_to_holded(sku, new_price)
-        except Exception as he:
-            holded_error = str(he)
+            holded_updated = _sync_price_to_holded(sku, float(requested_price))
+        except Exception as holded_exception:
+            holded_error = str(holded_exception)
 
+        active_products = WebProduct.query.filter_by(active=True).all()
         return jsonify({
             'success': True,
-            'sku': sku,
-            'old_price': old_price,
-            'new_price': new_price,
-            'product_name': product.name,
+            'sku': persisted.sku,
+            'old_price': float(old_price),
+            'new_price': float(as_money(persisted.price)),
+            'price_cents': persisted_cents,
+            'product_name': persisted.name,
+            'product': persisted.to_admin_dict(),
             'db_updated': True,
+            'verified': True,
+            'pricing_source': 'database',
+            'updated_at': persisted.updated_at.isoformat() if persisted.updated_at else None,
+            'catalog_version': catalog_version(active_products),
             'holded_updated': holded_updated,
             'holded_error': holded_error
         })
@@ -540,13 +591,17 @@ def create_web_product():
     """Crea un nuevo producto web."""
     from src.models.web_product import WebProduct
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         
         # Validaciones básicas
         if not data.get('name') or not data.get('slug') or not data.get('category'):
             return jsonify({'error': 'Nombre, slug y categoría son obligatorios'}), 400
-        
-        if not data.get('price') or float(data['price']) <= 0:
+
+        try:
+            requested_price = as_money(data.get('price'))
+        except PricingError:
+            return jsonify({'error': 'El precio no es válido'}), 400
+        if requested_price <= 0:
             return jsonify({'error': 'El precio debe ser mayor que 0'}), 400
         
         # Verificar slug único
@@ -560,7 +615,7 @@ def create_web_product():
             sku=data.get('sku'),
             description=data.get('description'),
             long_description=data.get('longDescription'),
-            price=float(data['price']),
+            price=float(requested_price),
             original_price=float(data['originalPrice']) if data.get('originalPrice') else None,
             currency=data.get('currency', 'EUR'),
             image=data.get('image'),
@@ -597,10 +652,27 @@ def create_web_product():
         
         db.session.add(product)
         db.session.commit()
-        
+        product_id = product.id
+        db.session.expire_all()
+        persisted = db.session.get(WebProduct, product_id)
+        requested_cents = to_cents(requested_price)
+        persisted_cents = to_cents(persisted.price) if persisted else None
+        if persisted is None or persisted_cents != requested_cents:
+            return jsonify({
+                'error': 'PRICE_VERIFICATION_FAILED',
+                'message': 'El precio del producto nuevo no pudo verificarse después de guardarlo.',
+                'requested_price_cents': requested_cents,
+                'persisted_price_cents': persisted_cents
+            }), 500
+
+        active_products = WebProduct.query.filter_by(active=True).all()
         return jsonify({
             'success': True,
-            'product': product.to_admin_dict()
+            'verified': True,
+            'pricing_source': 'database',
+            'price_cents': persisted_cents,
+            'catalog_version': catalog_version(active_products),
+            'product': persisted.to_admin_dict()
         }), 201
     except Exception as e:
         db.session.rollback()
@@ -638,8 +710,17 @@ def update_web_product(product_id):
             product.description = data['description']
         if 'longDescription' in data:
             product.long_description = data['longDescription']
+        requested_price = None
+        requested_cents = None
         if 'price' in data:
-            product.price = float(data['price'])
+            try:
+                requested_price = as_money(data['price'])
+            except PricingError:
+                return jsonify({'error': 'El precio no es válido'}), 400
+            if requested_price <= 0:
+                return jsonify({'error': 'El precio debe ser mayor que 0'}), 400
+            requested_cents = to_cents(requested_price)
+            product.price = float(requested_price)
         if 'originalPrice' in data:
             product.original_price = float(data['originalPrice']) if data['originalPrice'] else None
         if 'image' in data:
@@ -703,11 +784,30 @@ def update_web_product(product_id):
         if 'preparationCost' in data:
             product.preparation_cost = float(data['preparationCost'])
         
+        product.updated_at = datetime.utcnow()
         db.session.commit()
-        
+        db.session.expire_all()
+        persisted = db.session.get(WebProduct, product_id)
+        if persisted is None:
+            return jsonify({'error': 'El producto no pudo verificarse después de guardarlo'}), 500
+
+        persisted_cents = to_cents(persisted.price)
+        if requested_cents is not None and persisted_cents != requested_cents:
+            return jsonify({
+                'error': 'PRICE_VERIFICATION_FAILED',
+                'message': 'El precio no pudo verificarse después de guardar el producto.',
+                'requested_price_cents': requested_cents,
+                'persisted_price_cents': persisted_cents
+            }), 500
+
+        active_products = WebProduct.query.filter_by(active=True).all()
         return jsonify({
             'success': True,
-            'product': product.to_admin_dict()
+            'verified': requested_cents is None or persisted_cents == requested_cents,
+            'pricing_source': 'database',
+            'price_cents': persisted_cents,
+            'catalog_version': catalog_version(active_products),
+            'product': persisted.to_admin_dict()
         })
     except Exception as e:
         db.session.rollback()
@@ -2471,48 +2571,25 @@ def _calculate_pack_costs(holded_products):
 
 
 def _get_web_prices():
-    """
-    Lee los precios actuales de la web desde la base de datos.
-    Devuelve un dict con SKU como clave, incluyendo el id de la DB.
-    """
-    try:
-        from src.models.web_product import WebProduct
-        products = WebProduct.query.all()
-        if products:
-            result = {}
-            for p in products:
-                if p.sku:
-                    result[p.sku] = {
-                        'id': p.id,
-                        'name': p.name,
-                        'price': p.price,
-                        'sku': p.sku,
-                        'category': p.category,
-                        'stock': p.stock,
-                        'active': p.active,
-                        'shipping_cost': p.shipping_cost or 0,
-                        'preparation_cost': p.preparation_cost or 0
-                    }
-            if result:
-                return result
-    except Exception as e:
-        print(f"[Admin] Error leyendo productos de DB: {e}")
+    """Lee exclusivamente los precios canónicos de la base de datos."""
+    from src.models.web_product import WebProduct
 
-    # Fallback: catálogo hardcodeado (solo se usa si la DB está vacía)
-    return {
-        'MIKVE5LP': {'name': 'Aceite de Oliva Virgen Extra 5L', 'price': 33.00, 'sku': 'MIKVE5LP', 'category': 'Aceites'},
-        'MIKVET500': {'name': 'Aceite de Oliva Virgen Extra Temprano 500ml sin filtrar', 'price': 14.90, 'sku': 'MIKVET500', 'category': 'Aceites'},
-        'MIKVE500': {'name': 'Aceite de Oliva Virgen Extra Mikel\'s Fruit (Equilibrado)', 'price': 10.00, 'sku': 'MIKVE500', 'category': 'Aceites'},
-        'MIKBIO19': {'name': 'Aceite de Oliva Virgen Extra Ecológico Mikel\'s Fruit', 'price': 13.50, 'sku': 'MIKBIO19', 'category': 'Aceites'},
-        'MIKPARA450': {'name': 'Paraguayo en Almíbar', 'price': 14.90, 'sku': 'MIKPARA450', 'category': 'Conservas'},
-        'MIKNECT450': {'name': 'Nectarina en Almíbar', 'price': 14.90, 'sku': 'MIKNECT450', 'category': 'Conservas'},
-        'MIKPARJ250': {'name': 'Mermelada de Paraguayo Artesanal', 'price': 6.50, 'sku': 'MIKPARJ250', 'category': 'Conservas'},
-        'MIKPACK01': {'name': 'Pack Degustación Premium', 'price': 9.00, 'sku': 'MIKPACK01', 'category': 'Packs'},
-        'MIKEST01': {'name': 'Estuche de Regalo Premium', 'price': 5.00, 'sku': 'MIKEST01', 'category': 'Packs'},
-        'MIKPACKFR': {'name': 'Pack Fruta Premium', 'price': 35.00, 'sku': 'MIKPACKFR', 'category': 'Packs'},
-        'MIKPACKTP': {'name': 'Pack Temprano Premium', 'price': 19.00, 'sku': 'MIKPACKTP', 'category': 'Packs'},
-        'MIKPACKCO': {'name': 'Pack Completo Mikel\'s Earth', 'price': 81.90, 'sku': 'MIKPACKCO', 'category': 'Packs'},
-    }
+    products = WebProduct.query.all()
+    result = {}
+    for product in products:
+        if product.sku:
+            result[product.sku] = {
+                'id': product.id,
+                'name': product.name,
+                'price': product.price,
+                'sku': product.sku,
+                'category': product.category,
+                'stock': product.stock,
+                'active': product.active,
+                'shipping_cost': product.shipping_cost or 0,
+                'preparation_cost': product.preparation_cost or 0
+            }
+    return result
 
 
 def _is_price_synced(holded_product, web_prices):

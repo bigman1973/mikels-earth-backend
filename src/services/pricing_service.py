@@ -210,4 +210,4 @@ def catalog_version(products):
     latest = max(timestamps)
     if not isinstance(latest, datetime):
         return str(latest)
-    return latest.replace(microsecond=0).isoformat() + "Z"
+    return latest.isoformat(timespec="microseconds") + "Z"
