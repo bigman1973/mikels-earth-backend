@@ -234,6 +234,8 @@ PRODUCTS = [
         "subscription_frequencies": [],
         "variants": [{"id": "extra", "name": "Extra Virgin", "description": "Diseño crema con ilustración del mas y olivos", "image": "/images/estuche-extra-fondo-blanco.jpg"}, {"id": "eco", "name": "Ecológico", "description": "Diseño crema con ilustración de la Seu Vella de Lleida", "image": "/images/estuche-eco-fondo-blanco.jpg"}, {"id": "temprano", "name": "Temprano", "description": "Diseño verde oscuro minimalista", "image": "/images/estuche-temprano-fondo-blanco.jpg"}],
         "claims": ["3 diseños disponibles", "Presentación premium", "Perfecto para regalo", "No incluye aceite"],
+        "active": True,
+        "visible_in_store": False,
         "display_order": 9
     },
     {
@@ -375,7 +377,8 @@ def seed_products():
                     free_shipping=p_data.get('free_shipping', False),
                     limited_edition=p_data.get('limited_edition', False),
                     award=p_data.get('award'),
-                    active=True,
+                    active=p_data.get('active', True),
+                    visible_in_store=p_data.get('visible_in_store', True),
                     display_order=p_data.get('display_order', 0)
                 )
                 db.session.add(product)

@@ -147,6 +147,27 @@ def create_tables():
             except Exception as mig_err4:
                 db.session.rollback()
                 print(f"Migration coupons fields (non-critical): {mig_err4}")
+            # Migración: separar venta activa de visibilidad en el catálogo.
+            # El estuche se reactiva una sola vez como complemento oculto; si posteriormente
+            # se desactiva de forma consciente (active=False, visible_in_store=False), esta
+            # condición no lo vuelve a activar en futuros arranques.
+            try:
+                db.session.execute(db.text(
+                    'ALTER TABLE web_products ADD COLUMN IF NOT EXISTS visible_in_store BOOLEAN NOT NULL DEFAULT TRUE'
+                ))
+                db.session.execute(db.text(
+                    "UPDATE web_products "
+                    "SET active = TRUE, visible_in_store = FALSE "
+                    "WHERE slug = 'estuche-regalo' "
+                    "AND active = FALSE "
+                    "AND visible_in_store = TRUE"
+                ))
+                db.session.commit()
+                print("Migration: active saleability separated from storefront visibility")
+            except Exception as mig_err_visibility:
+                db.session.rollback()
+                print(f"Migration visibility field (non-critical): {mig_err_visibility}")
+
             # Migración: añadir campos de traducción EN a web_products
             try:
                 db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS name_en VARCHAR(200)'))
@@ -285,7 +306,8 @@ def create_tables():
                             free_shipping=p_data.get('free_shipping', False),
                             limited_edition=p_data.get('limited_edition', False),
                             award=p_data.get('award'),
-                            active=True,
+                            active=p_data.get('active', True),
+                            visible_in_store=p_data.get('visible_in_store', True),
                             display_order=p_data.get('display_order', 0)
                         )
                         db.session.add(product)

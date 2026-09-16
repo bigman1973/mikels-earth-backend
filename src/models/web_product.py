@@ -72,7 +72,8 @@ class WebProduct(db.Model):
     free_shipping = db.Column(db.Boolean, default=False)
     limited_edition = db.Column(db.Boolean, default=False)
     award = db.Column(db.String(200))
-    active = db.Column(db.Boolean, default=True)  # Para ocultar sin borrar
+    active = db.Column(db.Boolean, default=True, nullable=False)  # Se puede vender y resolver en checkout/addons
+    visible_in_store = db.Column(db.Boolean, default=True, nullable=False)  # Aparece en el catálogo público
     
     # Costes logísticos (para cálculo de margen en panel admin)
     shipping_cost = db.Column(db.Float, default=0.0)  # Coste de portes por unidad
@@ -161,6 +162,7 @@ class WebProduct(db.Model):
         d = self.to_frontend_dict()
         d['sku'] = self.sku
         d['active'] = self.active
+        d['visibleInStore'] = self.visible_in_store
         d['displayOrder'] = self.display_order
         d['shippingCost'] = self.shipping_cost or 0
         d['preparationCost'] = self.preparation_cost or 0

@@ -111,7 +111,8 @@ def get_products():
             'source': 'holded',
             'shipping_cost': web_match.get('shipping_cost', sku_costs.get('shipping_cost', 0)),
             'preparation_cost': web_match.get('preparation_cost', sku_costs.get('preparation_cost', 0)),
-            'active': web_match.get('active', True)
+            'active': web_match.get('active', True),
+            'visibleInStore': web_match.get('visible_in_store', True)
         }
         result.append(product_data)
 
@@ -151,7 +152,8 @@ def get_products():
                 'source': 'web_only',
                 'shipping_cost': wp.get('shipping_cost', 0),
                 'preparation_cost': wp.get('preparation_cost', 0),
-                'active': wp.get('active', True)
+                'active': wp.get('active', True),
+                'visibleInStore': wp.get('visible_in_store', True)
             }
             result.append(product_data)
 
@@ -590,6 +592,7 @@ def create_web_product():
             limited_edition=data.get('limitedEdition', False),
             award=data.get('award'),
             active=data.get('active', True),
+            visible_in_store=data.get('visibleInStore', True),
             display_order=int(data.get('displayOrder', 0)),
             shipping_cost=float(data.get('shippingCost', 0)),
             preparation_cost=float(data.get('preparationCost', 0))
@@ -696,6 +699,8 @@ def update_web_product(product_id):
             product.award = data['award']
         if 'active' in data:
             product.active = data['active']
+        if 'visibleInStore' in data:
+            product.visible_in_store = data['visibleInStore']
         if 'displayOrder' in data:
             product.display_order = int(data['displayOrder'])
         if 'shippingCost' in data:
@@ -2490,6 +2495,7 @@ def _get_web_prices():
                         'category': p.category,
                         'stock': p.stock,
                         'active': p.active,
+                        'visible_in_store': p.visible_in_store,
                         'shipping_cost': p.shipping_cost or 0,
                         'preparation_cost': p.preparation_cost or 0
                     }
