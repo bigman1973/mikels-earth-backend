@@ -205,6 +205,49 @@ def create_tables():
             except Exception as mig_err_seed:
                 db.session.rollback()
                 print(f"Seed translations (non-critical): {mig_err_seed}")
+            # Migración editorial: marca Mikel's Fruit y texto vigente de la garrafa.
+            # No cambia precios, stock, descuentos ni estados del catálogo.
+            try:
+                text_columns = [
+                    'name', 'description', 'long_description',
+                    'name_en', 'description_en', 'long_description_en'
+                ]
+                for column in text_columns:
+                    db.session.execute(db.text(
+                        f"UPDATE web_products "
+                        f"SET {column} = REPLACE(REPLACE({column}, :old_brand, :new_brand), :old_brand_plain, :new_brand) "
+                        f"WHERE {column} LIKE :old_pattern OR {column} LIKE :old_plain_pattern"
+                    ), {
+                        'old_brand': "Mikel's Earth",
+                        'old_brand_plain': 'Mikels Earth',
+                        'new_brand': "Mikel's Fruit",
+                        'old_pattern': "%Mikel's Earth%",
+                        'old_plain_pattern': '%Mikels Earth%'
+                    })
+
+                garrafa = WebProduct.query.filter_by(slug='aceite-5l-caja-3').first()
+                if garrafa:
+                    garrafa.description = (
+                        'Garrafa de 5 litros de aceite de oliva virgen extra de baja acidez. '
+                        'Variedades Picual, Hojiblanca y Arbequina, de nuestros olivares de '
+                        'Córdoba y Lleida. Prensado en frío.'
+                    )
+                    garrafa.long_description = (
+                        'Garrafa de 5 litros de aceite de oliva virgen extra de baja acidez. '
+                        'Variedades Picual, Hojiblanca y Arbequina, de nuestros olivares de '
+                        'Córdoba y Lleida. Prensado en frío. **8,60 €/litro.** El aceite del '
+                        'día a día: para el sofrito, para la plancha y para aliñar.'
+                    )
+                    garrafa.claims = [
+                        claim for claim in (garrafa.claims or [])
+                        if claim not in ('Solo 6.60€/litro', 'Compra 3+ y ahorra 9%')
+                    ]
+
+                db.session.commit()
+                print("Migration: product brand and 5L copy updated")
+            except Exception as mig_err_editorial:
+                db.session.rollback()
+                print(f"Migration editorial copy (non-critical): {mig_err_editorial}")
             # Seed de cupones manuales (idempotente - no duplica)
             try:
                 from src.models.coupon import Coupon
