@@ -82,6 +82,12 @@ def handle_exception(e):
 # Mover creación de tablas a la primera solicitud para evitar timeout
 @app.before_request
 def create_tables():
+    # El healthcheck de Railway solo confirma que el proceso responde. No debe
+    # quedar bloqueado por migraciones; la primera petición funcional seguirá
+    # ejecutando este bloque completo antes de consultar o modificar datos.
+    if request.path == '/api/health':
+        return None
+
     if not hasattr(app, 'tables_created'):
         try:
             db.create_all()
