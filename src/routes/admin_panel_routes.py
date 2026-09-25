@@ -27,11 +27,23 @@ from src.services.holded_service import (
     HOLDED_API_KEY
 )
 from src.models.user import db
+from src.services.holded_tax_service import (
+    FiscalValidationError,
+    build_holded_master_index,
+    prepare_document_items,
+    resolve_tax_profile,
+)
 from datetime import datetime
 import json
 import os
 
 admin_panel_bp = Blueprint('admin_panel', __name__)
+
+
+def _order_items_for_holded(order):
+    """Validate all cart lines before creating a Holded contact or document."""
+    raw_items = json.loads(order.items) if isinstance(order.items, str) else (order.items or [])
+    return prepare_document_items(raw_items, holded_get_products())
 
 
 # ============================================================
@@ -58,6 +70,15 @@ def get_products():
     # Calcular costes de packs basados en componentes
     pack_costs = _calculate_pack_costs(holded_products)
 
+    # Holded master data is the sole source for IVA shown in the panel.  The
+    # panel must expose an unresolved configuration rather than guessing 4%.
+    try:
+        master_index = build_holded_master_index(holded_products)
+        catalogue_error = None
+    except FiscalValidationError as error:
+        master_index = None
+        catalogue_error = str(error)
+
     result = []
     matched_web_skus = set()
 
@@ -67,20 +88,18 @@ def get_products():
         if web_match:
             matched_web_skus.add(sku)
 
-        # Determinar IVA: aceites alimentarios 4%, conservas 10%, otros 21%
-        iva_rate = 0.04  # Por defecto 4% para AOVE
-        taxes = p.get('taxes', [])
-        if taxes:
-            # Si tiene info de impuestos en Holded, usarla
-            for tax in taxes:
-                if isinstance(tax, dict):
-                    tax_val = tax.get('tax', '')
-                    if '10' in str(tax_val):
-                        iva_rate = 0.10
-                    elif '21' in str(tax_val):
-                        iva_rate = 0.21
-                    elif '4' in str(tax_val):
-                        iva_rate = 0.04
+        taxes = p.get('taxes', p.get('tax', []))
+        iva_rate = None
+        tax_status = 'invalid'
+        tax_error = catalogue_error
+        if master_index:
+            try:
+                tax_profile = resolve_tax_profile(p, master_index)
+                iva_rate = float(tax_profile.iva_rate) if tax_profile.iva_rate is not None else None
+                tax_status = tax_profile.status
+                tax_error = None if tax_profile.status == 'single' else 'Pack mixto: pendiente de desglose fiscal.'
+            except FiscalValidationError as error:
+                tax_error = str(error)
 
         sku_costs = product_costs.get(sku, {})
         # Para packs: usar coste calculado de componentes si es mayor que el coste de Holded
@@ -104,6 +123,8 @@ def get_products():
             'cost_source': 'pack_components' if (sku in pack_costs and pack_costs[sku] > 0) else 'holded',
             'tax': taxes,
             'iva_rate': iva_rate,
+            'tax_status': tax_status,
+            'tax_error': tax_error,
             'web_price': web_match.get('price'),
             'web_name': web_match.get('name'),
             'web_category': web_match.get('category'),
@@ -119,15 +140,6 @@ def get_products():
     # Añadir productos web que NO tienen match en Holded
     for sku, wp in web_prices.items():
         if sku not in matched_web_skus:
-            # Determinar IVA por categoría
-            cat = wp.get('category', '').lower()
-            if cat in ('conservas',):
-                iva_rate = 0.10
-            elif cat in ('aceites',):
-                iva_rate = 0.04
-            else:
-                iva_rate = 0.04  # Packs de aceite/conserva → 4% por defecto
-
             sku_costs = product_costs.get(sku, {})
             # Para packs web_only: usar coste calculado de componentes
             effective_cost = pack_costs.get(sku, 0) if sku in pack_costs else 0
@@ -142,10 +154,12 @@ def get_products():
                 'stock': wp.get('stock', 0),
                 'has_stock': True,
                 'cost': effective_cost,
-                'cost_source': 'pack_components' if effective_cost > 0 else 'none',
-                'tax': [],
-                'iva_rate': iva_rate,
-                'web_price': wp.get('price'),
+            'cost_source': 'pack_components' if effective_cost > 0 else 'none',
+            'tax': [],
+            'iva_rate': None,
+            'tax_status': 'unmatched',
+            'tax_error': 'Sin producto maestro de Holded; no se puede calcular el IVA del margen.',
+            'web_price': wp.get('price'),
                 'web_name': wp.get('name'),
                 'web_category': wp.get('category'),
                 'synced': None,
@@ -1047,6 +1061,13 @@ def create_order_in_holded(order_id):
         if not order:
             return jsonify({'error': 'Pedido no encontrado'}), 404
 
+        # Validate all fiscal data before creating or updating the Holded
+        # contact.  An unresolved tax must produce zero ERP side effects.
+        try:
+            items = _order_items_for_holded(order)
+        except FiscalValidationError as error:
+            return jsonify({'error': str(error), 'fiscal_validation': 'failed'}), 422
+
         # Buscar o crear contacto en Holded
         contact_id = holded_get_or_create_contact(
             email=order.customer_email,
@@ -1062,25 +1083,6 @@ def create_order_in_holded(order_id):
 
         if not contact_id:
             return jsonify({'error': 'No se pudo crear/encontrar el contacto en Holded'}), 500
-
-        # Preparar items del pedido
-        # item['price'] es el precio unitario CON IVA (viene de Stripe)
-        # Holded espera el precio unitario SIN IVA en 'subtotal'
-        items = []
-        if order.items:
-            order_items = json.loads(order.items) if isinstance(order.items, str) else order.items
-            for item in order_items:
-                price_with_iva = item.get('price', 0)
-                # Quitar IVA (4% para AOVE/conservas)
-                price_without_iva = round(price_with_iva / 1.04, 2)
-                items.append({
-                    'name': item.get('name', ''),
-                    'description': item.get('description', ''),
-                    'units': item.get('quantity', 1),
-                    'subtotal': price_without_iva,
-                    'tax': 's_iva_4',
-                    'sku': item.get('sku', '')
-                })
 
         success, result = holded_create_sales_order(
             contact_id=contact_id,
@@ -1127,6 +1129,14 @@ def create_invoice_in_holded(order_id):
                 'doc_number': order.holded_doc_number
             }), 409
 
+        # Resolve the exact master tax for every product before creating or
+        # updating a Holded contact.  Packs require a gestor-approved price
+        # allocation and deliberately fail closed until it exists.
+        try:
+            items = _order_items_for_holded(order)
+        except FiscalValidationError as error:
+            return jsonify({'error': str(error), 'fiscal_validation': 'failed'}), 422
+
         # Determinar tipo de documento
         doc_type = 'invoice' if (order.needs_invoice and order.fiscal_nif) else 'salesreceipt'
         
@@ -1171,42 +1181,6 @@ def create_invoice_in_holded(order_id):
                 )
             except Exception:
                 pass  # No bloquear si falla actualizar NIF
-
-        # Preparar items
-        # item['price'] es el precio unitario CON IVA (viene de Stripe)
-        # Holded espera el precio unitario SIN IVA en 'subtotal'
-        # IVA por tipo de producto:
-        #   - Aceites AOVE → 4% (s_iva_4)
-        #   - Conservas (paraguayo, nectarina, mermelada) → 10% (s_iva_10)
-        #   - Estuches/packaging → 21% (s_iva_21)
-        #   - Packs mixtos → 4% (mayoría aceite)
-        items = []
-        if order.items:
-            order_items = json.loads(order.items) if isinstance(order.items, str) else order.items
-            for item in order_items:
-                price_with_iva = item.get('price', 0)
-                item_name = (item.get('name', '') or '').lower()
-                
-                # Determinar IVA según producto
-                if any(kw in item_name for kw in ['paraguayo', 'nectarina', 'mermelada', 'almíbar', 'almibar', 'conserva']):
-                    iva_rate = 0.10
-                    tax_id = 's_iva_10'
-                elif any(kw in item_name for kw in ['estuche']):
-                    iva_rate = 0.21
-                    tax_id = 's_iva_21'
-                else:
-                    # Aceites y packs (mayoría aceite) → 4%
-                    iva_rate = 0.04
-                    tax_id = 's_iva_4'
-                
-                price_without_iva = round(price_with_iva / (1 + iva_rate), 2)
-                items.append({
-                    'name': item.get('name', ''),
-                    'units': item.get('quantity', 1),
-                    'subtotal': price_without_iva,
-                    'tax': tax_id,
-                    'sku': item.get('sku', '')
-                })
 
         # Crear documento según tipo
         if doc_type == 'invoice':

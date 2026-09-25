@@ -184,6 +184,27 @@ def holded_create_contact(data):
 # PEDIDOS DE VENTA (Sales Orders)
 # ============================================================
 
+def _validated_document_items(items):
+    """Build Holded lines only when every caller supplied an explicit master tax."""
+    document_items = []
+    for item in items:
+        tax_id = item.get('tax')
+        sku = item.get('sku') or item.get('name') or 'sin referencia'
+        if not tax_id:
+            raise ValueError(f'La línea {sku} no tiene impuesto maestro de Holded; emisión cancelada.')
+        document_items.append({
+            'name': item.get('name', ''),
+            'desc': item.get('description', ''),
+            'units': item.get('units', 1),
+            'subtotal': item.get('subtotal', 0),
+            'taxes': [tax_id],  # Holded espera array 'taxes', no string 'tax'
+            'sku': item.get('sku', '')
+        })
+    if not document_items:
+        raise ValueError('No hay líneas con impuesto maestro para emitir en Holded.')
+    return document_items
+
+
 def holded_create_sales_order(contact_id, items, notes=''):
     """
     Crea un pedido de venta en Holded.
@@ -191,17 +212,7 @@ def holded_create_sales_order(contact_id, items, notes=''):
     subtotal = precio unitario SIN IVA
     """
     try:
-        order_items = []
-        for item in items:
-            tax_id = item.get('tax', 's_iva_4')
-            order_items.append({
-                'name': item.get('name', ''),
-                'desc': item.get('description', ''),
-                'units': item.get('units', 1),
-                'subtotal': item.get('subtotal', 0),
-                'taxes': [tax_id],  # Holded espera array 'taxes', no string 'tax'
-                'sku': item.get('sku', '')
-            })
+        order_items = _validated_document_items(items)
 
         payload = {
             'contactId': contact_id,
@@ -238,17 +249,7 @@ def holded_create_invoice(contact_id, items, notes=''):
     tax = identificador del impuesto (ej: 's_iva_4')
     """
     try:
-        invoice_items = []
-        for item in items:
-            tax_id = item.get('tax', 's_iva_4')
-            invoice_items.append({
-                'name': item.get('name', ''),
-                'desc': item.get('description', ''),
-                'units': item.get('units', 1),
-                'subtotal': item.get('subtotal', 0),
-                'taxes': [tax_id],  # Holded espera array 'taxes', no string 'tax'
-                'sku': item.get('sku', '')
-            })
+        invoice_items = _validated_document_items(items)
 
         payload = {
             'contactId': contact_id,
@@ -282,17 +283,7 @@ def holded_create_salesreceipt(contact_id, items, notes=''):
     subtotal = precio unitario SIN IVA
     """
     try:
-        receipt_items = []
-        for item in items:
-            tax_id = item.get('tax', 's_iva_4')
-            receipt_items.append({
-                'name': item.get('name', ''),
-                'desc': item.get('description', ''),
-                'units': item.get('units', 1),
-                'subtotal': item.get('subtotal', 0),
-                'taxes': [tax_id],  # Holded espera array 'taxes', no string 'tax'
-                'sku': item.get('sku', '')
-            })
+        receipt_items = _validated_document_items(items)
 
         payload = {
             'contactId': contact_id,
