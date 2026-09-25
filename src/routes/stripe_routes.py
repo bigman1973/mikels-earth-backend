@@ -348,6 +348,11 @@ def stripe_webhook():
                         'name': item.description,
                         'quantity': item.quantity,
                         'price': round(unit_price, 2),
+                        # Stripe has already allocated any checkout coupon over
+                        # its line items. Preserve the exact gross line amount
+                        # so fiscal pack expansion can distribute that charged
+                        # amount without losing cents when quantity is > 1.
+                        'gross_total': round(item.amount_total / 100, 2),
                         'sku': sku
                     }
                     if product_slug:

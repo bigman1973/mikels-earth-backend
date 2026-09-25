@@ -42,8 +42,21 @@ admin_panel_bp = Blueprint('admin_panel', __name__)
 
 def _order_items_for_holded(order):
     """Validate all cart lines before creating a Holded contact or document."""
+    from src.models.web_product import WebProduct
+
     raw_items = json.loads(order.items) if isinstance(order.items, str) else (order.items or [])
-    return prepare_document_items(raw_items, holded_get_products())
+    # The approved allocation formula uses the shop PVP (with VAT) as the
+    # reference value. Holded distribution prices must never be used here.
+    web_reference_prices = {
+        product.sku: product.price
+        for product in WebProduct.query.all()
+        if product.sku and product.price is not None and product.price > 0
+    }
+    return prepare_document_items(
+        raw_items,
+        holded_get_products(),
+        web_reference_prices=web_reference_prices,
+    )
 
 
 # ============================================================

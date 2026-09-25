@@ -234,6 +234,7 @@ class OrderLineSkuTests(unittest.TestCase):
             order = Order.query.filter_by(order_number='MKL-TEST-SKU').one()
             self.assertEqual(order.items[0]['sku'], 'MIKVET500')
             self.assertEqual(order.items[0]['slug'], 'aceite-temprano-sin-filtrar')
+            self.assertEqual(order.items[0]['gross_total'], 34.30)
 
         notify_order.assert_called_once()
         dispatch_notification.assert_called_once()
