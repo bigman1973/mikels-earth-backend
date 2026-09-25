@@ -8,7 +8,9 @@
   "MIKNECT450": {"shipping_cost": 0, "preparation_cost": 0},
   "MIKPARJ250": {"shipping_cost": 0, "preparation_cost": 0},
   "MIKPACK01": {"shipping_cost": 0, "preparation_cost": 0},
-  "MIKEST01": {"shipping_cost": 0, "preparation_cost": 0},
+  "MIKESTTEM": {"shipping_cost": 0, "preparation_cost": 0},
+  "MIKESTBIO": {"shipping_cost": 0, "preparation_cost": 0},
+  "MIKESTEV": {"shipping_cost": 0, "preparation_cost": 0},
   "MIKPACKFR": {"shipping_cost": 0, "preparation_cost": 0},
   "MIKPACKTP": {"shipping_cost": 0, "preparation_cost": 0},
   "MIKPACKCO": {"shipping_cost": 0, "preparation_cost": 0}

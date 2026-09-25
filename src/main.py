@@ -168,6 +168,104 @@ def create_tables():
                 db.session.rollback()
                 print(f"Migration visibility field (non-critical): {mig_err_visibility}")
 
+            # Migración comercial: sustituir el estuche genérico por tres
+            # complementos ocultos con los SKU reales de Holded. Los productos
+            # siguen activos para checkout, pero nunca se listan ni tienen ficha.
+            try:
+                legacy_box = WebProduct.query.filter_by(slug='estuche-regalo').first()
+                box_specs = [
+                    {
+                        'slug': 'estuche-regalo-temprano',
+                        'sku': 'MIKESTTEM',
+                        'name': 'Estuche de Regalo Premium Temprano',
+                        'description': 'Estuche cilíndrico premium verde oscuro para el aceite temprano.',
+                        'image': '/images/estuche-temprano-fondo-blanco.jpg',
+                    },
+                    {
+                        'slug': 'estuche-regalo-ecologico',
+                        'sku': 'MIKESTBIO',
+                        'name': 'Estuche de Regalo Premium Ecológico',
+                        'description': 'Estuche cilíndrico premium para el aceite ecológico.',
+                        'image': '/images/estuche-eco-fondo-blanco.jpg',
+                    },
+                    {
+                        'slug': 'estuche-regalo-virgen-extra',
+                        'sku': 'MIKESTEV',
+                        'name': 'Estuche de Regalo Premium Virgen Extra',
+                        'description': 'Estuche cilíndrico premium para el aceite virgen extra.',
+                        'image': '/images/estuche-extra-fondo-blanco.jpg',
+                    },
+                ]
+
+                for index, spec in enumerate(box_specs, start=14):
+                    gift_box = WebProduct.query.filter_by(slug=spec['slug']).first()
+                    if gift_box is None:
+                        gift_box = WebProduct(
+                            name=spec['name'],
+                            slug=spec['slug'],
+                            sku=spec['sku'],
+                            description=spec['description'],
+                            long_description=(
+                                f"Complemento de presentación {spec['name'].lower()}. "
+                                "Se vende únicamente junto al aceite correspondiente."
+                            ),
+                            price=legacy_box.price if legacy_box and legacy_box.price else 5.00,
+                            currency=legacy_box.currency if legacy_box else 'EUR',
+                            image=spec['image'],
+                            images=[spec['image']],
+                            category='Packs',
+                            tags=['Regalo', 'Premium', 'Presentación'],
+                            stock=legacy_box.stock if legacy_box else 0,
+                            weight=legacy_box.weight if legacy_box else '50g',
+                            ingredients=(
+                                legacy_box.ingredients
+                                if legacy_box
+                                else 'Cartón reciclable de alta calidad'
+                            ),
+                            subscription_available=False,
+                            subscription_frequencies=[],
+                            claims=['Presentación premium', 'No incluye aceite'],
+                            active=True,
+                            visible_in_store=False,
+                            display_order=index,
+                        )
+                        db.session.add(gift_box)
+                    else:
+                        gift_box.sku = spec['sku']
+                        gift_box.visible_in_store = False
+
+                addon_assignments = {
+                    'aceite-temprano-sin-filtrar': [{
+                        'productSlug': 'estuche-regalo-temprano',
+                        'label': 'Añadir Estuche Regalo Premium Temprano',
+                    }],
+                    'aceite-oliva-ecologico': [{
+                        'productSlug': 'estuche-regalo-ecologico',
+                        'label': 'Añadir Estuche Regalo Premium Eco',
+                    }],
+                    # Pendiente de Jordi: el aceite equilibrado está inactivo.
+                    # MIKESTEV solo podrá venderse si se reactiva esta ficha; si
+                    # no se reactiva, se retirará el complemento.
+                    'aceite-oliva-equilibrado': [{
+                        'productSlug': 'estuche-regalo-virgen-extra',
+                        'label': 'Añadir Estuche Regalo Premium Virgen Extra',
+                    }],
+                }
+                for oil_slug, addons in addon_assignments.items():
+                    oil = WebProduct.query.filter_by(slug=oil_slug).first()
+                    if oil:
+                        oil.addons = addons
+
+                if legacy_box:
+                    legacy_box.active = False
+                    legacy_box.visible_in_store = False
+
+                db.session.commit()
+                print("Migration: gift box addons mapped to MIKESTTEM/MIKESTBIO/MIKESTEV")
+            except Exception as mig_err_gift_boxes:
+                db.session.rollback()
+                print(f"Migration gift box SKU split (non-critical): {mig_err_gift_boxes}")
+
             # Migración: añadir campos de traducción EN a web_products
             try:
                 db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS name_en VARCHAR(200)'))
@@ -205,6 +303,49 @@ def create_tables():
             except Exception as mig_err_seed:
                 db.session.rollback()
                 print(f"Seed translations (non-critical): {mig_err_seed}")
+            # Migración editorial: marca Mikel's Fruit y texto vigente de la garrafa.
+            # No cambia precios, stock, descuentos ni estados del catálogo.
+            try:
+                text_columns = [
+                    'name', 'description', 'long_description',
+                    'name_en', 'description_en', 'long_description_en'
+                ]
+                for column in text_columns:
+                    db.session.execute(db.text(
+                        f"UPDATE web_products "
+                        f"SET {column} = REPLACE(REPLACE({column}, :old_brand, :new_brand), :old_brand_plain, :new_brand) "
+                        f"WHERE {column} LIKE :old_pattern OR {column} LIKE :old_plain_pattern"
+                    ), {
+                        'old_brand': "Mikel's Earth",
+                        'old_brand_plain': 'Mikels Earth',
+                        'new_brand': "Mikel's Fruit",
+                        'old_pattern': "%Mikel's Earth%",
+                        'old_plain_pattern': '%Mikels Earth%'
+                    })
+
+                garrafa = WebProduct.query.filter_by(slug='aceite-5l-caja-3').first()
+                if garrafa:
+                    garrafa.description = (
+                        'Garrafa de 5 litros de aceite de oliva virgen extra de baja acidez. '
+                        'Variedades Picual, Hojiblanca y Arbequina, de nuestros olivares de '
+                        'Córdoba y Lleida. Prensado en frío.'
+                    )
+                    garrafa.long_description = (
+                        'Garrafa de 5 litros de aceite de oliva virgen extra de baja acidez. '
+                        'Variedades Picual, Hojiblanca y Arbequina, de nuestros olivares de '
+                        'Córdoba y Lleida. Prensado en frío. **8,60 €/litro.** El aceite del '
+                        'día a día: para el sofrito, para la plancha y para aliñar.'
+                    )
+                    garrafa.claims = [
+                        claim for claim in (garrafa.claims or [])
+                        if claim not in ('Solo 6.60€/litro', 'Compra 3+ y ahorra 9%')
+                    ]
+
+                db.session.commit()
+                print("Migration: product brand and 5L copy updated")
+            except Exception as mig_err_editorial:
+                db.session.rollback()
+                print(f"Migration editorial copy (non-critical): {mig_err_editorial}")
             # Seed de cupones manuales (idempotente - no duplica)
             try:
                 from src.models.coupon import Coupon

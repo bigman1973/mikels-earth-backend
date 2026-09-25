@@ -3,6 +3,7 @@ import stripe
 import os
 from datetime import datetime
 import secrets
+from sqlalchemy import or_
 from src.services.whatsapp_service import notify_new_order, notify_new_subscription
 from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification, dispatch_started_checkout_event
 
@@ -62,6 +63,10 @@ def create_checkout_session():
                 db_product = WebProduct.query.filter_by(slug=item_slug).first()
             
             if db_product:
+                # Captura autoritativa de identidad en el momento de compra.
+                # El navegador no decide el SKU que acabará en el pedido.
+                item['sku'] = db_product.sku or ''
+                item['slug'] = db_product.slug
                 # Comparar precio (tolerancia de 0.01€ por redondeos)
                 if abs(float(item_price) - float(db_product.price)) > 0.01:
                     price_errors.append({
@@ -92,12 +97,17 @@ def create_checkout_session():
         # Create line items
         line_items = []
         for item in items:
+            product_metadata = {
+                'slug': str(item.get('slug') or ''),
+                'sku': str(item.get('sku') or '')
+            }
             line_items.append({
                 'price_data': {
                     'currency': 'eur',
                     'product_data': {
                         'name': item['name'],
                         **(({'description': item['weight']} if item.get('weight') else {})),
+                        'metadata': product_metadata,
                     },
                     'unit_amount': int(item['price'] * 100),  # Convert to cents
                 },
@@ -302,17 +312,47 @@ def stripe_webhook():
             
             # Obtener detalles del pedido
             try:
-                line_items = stripe.checkout.Session.list_line_items(session['id'], limit=100)
+                line_items = stripe.checkout.Session.list_line_items(
+                    session['id'],
+                    limit=100,
+                    expand=['data.price.product']
+                )
                 items = []
                 for item in line_items.data:
                     # amount_total es el total de la línea (precio × cantidad)
                     # Guardamos el precio unitario para que el desglose sea correcto
                     unit_price = (item.amount_total / 100) / item.quantity if item.quantity else item.amount_total / 100
-                    items.append({
+                    stripe_product = getattr(getattr(item, 'price', None), 'product', None)
+                    product_metadata = getattr(stripe_product, 'metadata', None) or {}
+                    sku = product_metadata.get('sku', '')
+                    product_slug = product_metadata.get('slug', '')
+
+                    # Compatibilidad para sesiones creadas antes de añadir metadata.
+                    if not sku:
+                        from src.models.web_product import WebProduct
+                        db_product = None
+                        if product_slug:
+                            db_product = WebProduct.query.filter_by(slug=product_slug).first()
+                        if not db_product:
+                            db_product = WebProduct.query.filter(
+                                or_(
+                                    WebProduct.name == item.description,
+                                    WebProduct.name_en == item.description
+                                )
+                            ).first()
+                        if db_product:
+                            sku = db_product.sku or ''
+                            product_slug = db_product.slug
+
+                    order_item = {
                         'name': item.description,
                         'quantity': item.quantity,
-                        'price': round(unit_price, 2)
-                    })
+                        'price': round(unit_price, 2),
+                        'sku': sku
+                    }
+                    if product_slug:
+                        order_item['slug'] = product_slug
+                    items.append(order_item)
                 
                 # Extraer dirección de envío de Stripe shipping_details (prioridad)
                 # Esto funciona cuando el cliente usa Link o rellena en Stripe Checkout

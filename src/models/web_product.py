@@ -104,6 +104,7 @@ class WebProduct(db.Model):
             'id': self.id,
             'name': name,
             'slug': self.slug,
+            'sku': self.sku,
             'description': description,
             'longDescription': long_description,
             'price': self.price,

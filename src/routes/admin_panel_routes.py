@@ -2392,8 +2392,14 @@ PACK_COMPONENTS = {
         {'sku': 'MIKPARJ250', 'name': 'Mermelada de Paraguayo 250g', 'quantity': 1},
         {'id': 'botellas_degustacion', 'name': '4x Botellas aceite 14ml (muestras)', 'quantity': 1, 'manual': True},
     ],
-    'MIKEST01': [  # Estuche de Regalo Premium (5€)
-        {'id': 'estuche_cilindrico', 'name': 'Estuche cilíndrico cartón', 'quantity': 1, 'manual': True},
+    'MIKESTTEM': [
+        {'id': 'estuche_temprano', 'name': 'Estuche premium Temprano', 'quantity': 1, 'manual': True},
+    ],
+    'MIKESTBIO': [
+        {'id': 'estuche_ecologico', 'name': 'Estuche premium Ecológico', 'quantity': 1, 'manual': True},
+    ],
+    'MIKESTEV': [
+        {'id': 'estuche_virgen_extra', 'name': 'Estuche premium Virgen Extra', 'quantity': 1, 'manual': True},
     ],
     'MIKPACKFR': [  # Pack Fruta Premium (35€)
         {'sku': 'MIKPARA450', 'name': 'Paraguayo en Almíbar 720g', 'quantity': 1},
@@ -2403,9 +2409,9 @@ PACK_COMPONENTS = {
     ],
     'MIKPACKTP': [  # Pack Temprano Premium (19€)
         {'sku': 'MIKVET500', 'name': 'Aceite Temprano 500ml sin filtrar', 'quantity': 1},
-        {'sku': 'MIKEST01', 'name': 'Estuche premium temprano', 'quantity': 1},
+        {'sku': 'MIKESTTEM', 'name': 'Estuche premium temprano', 'quantity': 1},
     ],
-    'MIKPACKCO': [  # Pack Completo Mikel's Earth (81.90€)
+    'MIKPACKCO': [  # Pack Completo Mikel's Fruit (81.90€)
         {'sku': 'MIKVE5LP', 'name': 'Aceite de Oliva Virgen Extra 5L', 'quantity': 1},
         {'sku': 'MIKVET500', 'name': 'Aceite Temprano 500ml sin filtrar', 'quantity': 1},
         {'sku': 'MIKPARA450', 'name': 'Paraguayo en Almíbar 720g', 'quantity': 1},
@@ -2514,10 +2520,12 @@ def _get_web_prices():
         'MIKNECT450': {'name': 'Nectarina en Almíbar', 'price': 14.90, 'sku': 'MIKNECT450', 'category': 'Conservas'},
         'MIKPARJ250': {'name': 'Mermelada de Paraguayo Artesanal', 'price': 6.50, 'sku': 'MIKPARJ250', 'category': 'Conservas'},
         'MIKPACK01': {'name': 'Pack Degustación Premium', 'price': 9.00, 'sku': 'MIKPACK01', 'category': 'Packs'},
-        'MIKEST01': {'name': 'Estuche de Regalo Premium', 'price': 5.00, 'sku': 'MIKEST01', 'category': 'Packs'},
+        'MIKESTTEM': {'name': 'Estuche de Regalo Premium Temprano', 'price': 5.00, 'sku': 'MIKESTTEM', 'category': 'Packs'},
+        'MIKESTBIO': {'name': 'Estuche de Regalo Premium Ecológico', 'price': 5.00, 'sku': 'MIKESTBIO', 'category': 'Packs'},
+        'MIKESTEV': {'name': 'Estuche de Regalo Premium Virgen Extra', 'price': 5.00, 'sku': 'MIKESTEV', 'category': 'Packs'},
         'MIKPACKFR': {'name': 'Pack Fruta Premium', 'price': 35.00, 'sku': 'MIKPACKFR', 'category': 'Packs'},
         'MIKPACKTP': {'name': 'Pack Temprano Premium', 'price': 19.00, 'sku': 'MIKPACKTP', 'category': 'Packs'},
-        'MIKPACKCO': {'name': 'Pack Completo Mikel\'s Earth', 'price': 81.90, 'sku': 'MIKPACKCO', 'category': 'Packs'},
+        'MIKPACKCO': {'name': 'Pack Completo Mikel\'s Fruit', 'price': 81.90, 'sku': 'MIKPACKCO', 'category': 'Packs'},
     }
 
 
