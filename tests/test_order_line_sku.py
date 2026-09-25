@@ -23,15 +23,44 @@ class OrderLineSkuTests(unittest.TestCase):
 
         with self.app.app_context():
             db.create_all()
-            db.session.add(WebProduct(
-                name='Aceite Temprano',
-                slug='aceite-temprano-sin-filtrar',
-                sku='MIKVET500',
-                price=17.15,
-                category='Aceites',
-                active=True,
-                visible_in_store=True,
-            ))
+            db.session.add_all([
+                WebProduct(
+                    name='Aceite Temprano',
+                    slug='aceite-temprano-sin-filtrar',
+                    sku='MIKVET500',
+                    price=17.15,
+                    category='Aceites',
+                    active=True,
+                    visible_in_store=True,
+                ),
+                WebProduct(
+                    name='Estuche Temprano',
+                    slug='estuche-regalo-temprano',
+                    sku='MIKESTTEM',
+                    price=5.00,
+                    category='Packs',
+                    active=True,
+                    visible_in_store=False,
+                ),
+                WebProduct(
+                    name='Estuche Ecológico',
+                    slug='estuche-regalo-ecologico',
+                    sku='MIKESTBIO',
+                    price=5.00,
+                    category='Packs',
+                    active=True,
+                    visible_in_store=False,
+                ),
+                WebProduct(
+                    name='Estuche Virgen Extra',
+                    slug='estuche-regalo-virgen-extra',
+                    sku='MIKESTEV',
+                    price=5.00,
+                    category='Packs',
+                    active=True,
+                    visible_in_store=False,
+                ),
+            ])
             db.session.commit()
 
         self.client = self.app.test_client()
@@ -87,6 +116,54 @@ class OrderLineSkuTests(unittest.TestCase):
         self.assertEqual(metadata['sku'], 'MIKVET500')
         self.assertEqual(metadata['slug'], 'aceite-temprano-sin-filtrar')
         dispatch_checkout.assert_called_once()
+
+    @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
+    @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
+    def test_checkout_uses_specific_database_sku_for_each_hidden_box(
+        self,
+        create_session,
+        dispatch_checkout,
+    ):
+        create_session.return_value = SimpleNamespace(
+            id='cs_test_box_sku',
+            url='https://checkout.stripe.test/session',
+        )
+        cases = [
+            ('estuche-regalo-temprano', 'MIKESTTEM'),
+            ('estuche-regalo-ecologico', 'MIKESTBIO'),
+            ('estuche-regalo-virgen-extra', 'MIKESTEV'),
+        ]
+
+        for slug, expected_sku in cases:
+            with self.subTest(slug=slug):
+                create_session.reset_mock()
+                response = self.client.post('/api/stripe/create-checkout-session', json={
+                    'items': [{
+                        'slug': slug,
+                        'sku': 'MIKEST01',
+                        'name': 'Estuche de Regalo Premium',
+                        'price': 5.00,
+                        'quantity': 1,
+                        'weight': '50 g',
+                    }],
+                    'customer_info': {
+                        'email': 'cliente@example.com',
+                        'name': 'Cliente de prueba',
+                        'phone': '',
+                        'address': 'Calle de prueba 1',
+                        'city': 'Alcarràs',
+                        'postal_code': '25180',
+                        'country': 'España',
+                    },
+                })
+
+                self.assertEqual(response.status_code, 200)
+                session_params = create_session.call_args.kwargs
+                metadata = session_params['line_items'][0]['price_data']['product_data']['metadata']
+                self.assertEqual(metadata['sku'], expected_sku)
+                self.assertEqual(metadata['slug'], slug)
+
+        self.assertEqual(dispatch_checkout.call_count, 3)
 
     @patch('src.services.email_dispatcher.dispatch_post_purchase_event')
     @patch('src.routes.stripe_routes.dispatch_order_confirmation')

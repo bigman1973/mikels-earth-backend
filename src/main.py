@@ -168,6 +168,101 @@ def create_tables():
                 db.session.rollback()
                 print(f"Migration visibility field (non-critical): {mig_err_visibility}")
 
+            # Migración comercial: sustituir el estuche genérico por tres
+            # complementos ocultos con los SKU reales de Holded. Los productos
+            # siguen activos para checkout, pero nunca se listan ni tienen ficha.
+            try:
+                legacy_box = WebProduct.query.filter_by(slug='estuche-regalo').first()
+                box_specs = [
+                    {
+                        'slug': 'estuche-regalo-temprano',
+                        'sku': 'MIKESTTEM',
+                        'name': 'Estuche de Regalo Premium Temprano',
+                        'description': 'Estuche cilíndrico premium verde oscuro para el aceite temprano.',
+                        'image': '/images/estuche-temprano-fondo-blanco.jpg',
+                    },
+                    {
+                        'slug': 'estuche-regalo-ecologico',
+                        'sku': 'MIKESTBIO',
+                        'name': 'Estuche de Regalo Premium Ecológico',
+                        'description': 'Estuche cilíndrico premium para el aceite ecológico.',
+                        'image': '/images/estuche-eco-fondo-blanco.jpg',
+                    },
+                    {
+                        'slug': 'estuche-regalo-virgen-extra',
+                        'sku': 'MIKESTEV',
+                        'name': 'Estuche de Regalo Premium Virgen Extra',
+                        'description': 'Estuche cilíndrico premium para el aceite virgen extra.',
+                        'image': '/images/estuche-extra-fondo-blanco.jpg',
+                    },
+                ]
+
+                for index, spec in enumerate(box_specs, start=14):
+                    gift_box = WebProduct.query.filter_by(slug=spec['slug']).first()
+                    if gift_box is None:
+                        gift_box = WebProduct(
+                            name=spec['name'],
+                            slug=spec['slug'],
+                            sku=spec['sku'],
+                            description=spec['description'],
+                            long_description=(
+                                f"Complemento de presentación {spec['name'].lower()}. "
+                                "Se vende únicamente junto al aceite correspondiente."
+                            ),
+                            price=legacy_box.price if legacy_box and legacy_box.price else 5.00,
+                            currency=legacy_box.currency if legacy_box else 'EUR',
+                            image=spec['image'],
+                            images=[spec['image']],
+                            category='Packs',
+                            tags=['Regalo', 'Premium', 'Presentación'],
+                            stock=legacy_box.stock if legacy_box else 0,
+                            weight=legacy_box.weight if legacy_box else '50g',
+                            ingredients=(
+                                legacy_box.ingredients
+                                if legacy_box
+                                else 'Cartón reciclable de alta calidad'
+                            ),
+                            subscription_available=False,
+                            subscription_frequencies=[],
+                            claims=['Presentación premium', 'No incluye aceite'],
+                            active=True,
+                            visible_in_store=False,
+                            display_order=index,
+                        )
+                        db.session.add(gift_box)
+                    else:
+                        gift_box.sku = spec['sku']
+                        gift_box.visible_in_store = False
+
+                addon_assignments = {
+                    'aceite-temprano-sin-filtrar': [{
+                        'productSlug': 'estuche-regalo-temprano',
+                        'label': 'Añadir Estuche Regalo Premium Temprano',
+                    }],
+                    'aceite-oliva-ecologico': [{
+                        'productSlug': 'estuche-regalo-ecologico',
+                        'label': 'Añadir Estuche Regalo Premium Eco',
+                    }],
+                    'aceite-oliva-equilibrado': [{
+                        'productSlug': 'estuche-regalo-virgen-extra',
+                        'label': 'Añadir Estuche Regalo Premium Virgen Extra',
+                    }],
+                }
+                for oil_slug, addons in addon_assignments.items():
+                    oil = WebProduct.query.filter_by(slug=oil_slug).first()
+                    if oil:
+                        oil.addons = addons
+
+                if legacy_box:
+                    legacy_box.active = False
+                    legacy_box.visible_in_store = False
+
+                db.session.commit()
+                print("Migration: gift box addons mapped to MIKESTTEM/MIKESTBIO/MIKESTEV")
+            except Exception as mig_err_gift_boxes:
+                db.session.rollback()
+                print(f"Migration gift box SKU split (non-critical): {mig_err_gift_boxes}")
+
             # Migración: añadir campos de traducción EN a web_products
             try:
                 db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS name_en VARCHAR(200)'))
