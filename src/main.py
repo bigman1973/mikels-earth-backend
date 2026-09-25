@@ -243,6 +243,9 @@ def create_tables():
                         'productSlug': 'estuche-regalo-ecologico',
                         'label': 'Añadir Estuche Regalo Premium Eco',
                     }],
+                    # Pendiente de Jordi: el aceite equilibrado está inactivo.
+                    # MIKESTEV solo podrá venderse si se reactiva esta ficha; si
+                    # no se reactiva, se retirará el complemento.
                     'aceite-oliva-equilibrado': [{
                         'productSlug': 'estuche-regalo-virgen-extra',
                         'label': 'Añadir Estuche Regalo Premium Virgen Extra',

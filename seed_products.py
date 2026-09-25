@@ -134,6 +134,9 @@ PRODUCTS = [
         "subscription_discount": 10,
         "subscription_frequencies": [{"value": "monthly", "label": "Mensual", "discount": 10}, {"value": "quarterly", "label": "Trimestral", "discount": 8}, {"value": "biannual", "label": "Semestral", "discount": 7}],
         "volume_discount": {"minQuantity": 12, "discount": 10},
+        # Pendiente de decisión de Jordi: este aceite está inactivo. MIKESTEV
+        # solo será utilizable si se reactiva la ficha; en caso contrario se
+        # retirará este complemento.
         "addons": [{"productSlug": "estuche-regalo-virgen-extra", "label": "Añadir Estuche Regalo Premium"}],
         "display_order": 5
     },
