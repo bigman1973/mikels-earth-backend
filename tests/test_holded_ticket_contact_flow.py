@@ -157,8 +157,9 @@ class HoldedV2TicketServiceTests(unittest.TestCase):
 
         success, result = holded_service.holded_create_salesreceipt(
             items=[{
-                'name': 'Aceite Temprano', 'description': '500 ml',
-                'units': 1, 'subtotal': 16.49, 'tax': 's_iva_4', 'sku': 'MIKVET500'
+            'name': 'Aceite Temprano', 'description': '500 ml',
+            'units': 1, 'subtotal': 16.49, 'tax': 's_iva_4', 'sku': 'MIKVET500',
+            'product_id': 'early-master'
             }],
             notes='Ticket pedido web #MKL-TICKET-80'
         )
@@ -170,8 +171,10 @@ class HoldedV2TicketServiceTests(unittest.TestCase):
         self.assertEqual(create_call.args[0], 'https://api.holded.com/api/v2/sales-receipts')
         self.assertNotIn('contact_id', create_call.kwargs['json'])
         self.assertEqual(create_call.kwargs['json']['items'][0], {
+            'type': 'product',
             'name': 'Aceite Temprano',
             'description': '500 ml',
+            'product_id': 'early-master',
             'units': 1,
             'price': 16.49,
             'taxes': ['s_iva_4'],
@@ -181,6 +184,21 @@ class HoldedV2TicketServiceTests(unittest.TestCase):
             post.call_args_list[1].args[0],
             'https://api.holded.com/api/v2/sales-receipts/receipt-80/approve'
         )
+
+    @patch.dict(os.environ, {'HOLDED_V2_API_TOKEN': 'test-v2-token'}, clear=False)
+    @patch('src.services.holded_service.requests.post')
+    def test_ticket_refuses_unlinked_line_before_any_holded_post(self, post):
+        success, result = holded_service.holded_create_salesreceipt(
+            items=[{
+                'name': 'Aceite sin enlace', 'units': 1, 'subtotal': 16.49,
+                'tax': 's_iva_4', 'sku': 'MIKVET500'
+            }],
+            notes='Ticket de prueba'
+        )
+
+        self.assertFalse(success)
+        self.assertIn('identificador maestro de Holded', result['literal_response'])
+        post.assert_not_called()
 
     @patch('src.services.holded_service.requests.post')
     def test_detailed_contact_error_preserves_http_and_body(self, post):

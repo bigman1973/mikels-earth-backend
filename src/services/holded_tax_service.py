@@ -336,6 +336,9 @@ def _expand_pack_document_items(
             "subtotal": float(unit_base),
             "tax": profile.tax_ids[0],
             "sku": component_sku,
+            # Holded v2 moves stock only when the fiscal line is linked to the
+            # catalogue master. SKU alone is merely a display reference.
+            "product_id": str(component.product.get("id") or "").strip(),
         })
 
     return document_items
@@ -367,6 +370,8 @@ def prepare_simple_document_item(order_item: dict[str, Any], index: HoldedMaster
         "subtotal": float(unit_base),
         "tax": profile.tax_ids[0],
         "sku": sku,
+        # Preserve the ERP master reference throughout the document path.
+        "product_id": str(product.get("id") or "").strip(),
     }
 
 

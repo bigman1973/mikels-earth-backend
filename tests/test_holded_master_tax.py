@@ -107,8 +107,10 @@ class HoldedMasterTaxTests(unittest.TestCase):
 
         self.assertEqual(items[0]["tax"], "s_iva_4")
         self.assertEqual(items[0]["subtotal"], 10.0)
+        self.assertEqual(items[0]["product_id"], "oil5")
         self.assertEqual(items[1]["tax"], "s_iva_10")
         self.assertEqual(items[1]["subtotal"], 5.0)
+        self.assertEqual(items[1]["product_id"], "jam")
 
     def test_gift_case_is_not_expanded_and_uses_its_product_tax(self):
         items = prepare_document_items([
@@ -128,6 +130,7 @@ class HoldedMasterTaxTests(unittest.TestCase):
         self.assertEqual([item["sku"] for item in items], ["MIKPARJ250", "MIKVE14", "MIKBIO14"])
         self.assertEqual([item["tax"] for item in items], ["s_iva_10", "s_iva_4", "s_iva_4"])
         self.assertEqual([item["units"] for item in items], [1, 2, 2])
+        self.assertEqual([item["product_id"] for item in items], ["jam", "mini-ve", "mini-bio"])
         self.assertNotIn("MIKESTKRA", [item["sku"] for item in items])
         # 19.90 € split over 6.50, 2 × 1.00 and 2 × 1.00: 12.32 / 3.79 / 3.79.
         self.assertEqual(total_gross(items), Decimal("19.90"))
@@ -151,6 +154,10 @@ class HoldedMasterTaxTests(unittest.TestCase):
             ["s_iva_4", "s_iva_4", "s_iva_10", "s_iva_10", "s_iva_10", "s_iva_4", "s_iva_4"],
         )
         self.assertEqual([item["units"] for item in items], [2, 2, 2, 2, 2, 4, 4])
+        self.assertEqual(
+            [item["product_id"] for item in items],
+            ["oil5", "early", "para", "nect", "jam", "mini-ve", "mini-bio"],
+        )
         self.assertNotIn("MIKESTKRA", [item["sku"] for item in items])
         self.assertEqual(total_gross(items), Decimal("188.39"))
 

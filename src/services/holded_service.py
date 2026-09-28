@@ -351,22 +351,38 @@ def holded_get_or_create_contact_detailed(
 # PEDIDOS DE VENTA (Sales Orders)
 # ============================================================
 
-def _validated_document_items(items):
-    """Build Holded lines only when every caller supplied an explicit master tax."""
+def _validated_document_items(items, require_product_id=False):
+    """Build document lines with master tax and optional stock linkage.
+
+    ``product_id`` links a v2 ticket line to Holded's catalogue. Tickets must
+    require it: without it a document can be correct fiscally but cannot move
+    inventory. Legacy invoice and sales-order payloads are left unchanged.
+    """
     document_items = []
     for item in items:
         tax_id = item.get('tax')
         sku = item.get('sku') or item.get('name') or 'sin referencia'
         if not tax_id:
             raise ValueError(f'La línea {sku} no tiene impuesto maestro de Holded; emisión cancelada.')
-        document_items.append({
+        product_id = str(item.get('product_id') or '').strip()
+        if require_product_id and not product_id:
+            raise ValueError(
+                f'La línea {sku} no tiene identificador maestro de Holded; '
+                'emisión cancelada para no desajustar stock.'
+            )
+        document_item = {
             'name': item.get('name', ''),
             'desc': item.get('description', ''),
             'units': item.get('units', 1),
             'subtotal': item.get('subtotal', 0),
             'taxes': [tax_id],  # Holded espera array 'taxes', no string 'tax'
-            'sku': item.get('sku', '')
-        })
+            'sku': item.get('sku', ''),
+        }
+        # Legacy invoice and sales-order endpoints retain their unmodified
+        # schema.  v2 tickets need the explicit product reference to move stock.
+        if require_product_id:
+            document_item['product_id'] = product_id
+        document_items.append(document_item)
     if not document_items:
         raise ValueError('No hay líneas con impuesto maestro para emitir en Holded.')
     return document_items
@@ -458,11 +474,13 @@ def holded_create_salesreceipt(items, notes=''):
             'literal_response': 'Falta la variable HOLDED_V2_API_TOKEN.'
         }
     try:
-        legacy_items = _validated_document_items(items)
+        legacy_items = _validated_document_items(items, require_product_id=True)
         receipt_items = [
             {
+                'type': 'product',
                 'name': item['name'],
                 'description': item.get('desc', ''),
+                'product_id': item['product_id'],
                 'units': item['units'],
                 'price': item['subtotal'],
                 'taxes': item['taxes'],
