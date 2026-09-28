@@ -17,12 +17,14 @@ from src.services.holded_service import (
     holded_get_invoice_pdf,
     holded_get_warehouses,
     holded_get_or_create_contact,
+    holded_get_or_create_contact_detailed,
     holded_get_contact_invoices,
     holded_get_contact_salesorders,
     holded_get_contact_salesreceipts,
     holded_get_all_salesreceipts,
     holded_get_document,
     holded_send_document_email,
+    format_holded_error,
     HOLDED_BASE_URL,
     HOLDED_API_KEY
 )
@@ -1153,47 +1155,30 @@ def create_invoice_in_holded(order_id):
         # Determinar tipo de documento
         doc_type = 'invoice' if (order.needs_invoice and order.fiscal_nif) else 'salesreceipt'
         
-        # Buscar o crear contacto en Holded
-        # Si tiene datos fiscales, usar razón social; si no, nombre del cliente
-        contact_name = order.fiscal_name if (order.needs_invoice and order.fiscal_name) else order.customer_name
-        address_data = None
-        if order.needs_invoice and order.fiscal_address:
+        # A complete invoice identifies its recipient. A simplified ticket
+        # deliberately does not: it is created by Holded v2 without a
+        # contact_id, so a broken contact record cannot block it.
+        contact_id = None
+        if doc_type == 'invoice':
+            contact_name = order.fiscal_name or order.customer_name
             address_data = {
-                'address': order.fiscal_address,
+                'address': order.fiscal_address or order.shipping_address or '',
                 'city': order.fiscal_city or order.shipping_city or '',
                 'postal_code': order.fiscal_postal_code or order.shipping_postal_code or '',
                 'country': 'España'
             }
-        else:
-            address_data = {
-                'address': order.shipping_address or '',
-                'city': order.shipping_city or '',
-                'postal_code': order.shipping_postal_code or '',
-                'country': order.shipping_country or 'España'
-            }
-        
-        contact_id = holded_get_or_create_contact(
-            email=order.customer_email,
-            name=contact_name,
-            phone=order.customer_phone or '',
-            address_data=address_data
-        )
-
-        if not contact_id:
-            return jsonify({'error': 'No se pudo crear/encontrar el contacto en Holded'}), 500
-
-        # Si es factura y tiene NIF, actualizar el contacto con el NIF
-        if doc_type == 'invoice' and order.fiscal_nif:
-            try:
-                import requests as req
-                req.put(
-                    f'{HOLDED_BASE_URL}/contacts/{contact_id}',
-                    headers={'key': HOLDED_API_KEY, 'Content-Type': 'application/json'},
-                    json={'vatnumber': order.fiscal_nif},
-                    timeout=10
-                )
-            except Exception:
-                pass  # No bloquear si falla actualizar NIF
+            contact_id, contact_error = holded_get_or_create_contact_detailed(
+                email=order.customer_email,
+                name=contact_name,
+                phone=order.customer_phone or '',
+                address_data=address_data,
+                vatnumber=order.fiscal_nif
+            )
+            if not contact_id:
+                return jsonify({
+                    'error': format_holded_error(contact_error),
+                    'holded_error': contact_error
+                }), 502
 
         # Crear documento según tipo
         if doc_type == 'invoice':
@@ -1206,7 +1191,6 @@ def create_invoice_in_holded(order_id):
         else:
             notes = f'Ticket pedido web #{order.order_number}'
             success, result = holded_create_salesreceipt(
-                contact_id=contact_id,
                 items=items,
                 notes=notes
             )
@@ -1214,10 +1198,15 @@ def create_invoice_in_holded(order_id):
         if success:
             # Guardar referencia en la DB
             doc_id = result.get('id', '')
-            doc_number = result.get('docNumber', '') or result.get('num', '') or result.get('invoiceNum', '')
+            doc_number = (
+                result.get('document_number', '')
+                or result.get('docNumber', '')
+                or result.get('num', '')
+                or result.get('invoiceNum', '')
+            )
             
             # Si no viene docNumber en la respuesta, obtenerlo con GET al documento
-            if not doc_number and doc_id:
+            if not doc_number and doc_id and doc_type == 'invoice':
                 try:
                     import requests as req
                     doc_detail = req.get(
@@ -1248,7 +1237,12 @@ def create_invoice_in_holded(order_id):
                 'holded_id': doc_id
             })
         else:
-            return jsonify({'error': f'Error creando {"factura" if doc_type == "invoice" else "ticket"} en Holded: {result}'}), 500
+            error_message = (
+                format_holded_error(result)
+                if isinstance(result, dict)
+                else f'Holded — creación de {"factura" if doc_type == "invoice" else "ticket"}: {result}'
+            )
+            return jsonify({'error': error_message, 'holded_error': result}), 502
     except Exception as e:
         import traceback
         traceback.print_exc()

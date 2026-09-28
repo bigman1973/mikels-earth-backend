@@ -6,13 +6,49 @@ import os
 import requests
 from datetime import datetime
 
-HOLDED_API_KEY = os.environ.get('HOLDED_API_KEY', '5bd8629be1127486298dfd61cb296943')
+HOLDED_API_KEY = os.environ.get('HOLDED_API_KEY', '').strip()
 HOLDED_BASE_URL = 'https://api.holded.com/api/invoicing/v1'
+HOLDED_V2_BASE_URL = 'https://api.holded.com/api/v2'
 
 HEADERS = {
     'key': HOLDED_API_KEY,
     'Content-Type': 'application/json'
 }
+
+
+def _holded_v2_headers():
+    """Return the v2 headers only when its scoped token is configured."""
+    token = os.environ.get('HOLDED_V2_API_TOKEN', '').strip()
+    if not token:
+        return None
+    return {
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+    }
+
+
+def _holded_error(stage, response=None, exception=None):
+    """Preserve the actionable Holded response for the admin panel and logs."""
+    if exception is not None:
+        return {
+            'stage': stage,
+            'http_status': None,
+            'literal_response': str(exception)
+        }
+    return {
+        'stage': stage,
+        'http_status': response.status_code,
+        'literal_response': response.text
+    }
+
+
+def format_holded_error(error):
+    """Format a safe, literal API failure for a user-facing admin response."""
+    status = error.get('http_status')
+    status_label = f'HTTP {status}' if status is not None else 'sin respuesta HTTP'
+    literal = error.get('literal_response') or 'sin detalle devuelto por Holded'
+    return f'Holded — {error.get("stage", "operación")}: {status_label}. Respuesta: {literal}'
 
 
 # ============================================================
@@ -180,6 +216,137 @@ def holded_create_contact(data):
         return None
 
 
+def _contact_update_payload(data):
+    """Build the legacy Holded contact fields without including empty values."""
+    update_payload = {}
+    if data.get('email'):
+        update_payload['email'] = data['email']
+    if data.get('phone'):
+        update_payload['phone'] = data['phone']
+        update_payload['mobile'] = data['phone']
+    if data.get('vatnumber'):
+        update_payload['vatnumber'] = data['vatnumber']
+    if data.get('address') or data.get('city') or data.get('postal_code'):
+        update_payload['billAddress'] = {
+            'address': data.get('address', ''),
+            'city': data.get('city', ''),
+            'postalCode': data.get('postal_code', ''),
+            'province': data.get('province', ''),
+            'country': data.get('country', 'España'),
+            'countryCode': data.get('country_code', 'ES')
+        }
+    return update_payload
+
+
+def _contact_create_payload(data):
+    """Build a legacy Holded client-contact payload."""
+    return {
+        'name': data.get('name', ''),
+        'email': data.get('email', ''),
+        'phone': data.get('phone', ''),
+        'mobile': data.get('phone', ''),
+        'type': 'client',
+        'billAddress': {
+            'address': data.get('address', ''),
+            'city': data.get('city', ''),
+            'postalCode': data.get('postal_code', ''),
+            'province': data.get('province', ''),
+            'country': data.get('country', 'España'),
+            'countryCode': data.get('country_code', 'ES')
+        }
+    }
+
+
+def holded_get_or_create_contact_detailed(
+    email, name, phone='', address_data=None, vatnumber=''
+):
+    """Return a contact ID or the unmodified Holded HTTP failure details.
+
+    This is used only when a complete invoice needs an identified recipient.
+    Unlike the legacy helper, it never collapses an ERP failure into ``None``.
+    """
+    try:
+        contacts_response = requests.get(
+            f'{HOLDED_BASE_URL}/contacts', headers=HEADERS, timeout=15
+        )
+        if contacts_response.status_code != 200:
+            return None, _holded_error('consulta de contactos', contacts_response)
+        contacts = contacts_response.json()
+    except Exception as exc:
+        return None, _holded_error('consulta de contactos', exception=exc)
+
+    name_normalized = (name or '').strip().lower()
+    email_normalized = (email or '').strip().lower()
+    existing = next(
+        (
+            contact for contact in contacts
+            if email_normalized and (contact.get('email') or '').strip().lower() == email_normalized
+        ),
+        None
+    )
+    if not existing and name_normalized:
+        existing = next(
+            (
+                contact for contact in contacts
+                if (contact.get('name') or '').strip().lower() == name_normalized
+            ),
+            None
+        )
+
+    contact_data = {
+        'name': name,
+        'email': email,
+        'phone': phone,
+        'vatnumber': vatnumber
+    }
+    if address_data:
+        contact_data.update(address_data)
+
+    if existing:
+        contact_id = existing.get('id')
+        if not contact_id:
+            return None, {
+                'stage': 'lectura de contacto existente',
+                'http_status': None,
+                'literal_response': 'Holded devolvió un contacto sin identificador.'
+            }
+        update_payload = _contact_update_payload(contact_data)
+        if not update_payload:
+            return contact_id, None
+        try:
+            update_response = requests.put(
+                f'{HOLDED_BASE_URL}/contacts/{contact_id}',
+                headers=HEADERS,
+                json=update_payload,
+                timeout=10
+            )
+        except Exception as exc:
+            return None, _holded_error('actualización de contacto', exception=exc)
+        if update_response.status_code not in (200, 201):
+            return None, _holded_error('actualización de contacto', update_response)
+        return contact_id, None
+
+    try:
+        create_response = requests.post(
+            f'{HOLDED_BASE_URL}/contacts',
+            headers=HEADERS,
+            json=_contact_create_payload(contact_data),
+            timeout=10
+        )
+    except Exception as exc:
+        return None, _holded_error('creación de contacto', exception=exc)
+    if create_response.status_code not in (200, 201):
+        return None, _holded_error('creación de contacto', create_response)
+    contact_id = create_response.json().get('id')
+    if not contact_id:
+        return None, {
+            'stage': 'creación de contacto',
+            'http_status': create_response.status_code,
+            'literal_response': 'Holded respondió sin identificador de contacto.'
+        }
+    return contact_id, None
+
+
 # ============================================================
 # PEDIDOS DE VENTA (Sales Orders)
 # ============================================================
@@ -275,38 +442,86 @@ def holded_create_invoice(contact_id, items, notes=''):
         return False, str(e)
 
 
-def holded_create_salesreceipt(contact_id, items, notes=''):
-    """
-    Crea un ticket (salesreceipt / T) en Holded.
-    Se usa para clientes que NO solicitan factura formal.
-    items: lista de dicts con {name, units, subtotal, tax}
-    subtotal = precio unitario SIN IVA
-    """
-    try:
-        receipt_items = _validated_document_items(items)
+def holded_create_salesreceipt(items, notes=''):
+    """Create and approve a simplified ticket through Holded v2.
 
+    Sales receipts under the legal threshold do not identify the recipient. The
+    v2 API explicitly supports this: no ``contact_id`` is sent and no customer
+    contact is looked up or created. The document and its sequential number are
+    still generated exclusively in Holded.
+    """
+    headers = _holded_v2_headers()
+    if not headers:
+        return False, {
+            'stage': 'configuración de ticket',
+            'http_status': None,
+            'literal_response': 'Falta la variable HOLDED_V2_API_TOKEN.'
+        }
+    try:
+        legacy_items = _validated_document_items(items)
+        receipt_items = [
+            {
+                'name': item['name'],
+                'description': item.get('desc', ''),
+                'units': item['units'],
+                'price': item['subtotal'],
+                'taxes': item['taxes'],
+                'sku': item.get('sku', '')
+            }
+            for item in legacy_items
+        ]
         payload = {
-            'contactId': contact_id,
             'items': receipt_items,
             'notes': notes,
-            'date': int(datetime.now().timestamp()),
-            'approveDoc': True  # Aprobar directamente (no borrador) según API Holded
+            'date': datetime.now().date().isoformat(),
+            'currency': 'EUR',
+            'language': 'es'
         }
-
-        response = requests.post(
-            f'{HOLDED_BASE_URL}/documents/salesreceipt',
-            headers=HEADERS,
+        create_response = requests.post(
+            f'{HOLDED_V2_BASE_URL}/sales-receipts',
+            headers=headers,
             json=payload,
             timeout=15
         )
+    except Exception as exc:
+        return False, _holded_error('creación de ticket', exception=exc)
+    if create_response.status_code != 201:
+        return False, _holded_error('creación de ticket', create_response)
 
-        if response.status_code in [200, 201]:
-            return True, response.json()
-        print(f"[Holded] Error creando ticket: {response.status_code} - {response.text}")
-        return False, response.text
-    except Exception as e:
-        print(f"[Holded] Error creando ticket (salesreceipt): {e}")
-        return False, str(e)
+    receipt_id = create_response.json().get('id')
+    if not receipt_id:
+        return False, {
+            'stage': 'creación de ticket',
+            'http_status': create_response.status_code,
+            'literal_response': 'Holded respondió sin identificador de ticket.'
+        }
+    try:
+        approve_response = requests.post(
+            f'{HOLDED_V2_BASE_URL}/sales-receipts/{receipt_id}/approve',
+            headers=headers,
+            timeout=15
+        )
+    except Exception as exc:
+        return False, _holded_error('aprobación de ticket', exception=exc)
+    if approve_response.status_code != 200:
+        return False, _holded_error('aprobación de ticket', approve_response)
+
+    try:
+        detail_response = requests.get(
+            f'{HOLDED_V2_BASE_URL}/sales-receipts/{receipt_id}',
+            headers=headers,
+            timeout=15
+        )
+    except Exception as exc:
+        return False, _holded_error('lectura de ticket aprobado', exception=exc)
+    if detail_response.status_code != 200:
+        return False, _holded_error('lectura de ticket aprobado', detail_response)
+    receipt = detail_response.json()
+    return True, {
+        'id': receipt_id,
+        'document_number': receipt.get('document_number', ''),
+        'document': receipt
+    }
 
 
 def holded_get_invoice_pdf(document_id):
@@ -335,13 +550,29 @@ def holded_send_document_email(doc_type, doc_id, emails, subject=None, message=N
     message: mensaje personalizado (opcional)
     """
     try:
-        payload = {
-            'emails': emails if isinstance(emails, list) else [emails]
-        }
+        payload = {'emails': emails if isinstance(emails, list) else [emails]}
         if subject:
             payload['subject'] = subject
         if message:
             payload['message'] = message
+
+        if doc_type == 'salesreceipt':
+            headers = _holded_v2_headers()
+            if not headers:
+                return False, {
+                    'stage': 'envío de ticket',
+                    'http_status': None,
+                    'literal_response': 'Falta la variable HOLDED_V2_API_TOKEN.'
+                }
+            response = requests.post(
+                f'{HOLDED_V2_BASE_URL}/sales-receipts/{doc_id}/send',
+                headers=headers,
+                json=payload,
+                timeout=15
+            )
+            if response.status_code == 200:
+                return True, response.json() if response.text else {}
+            return False, _holded_error('envío de ticket', response)
 
         response = requests.post(
             f'{HOLDED_BASE_URL}/documents/{doc_type}/{doc_id}/send',
@@ -353,11 +584,9 @@ def holded_send_document_email(doc_type, doc_id, emails, subject=None, message=N
         if response.status_code in [200, 201]:
             print(f"[Holded] Documento {doc_id} enviado por email a {emails}")
             return True, response.json() if response.text else {}
-        print(f"[Holded] Error enviando documento por email: {response.status_code} - {response.text}")
-        return False, response.text
+        return False, _holded_error('envío de documento', response)
     except Exception as e:
-        print(f"[Holded] Error enviando documento por email: {e}")
-        return False, str(e)
+        return False, _holded_error('envío de documento', exception=e)
 
 
 # ============================================================
