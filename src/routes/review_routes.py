@@ -8,14 +8,11 @@ from flask import Blueprint, request, jsonify
 from src.models.user import db
 from src.models.review import Review
 from src.models.order import Order
-from src.models.coupon import Coupon
 from src.services.klaviyo_service import send_klaviyo_event
 from datetime import datetime
 from collections import defaultdict
 import os
 import re
-import random
-import string
 import time
 import hmac
 
@@ -62,13 +59,6 @@ def init_reviews_db():
         return jsonify({'error': str(e)}), 500
 
 
-def _generate_review_coupon_code():
-    """Genera un código de cupón único para recompensar la reseña"""
-    chars = string.ascii_uppercase + string.digits
-    random_part = ''.join(random.choice(chars) for _ in range(6))
-    return f'GRACIAS10-{random_part}'
-
-
 def _validate_email(email):
     """Validar formato de email"""
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -87,8 +77,7 @@ def create_review():
         return jsonify({'error': 'Demasiados intentos. Inténtalo más tarde.'}), 429
     _review_rate_store[client_ip].append(now)
     """
-    Crear una nueva reseña.
-    Genera un cupón de agradecimiento del 10% y envía un email de agradecimiento via Klaviyo.
+    Crear una nueva reseña y enviar su evento de confirmación a Klaviyo.
     
     Body JSON:
     {
@@ -170,20 +159,6 @@ def create_review():
         if existing_review:
             return jsonify({'error': 'Ya has dejado una reseña para este producto'}), 409
         
-        # Generar cupón de agradecimiento
-        coupon_code = _generate_review_coupon_code()
-        
-        # Asegurar que el código es único
-        try:
-            max_attempts = 10
-            for _ in range(max_attempts):
-                if not Coupon.query.filter_by(code=coupon_code).first():
-                    break
-                coupon_code = _generate_review_coupon_code()
-        except Exception as e:
-            print(f"⚠️ Error verificando unicidad de cupón (tabla coupons puede no existir): {e}")
-            # El cupón generado se usa igualmente
-        
         # Crear la reseña
         review = Review(
             customer_email=email,
@@ -195,26 +170,14 @@ def create_review():
             comment=comment,
             status='approved',  # Auto-aprobada
             is_verified_purchase=is_verified,
-            order_number=order_number if order_number else None,
-            reward_coupon_code=coupon_code
+            order_number=order_number if order_number else None
         )
         
         db.session.add(review)
         
-        # Crear el cupón en la tabla de cupones (para que sea validable en el checkout)
-        try:
-            reward_coupon = Coupon(
-                code=coupon_code,
-                email=f"review-{email}",  # Prefijo para distinguir de cupones newsletter
-                discount_percent=10
-            )
-            db.session.add(reward_coupon)
-        except Exception as e:
-            print(f"⚠️ Error creando cupón de reseña (tabla coupons puede no existir): {e}")
-        
         db.session.commit()
         
-        # Enviar evento a Klaviyo para email de agradecimiento con cupón
+        # Enviar evento a Klaviyo para el email de agradecimiento sin incentivo.
         try:
             send_klaviyo_event(
                 metric_name="Mikels Review Submitted",
@@ -224,7 +187,6 @@ def create_review():
                     "ProductName": data['product_name'].strip(),
                     "Rating": rating,
                     "Comment": comment,
-                    "CouponCode": coupon_code,
                     "Source": "mikels-earth-website"
                 },
                 profile_attrs={"first_name": data['customer_name'].strip().split(' ')[0]}
@@ -234,9 +196,8 @@ def create_review():
         
         return jsonify({
             'success': True,
-            'message': '¡Gracias por tu reseña! Te hemos enviado un cupón de descuento del 10% a tu email.',
-            'review': review.to_public_dict(),
-            'coupon_code': coupon_code
+            'message': '¡Gracias por compartir tu opinión!',
+            'review': review.to_public_dict()
         }), 201
         
     except Exception as e:
