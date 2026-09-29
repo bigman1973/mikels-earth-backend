@@ -33,6 +33,7 @@ from src.models.abandoned_cart import AbandonedCart  # Modelo de carrito abandon
 from src.models.product_notification import ProductNotification  # Modelo notificación producto
 from src.models.admin_user import AdminUser  # Modelo usuarios admin
 from src.models.web_product import WebProduct  # Catálogo de productos web
+from src.models.newsletter_consent import NewsletterConsent  # Registro auditable de consentimientos
 
 # Load environment variables
 load_dotenv()
