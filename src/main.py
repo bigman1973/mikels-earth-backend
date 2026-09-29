@@ -7,6 +7,19 @@ from flask import Flask, send_from_directory, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
+
+# Load and validate required security configuration before importing routes that
+# sign or verify administrator credentials.
+load_dotenv()
+
+REQUIRED_SECURITY_ENVIRONMENT = ('SECRET_KEY', 'JWT_SECRET', 'ADMIN_SECRET_KEY')
+missing_security_environment = [
+    name for name in REQUIRED_SECURITY_ENVIRONMENT if not os.getenv(name, '').strip()
+]
+if missing_security_environment:
+    missing = ', '.join(missing_security_environment)
+    raise RuntimeError(f'Missing required security environment variables: {missing}')
+
 from src.models.user import db
 from src.models.order import Order, Subscription
 from src.models.coupon import Coupon
@@ -34,11 +47,8 @@ from src.models.product_notification import ProductNotification  # Modelo notifi
 from src.models.admin_user import AdminUser  # Modelo usuarios admin
 from src.models.web_product import WebProduct  # Catálogo de productos web
 
-# Load environment variables
-load_dotenv()
-
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'asdf#FGSgvasgf$5$WGT')
+app.config['SECRET_KEY'] = os.environ['SECRET_KEY'].strip()
 
 # Enable CORS
 # Permitir múltiples orígenes: producción, Vercel preview, y desarrollo local

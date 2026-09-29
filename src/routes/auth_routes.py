@@ -19,7 +19,9 @@ MICROSOFT_AUTH_URL = f'{MICROSOFT_AUTHORITY}/oauth2/v2.0/authorize'
 MICROSOFT_GRAPH_URL = 'https://graph.microsoft.com/v1.0/me'
 
 # JWT Secret para tokens de sesión propios
-JWT_SECRET = os.environ.get('JWT_SECRET', os.environ.get('SECRET_KEY', 'mikels-admin-secret-key'))
+JWT_SECRET = os.environ['JWT_SECRET'].strip()
+if not JWT_SECRET:
+    raise RuntimeError('Missing required security environment variable: JWT_SECRET')
 JWT_EXPIRATION_HOURS = 24
 
 # Frontend URL

@@ -17,8 +17,13 @@ import re
 import random
 import string
 import time
+import hmac
 
 review_bp = Blueprint('review', __name__)
+
+ADMIN_SECRET_KEY = os.environ['ADMIN_SECRET_KEY'].strip()
+if not ADMIN_SECRET_KEY:
+    raise RuntimeError('Missing required security environment variable: ADMIN_SECRET_KEY')
 
 # Anti-spam
 _review_rate_store = defaultdict(list)
@@ -39,6 +44,10 @@ def _is_gibberish(text):
         if upper_count > len(text) * 0.35:
             return True
     return False
+
+
+def _has_valid_admin_key(candidate):
+    return bool(candidate) and hmac.compare_digest(candidate, ADMIN_SECRET_KEY)
 
 
 @review_bp.route('/init-db', methods=['GET'])
@@ -369,7 +378,7 @@ def delete_review(review_id):
     """
     try:
         admin_key = request.headers.get('X-Admin-Key', '')
-        if admin_key != os.environ.get('ADMIN_SECRET_KEY', 'mikels-admin-2026'):
+        if not _has_valid_admin_key(admin_key):
             return jsonify({'error': 'No autorizado'}), 401
         
         review = Review.query.get(review_id)
@@ -395,7 +404,7 @@ def update_review(review_id):
     """
     try:
         admin_key = request.headers.get('X-Admin-Key', '')
-        if admin_key != os.environ.get('ADMIN_SECRET_KEY', 'mikels-admin-2026'):
+        if not _has_valid_admin_key(admin_key):
             return jsonify({'error': 'No autorizado'}), 401
         
         review = Review.query.get(review_id)
