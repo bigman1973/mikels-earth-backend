@@ -13,7 +13,7 @@ def send_newsletter_welcome_email(email, coupon_code="BIENVENIDA10"):
         email: Email del suscriptor
         coupon_code: Código de cupón único generado (default: BIENVENIDA10)
     """
-    subject = "🌿 Bienvenido a la familia Mikel's Earth + Tu regalo (10% descuento)"
+    subject = "🌿 Bienvenido a la familia Mikel's Fruit + Tu regalo (10% descuento)"
     
     # HTML optimizado para compatibilidad con todos los clientes de email
     html_content = f"""
@@ -22,7 +22,7 @@ def send_newsletter_welcome_email(email, coupon_code="BIENVENIDA10"):
     <head>
         <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-        <title>Bienvenido a Mikel's Earth</title>
+        <title>Bienvenido a Mikel's Fruit</title>
     </head>
     <body style="margin: 0; padding: 0; font-family: Georgia, 'Times New Roman', serif; background-color: #f5f5f5;">
         <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f5f5f5;">
@@ -33,7 +33,7 @@ def send_newsletter_welcome_email(email, coupon_code="BIENVENIDA10"):
                         <!-- Header -->
                         <tr>
                             <td align="center" style="background-color: #2d5016; padding: 40px 30px;">
-                                <h1 style="color: #ffffff; font-size: 28px; font-weight: normal; margin: 0;">🌿 Bienvenido a la familia Mikel's Earth</h1>
+                                <h1 style="color: #ffffff; font-size: 28px; font-weight: normal; margin: 0;">🌿 Bienvenido a la familia Mikel's Fruit</h1>
                             </td>
                         </tr>
                         
@@ -99,7 +99,7 @@ def send_newsletter_welcome_email(email, coupon_code="BIENVENIDA10"):
                                 <p style="margin: 0 0 20px 0;">Porque creemos que si vas a comprar nuestros productos, mereces saber quiénes somos de verdad.</p>
                                 
                                 <!-- Section Title -->
-                                <h2 style="font-size: 22px; color: #2d5016; margin: 40px 0 20px 0; font-weight: bold;">Cómo nació Mikel's Earth (la historia real)</h2>
+                                <h2 style="font-size: 22px; color: #2d5016; margin: 40px 0 20px 0; font-weight: bold;">Cómo nació Mikel's Fruit (la historia real)</h2>
                                 
                                 <p style="margin: 0 0 20px 0;">Llevo más de 30 años exportando el mejor aceite del territorio a Asia.</p>
                                 
@@ -231,7 +231,7 @@ def send_newsletter_welcome_email(email, coupon_code="BIENVENIDA10"):
                                 
                                 <p style="margin: 40px 0 0 0;">Un abrazo desde Lleida,</p>
                                 <p style="color: #2d5016; font-weight: bold; font-size: 18px; margin: 10px 0;">Jordi Giró</p>
-                                <p style="color: #666; font-style: italic; margin: 0;">Fundador de Mikel's Earth<br/>Del campo a tu mesa</p>
+                                <p style="color: #666; font-style: italic; margin: 0;">Fundador de Mikel's Fruit<br/>Del campo a tu mesa</p>
                                 
                                 <!-- P.D. Box -->
                                 <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 30px 0 0 0;">
@@ -249,7 +249,7 @@ def send_newsletter_welcome_email(email, coupon_code="BIENVENIDA10"):
                         <!-- Footer -->
                         <tr>
                             <td align="center" style="background-color: #f9f9f9; padding: 30px; border-top: 1px solid #e0e0e0;">
-                                <p style="margin: 5px 0; font-size: 14px; color: #666;"><strong>Mikel's Earth</strong> - Del campo a tu mesa desde 1819</p>
+                                <p style="margin: 5px 0; font-size: 14px; color: #666;"><strong>Mikel's Fruit</strong> - Del campo a tu mesa desde 1819</p>
                                 <p style="margin: 5px 0; font-size: 14px; color: #666;">Carrer Cardenal Cisneros, 10 - Lleida, España</p>
                                 <p style="margin: 15px 0 0 0; font-size: 12px; color: #666;">Has recibido este correo porque te has suscrito a nuestro newsletter en www.mikels.es</p>
                             </td>
@@ -280,7 +280,7 @@ def send_newsletter_welcome_email(email, coupon_code="BIENVENIDA10"):
                 "content-type": "application/json"
             },
             json={
-                "sender": {"name": "Jordi - Mikel's Earth", "email": "noreply@mikels.es"},
+                "sender": {"name": "Jordi - Mikel's Fruit", "email": "noreply@mikels.es"},
                 "to": [{"email": email}],
                 "subject": subject,
                 "htmlContent": html_content

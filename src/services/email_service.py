@@ -30,7 +30,7 @@ def send_email(to_email, subject, html_content):
     
     payload = {
         'sender': {
-            'name': "Mikel's Earth",
+            'name': "Mikel's Fruit",
             'email': 'info@mikels.es'
         },
         'to': [
@@ -165,7 +165,7 @@ def format_order_email(order_data):
             
             <div class="footer">
                 <p>Este es un email automático de notificación de pedidos.</p>
-                <p>Mikel's Earth - Productos del campo directo a tu mesa</p>
+                <p>Mikel's Fruit - Productos del campo directo a tu mesa</p>
             </div>
         </div>
     </body>
@@ -230,7 +230,7 @@ def format_subscription_email(subscription_data):
             
             <div class="footer">
                 <p>Este es un email automático de notificación de suscripciones.</p>
-                <p>Mikel's Earth - Productos del campo directo a tu mesa</p>
+                <p>Mikel's Fruit - Productos del campo directo a tu mesa</p>
             </div>
         </div>
     </body>
@@ -306,7 +306,7 @@ def format_customer_order_confirmation(order_data):
             <div class="content">
                 <div class="section">
                     <p style="font-size: 16px; margin-top: 0;">Hola <strong>{order_data.get('customer_name', 'Cliente')}</strong>,</p>
-                    <p>¡Gracias por confiar en Mikel's Earth! Hemos recibido tu pedido y lo estamos preparando con mucho cariño.</p>
+                    <p>¡Gracias por confiar en Mikel's Fruit! Hemos recibido tu pedido y lo estamos preparando con mucho cariño.</p>
                     
                     <div class="highlight-box">
                         <p style="margin: 0;"><strong>📋 Número de Pedido:</strong> {order_data.get('order_number', 'N/A')}</p>
@@ -379,7 +379,7 @@ def format_customer_order_confirmation(order_data):
             </div>
             
             <div class="footer">
-                <p><strong>Mikel's Earth</strong></p>
+                <p><strong>Mikel's Fruit</strong></p>
                 <p>Productos del campo directo a tu mesa</p>
                 <p style="font-size: 0.8em; color: #999; margin-top: 15px;">Este email se envió a {order_data.get('customer_email', '')} porque realizaste una compra en nuestra tienda.</p>
             </div>
@@ -403,10 +403,10 @@ def send_customer_order_confirmation(order_data):
         return False
     
     if locale == 'en':
-        subject = f"✅ Order Confirmed #{order_data.get('order_number', 'N/A')} - Mikel's Earth"
+        subject = f"✅ Order Confirmed #{order_data.get('order_number', 'N/A')} - Mikel's Fruit"
         html_content = format_customer_order_confirmation_en(order_data)
     else:
-        subject = f"✅ Pedido Confirmado #{order_data.get('order_number', 'N/A')} - Mikel's Earth"
+        subject = f"✅ Pedido Confirmado #{order_data.get('order_number', 'N/A')} - Mikel's Fruit"
         html_content = format_customer_order_confirmation(order_data)
     
     return send_email(customer_email, subject, html_content)
@@ -458,7 +458,7 @@ def format_customer_order_confirmation_en(order_data):
             <div class="content">
                 <div class="section">
                     <p style="font-size: 16px; margin-top: 0;">Hello <strong>{order_data.get('customer_name', 'Customer')}</strong>,</p>
-                    <p>Thank you for choosing Mikel's Earth! We have received your order and are preparing it with great care.</p>
+                    <p>Thank you for choosing Mikel's Fruit! We have received your order and are preparing it with great care.</p>
                     
                     <div class="highlight-box">
                         <p style="margin: 0;"><strong>📋 Order Number:</strong> {order_data.get('order_number', 'N/A')}</p>
@@ -520,7 +520,7 @@ def format_customer_order_confirmation_en(order_data):
             </div>
             
             <div class="footer">
-                <p><strong>Mikel's Earth</strong></p>
+                <p><strong>Mikel's Fruit</strong></p>
                 <p>From the field, straight to your table</p>
                 <p style="font-size: 0.8em; color: #999; margin-top: 15px;">This email was sent to {order_data.get('customer_email', '')} because you made a purchase in our shop.</p>
             </div>
@@ -590,7 +590,7 @@ def send_product_notification_request(product_name, customer_name, customer_emai
             
             <div class="footer">
                 <p>Este es un email automático de solicitud de notificación.</p>
-                <p>Mikel's Earth - Productos del campo directo a tu mesa</p>
+                <p>Mikel's Fruit - Productos del campo directo a tu mesa</p>
             </div>
         </div>
     </body>
@@ -606,7 +606,7 @@ def send_customer_notification_confirmation(product_name, customer_name, custome
     """
     Envía email de confirmación al cliente cuando solicita ser notificado de un producto sold out
     """
-    subject = f"✅ Te avisaremos cuando {product_name} esté disponible - Mikel's Earth"
+    subject = f"✅ Te avisaremos cuando {product_name} esté disponible - Mikel's Fruit"
     
     html_content = f"""
     <!DOCTYPE html>
@@ -670,7 +670,7 @@ def send_customer_notification_confirmation(product_name, customer_name, custome
             </div>
             
             <div class="footer">
-                <p><strong>Mikel's Earth</strong></p>
+                <p><strong>Mikel's Fruit</strong></p>
                 <p>Productos del campo directo a tu mesa desde 1819</p>
                 <p style="font-size: 0.8em; color: #999; margin-top: 15px;">Este email se envió a {customer_email} porque solicitaste ser notificado sobre la disponibilidad de un producto.</p>
             </div>
@@ -709,7 +709,7 @@ def send_newsletter_subscription_notification(email):
                 <h1>📧 Nueva Suscripción al Newsletter</h1>
             </div>
             <div class="content">
-                <p>Se ha registrado una nueva suscripción al newsletter de Mikel's Earth.</p>
+                <p>Se ha registrado una nueva suscripción al newsletter de Mikel's Fruit.</p>
                 
                 <div class="highlight">
                     <p style="margin: 0;"><strong>Email:</strong> {email}</p>
@@ -740,7 +740,7 @@ def send_newsletter_subscription_notification(email):
                 "content-type": "application/json"
             },
             json={
-                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "sender": {"name": "Mikel's Fruit", "email": "noreply@mikels.es"},
                 "to": [{"email": "info@mikels.es"}],
                 "subject": subject,
                 "htmlContent": html_content
@@ -860,7 +860,7 @@ def send_workshop_visit_notification(nombre, email, telefono, interes):
                 "content-type": "application/json"
             },
             json={
-                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "sender": {"name": "Mikel's Fruit", "email": "noreply@mikels.es"},
                 "to": [{"email": "info@mikels.es"}],
                 "subject": subject,
                 "htmlContent": html_content
@@ -876,7 +876,7 @@ def send_workshop_visit_confirmation(nombre, email):
     """
     Envía email de confirmación al interesado en visitar el obrador
     """
-    subject = "✅ Solicitud de visita recibida - Mikel's Earth"
+    subject = "✅ Solicitud de visita recibida - Mikel's Fruit"
     
     html_content = f"""
     <!DOCTYPE html>
@@ -915,7 +915,7 @@ def send_workshop_visit_confirmation(nombre, email):
                 <ul style="color: #555;">
                     <li>El proceso completo de elaboración artesanal</li>
                     <li>Nuestras instalaciones y maquinaria tradicional</li>
-                    <li>La historia familiar detrás de Mikel's Earth</li>
+                    <li>La historia familiar detrás de Mikel's Fruit</li>
                     <li>Degustación de nuestros productos (según disponibilidad)</li>
                 </ul>
                 
@@ -926,10 +926,10 @@ def send_workshop_visit_confirmation(nombre, email):
                 </p>
                 
                 <p style="margin-top: 30px;">¡Hasta pronto!</p>
-                <p style="color: #2d5016; font-weight: bold;">El equipo de Mikel's Earth</p>
+                <p style="color: #2d5016; font-weight: bold;">El equipo de Mikel's Fruit</p>
             </div>
             <div class="footer">
-                <p>Mikel's Earth - Del campo a tu mesa</p>
+                <p>Mikel's Fruit - Del campo a tu mesa</p>
                 <p style="font-size: 0.85em; color: #999;">Carrer Cardenal Cisneros, 10 - Lérida, España</p>
             </div>
         </div>
@@ -954,7 +954,7 @@ def send_workshop_visit_confirmation(nombre, email):
                 "content-type": "application/json"
             },
             json={
-                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "sender": {"name": "Mikel's Fruit", "email": "noreply@mikels.es"},
                 "to": [{"email": email, "name": nombre}],
                 "subject": subject,
                 "htmlContent": html_content
@@ -1032,7 +1032,7 @@ def send_contact_notification(name, email, phone, message):
                 "content-type": "application/json"
             },
             json={
-                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "sender": {"name": "Mikel's Fruit", "email": "noreply@mikels.es"},
                 "to": [{"email": "info@mikels.es"}],
                 "replyTo": {"email": email, "name": name},
                 "subject": subject,
@@ -1049,7 +1049,7 @@ def send_contact_confirmation(name, email):
     """
     Envía email de confirmación al cliente que envió mensaje de contacto
     """
-    subject = "✅ Mensaje recibido - Mikel's Earth"
+    subject = "✅ Mensaje recibido - Mikel's Fruit"
     
     html_content = f"""
     <!DOCTYPE html>
@@ -1094,11 +1094,11 @@ def send_contact_confirmation(name, email):
                     <li><a href="https://www.mikels.es/la-familia" style="color: #2d5016;">Descubrir nuestra historia familiar</a></li>
                 </ul>
                 
-                <p style="margin-top: 30px;">¡Gracias por tu interés en Mikel's Earth!</p>
-                <p style="color: #2d5016; font-weight: bold;">El equipo de Mikel's Earth</p>
+                <p style="margin-top: 30px;">¡Gracias por tu interés en Mikel's Fruit!</p>
+                <p style="color: #2d5016; font-weight: bold;">El equipo de Mikel's Fruit</p>
             </div>
             <div class="footer">
-                <p>Mikel's Earth - Del campo a tu mesa</p>
+                <p>Mikel's Fruit - Del campo a tu mesa</p>
                 <p style="font-size: 0.85em; color: #999;">Carrer Cardenal Cisneros, 10 - Lérida, España</p>
             </div>
         </div>
@@ -1123,7 +1123,7 @@ def send_contact_confirmation(name, email):
                 "content-type": "application/json"
             },
             json={
-                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "sender": {"name": "Mikel's Fruit", "email": "noreply@mikels.es"},
                 "to": [{"email": email, "name": name}],
                 "subject": subject,
                 "htmlContent": html_content
@@ -1141,7 +1141,7 @@ def send_newsletter_subscription_confirmation(email):
     """
     Envía email de confirmación al usuario que se suscribe al newsletter
     """
-    subject = "✅ ¡Bienvenido a la familia Mikel's Earth!"
+    subject = "✅ ¡Bienvenido a la familia Mikel's Fruit!"
     
     html_content = f"""
     <!DOCTYPE html>
@@ -1161,7 +1161,7 @@ def send_newsletter_subscription_confirmation(email):
     <body>
         <div class="container">
             <div class="header">
-                <h1 style="margin: 0;">🌿 ¡Bienvenido a Mikel's Earth!</h1>
+                <h1 style="margin: 0;">🌿 ¡Bienvenido a Mikel's Fruit!</h1>
             </div>
             <div class="content">
                 <p>¡Gracias por suscribirte a nuestro newsletter!</p>
@@ -1200,10 +1200,10 @@ def send_newsletter_subscription_confirmation(email):
                 </p>
                 
                 <p style="margin-top: 30px;">¡Gracias por confiar en nosotros!</p>
-                <p style="color: #2d5016; font-weight: bold;">El equipo de Mikel's Earth</p>
+                <p style="color: #2d5016; font-weight: bold;">El equipo de Mikel's Fruit</p>
             </div>
             <div class="footer">
-                <p>Mikel's Earth - Del campo a tu mesa desde 1819</p>
+                <p>Mikel's Fruit - Del campo a tu mesa desde 1819</p>
                 <p style="font-size: 0.85em; color: #999;">Carrer Cardenal Cisneros, 10 - Lérida, España</p>
             </div>
         </div>
@@ -1228,7 +1228,7 @@ def send_newsletter_subscription_confirmation(email):
                 "content-type": "application/json"
             },
             json={
-                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "sender": {"name": "Mikel's Fruit", "email": "noreply@mikels.es"},
                 "to": [{"email": email}],
                 "subject": subject,
                 "htmlContent": html_content

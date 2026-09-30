@@ -3,7 +3,9 @@ from flask import Blueprint, request, jsonify
 from src.services.email_dispatcher import dispatch_newsletter_subscription_notification, dispatch_newsletter_welcome, dispatch_add_contact
 from src.models.coupon import Coupon
 from src.models.newsletter_consent import NewsletterConsent
+from src.models.newsletter_subscriber import NewsletterSubscriber
 from src.models.user import db
+from src.services.email_identity import normalize_email_address, newsletter_email_key
 from datetime import datetime
 import re
 import time
@@ -44,11 +46,11 @@ def _is_newsletter_rate_limited(ip):
 @newsletter_bp.route('/subscribe', methods=['POST'])
 def subscribe_newsletter():
     """
-    Endpoint para suscribirse al newsletter.
-    Acepta: email (obligatorio), first_name, last_name (obligatorios desde frontend), phone (opcional).
-    Las suscripciones originadas en el popup requieren además el consentimiento
-    expreso de privacidad y registran, por separado, la elección de WhatsApp.
-    PROTECCIÓN: Un email solo puede suscribirse UNA vez. Si ya tiene cupón (usado o no), se rechaza.
+    Subscribe to the newsletter while issuing one welcome coupon per identity.
+
+    Every popup submission is retained as a consent-history row. Coupon issuance
+    is reserved by a canonical identity so an exact repeat or a Gmail alias
+    cannot create a second welcome coupon.
     """
     try:
         # Anti-spam: rate limiting
@@ -56,21 +58,24 @@ def subscribe_newsletter():
         if client_ip:
             client_ip = client_ip.split(',')[0].strip()
         if _is_newsletter_rate_limited(client_ip):
-            print(f"\u26a0\ufe0f Newsletter rate limited: {client_ip}")
-            return jsonify({'success': True, 'message': 'Subscription successful', 'coupon_code': 'BIENVENIDA10'}), 200
+            print(f"⚠️ Newsletter rate limited: {client_ip}")
+            return jsonify({
+                'success': True,
+                'already_subscribed': True,
+                'message': 'Ya estás suscrito. Si no encuentras tu cupón, escríbenos.',
+            }), 200
 
         data = request.get_json(silent=True) or {}
-        email = data.get('email')
+        email = normalize_email_address(data.get('email'))
         first_name = data.get('first_name', '').strip()
         last_name = data.get('last_name', '').strip()
         phone = data.get('phone', '').strip()
-        coupon_code = data.get('coupon_code')  # Cupón generado por el microservicio
         source = data.get('source', 'website')
         privacy_policy_accepted = data.get('privacy_policy_accepted')
         whatsapp_marketing_accepted = data.get('whatsapp_marketing_accepted') is True
         
         if not email:
-            return jsonify({'error': 'Email is required'}), 400
+            return jsonify({'error': 'Introduce un email válido.'}), 400
 
         if source == 'popup' and privacy_policy_accepted is not True:
             return jsonify({
@@ -80,7 +85,7 @@ def subscribe_newsletter():
         if source == 'popup':
             consent_recorded_at = datetime.utcnow()
             consent = NewsletterConsent(
-                email=email.lower().strip(),
+                email=email,
                 first_name=first_name,
                 last_name=last_name,
                 phone=phone or None,
@@ -95,37 +100,69 @@ def subscribe_newsletter():
 
         # Anti-spam: gibberish name check
         if _is_gibberish(first_name) or _is_gibberish(last_name):
-            print(f"\ud83d\udeab Newsletter spam blocked (gibberish): {first_name} {last_name} / {email} / IP={client_ip}")
-            return jsonify({'success': True, 'message': 'Subscription successful', 'coupon_code': 'BIENVENIDA10'}), 200
-        
-        # ===== PROTECCIÓN CONTRA SUSCRIPCIONES DUPLICADAS =====
-        # Verificar si este email ya tiene CUALQUIER cupón de newsletter (usado o no)
-        existing_coupon = Coupon.query.filter(
-            Coupon.email == email.lower().strip()
-        ).first()
-        
-        if existing_coupon:
-            # Ya se suscribió antes - NO generar nuevo cupón
-            print(f"⚠️ Email {email} ya tiene cupón newsletter: {existing_coupon.code} (used={existing_coupon.used})")
-            return jsonify({
-                'success': False,
-                'already_subscribed': True,
-                'message': '¡Ya estás suscrito/a! Revisa tu email original para encontrar tu cupón de bienvenida.'
-            }), 200
-        # ===== FIN PROTECCIÓN =====
-        
-        # Si no viene cupón del frontend, generar uno usando PostgreSQL
-        if not coupon_code:
+            print(f"🚫 Newsletter spam blocked (gibberish): {first_name} {last_name} / {email} / IP={client_ip}")
+            return jsonify({'success': True, 'message': 'Subscription successful'}), 200
+
+        email_key = newsletter_email_key(email)
+        subscriber = NewsletterSubscriber.query.filter_by(email_key=email_key).first()
+        new_subscriber = subscriber is None
+
+        if new_subscriber:
+            # Do not let a historical welcome coupon be reissued just because
+            # the subscriber table is new. Manual and post-purchase coupons are
+            # deliberately excluded by their code prefixes.
+            existing_welcome_coupon = next(
+                (
+                    coupon
+                    for coupon in Coupon.query.filter(
+                        Coupon.email.isnot(None),
+                        Coupon.code.like('MIKELS-%'),
+                    ).all()
+                    if newsletter_email_key(coupon.email) == email_key
+                ),
+                None,
+            )
+
+            subscriber = NewsletterSubscriber(
+                email_key=email_key,
+                email=email,
+                welcome_coupon=existing_welcome_coupon,
+            )
+            db.session.add(subscriber)
             try:
-                # Crear cupón único usando el modelo Coupon (PostgreSQL)
-                coupon = Coupon.create_coupon(email.lower().strip(), discount_percent=10)
-                coupon_code = coupon.code
-                print(f"Coupon created successfully: {coupon_code} for {email}")
-            except Exception as e:
-                print(f"Error creating coupon: {str(e)}")
-                # Si falla, usar código genérico como fallback
-                coupon_code = "BIENVENIDA10"
-        
+                db.session.commit()
+            except Exception:
+                # A concurrent request for the same canonical identity lost the
+                # unique-key race. It must behave as an existing subscriber.
+                db.session.rollback()
+                subscriber = NewsletterSubscriber.query.filter_by(email_key=email_key).first()
+                if not subscriber:
+                    raise
+                new_subscriber = False
+
+            # A pre-existing welcome code proves that this identity already
+            # consumed its one welcome entitlement, even though it is only now
+            # being backfilled into newsletter_subscribers.
+            if existing_welcome_coupon:
+                new_subscriber = False
+
+        coupon = subscriber.welcome_coupon
+        if new_subscriber and coupon is None:
+            try:
+                coupon = Coupon.create_welcome_coupon(email)
+                subscriber.welcome_coupon = coupon
+                subscriber.email = email
+                db.session.commit()
+                print(f"Welcome coupon created for newsletter identity {email_key}")
+            except Exception:
+                db.session.rollback()
+                # Do not reserve an identity if its welcome coupon was not
+                # created. A later valid submission can safely retry.
+                if subscriber.id:
+                    db.session.delete(subscriber)
+                    db.session.commit()
+                raise
+
         # El teléfono solo se entrega al proveedor de marketing cuando existe
         # consentimiento específico para comunicaciones comerciales por WhatsApp.
         marketing_phone = phone if whatsapp_marketing_accepted else None
@@ -136,25 +173,33 @@ def subscribe_newsletter():
             first_name=first_name, 
             last_name=last_name, 
             phone=marketing_phone,
-            source=source
+            source=source,
+            whatsapp_marketing_accepted=whatsapp_marketing_accepted,
+            subscribe_email=new_subscriber,
         )
-        
-        # Enviar notificación a info@mikels.es (Klaviyo + Brevo fallback)
+
+        if not new_subscriber:
+            return jsonify({
+                'success': True,
+                'already_subscribed': True,
+                'message': 'Ya estás suscrito. Si no encuentras tu cupón, escríbenos.',
+                'contact_id': contact_result.get('id') if contact_result else None,
+            }), 200
+
+        # Only the first subscription causes a notification and welcome email.
         dispatch_newsletter_subscription_notification(
             email,
-            coupon_code,
+            coupon.code,
             first_name=first_name,
             last_name=last_name,
             phone=marketing_phone,
         )
-        
-        # Enviar email de bienvenida al suscriptor con código de descuento único (Klaviyo + Brevo fallback)
-        dispatch_newsletter_welcome(email, coupon_code)
-        
+        dispatch_newsletter_welcome(email, coupon.code)
+
         return jsonify({
             'success': True,
             'message': 'Subscription successful',
-            'coupon_code': coupon_code,
+            'coupon_code': coupon.code,
             'contact_id': contact_result.get('id') if contact_result else None
         }), 200
         
