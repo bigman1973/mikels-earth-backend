@@ -1,8 +1,16 @@
+import os
 import unittest
 from decimal import Decimal, ROUND_HALF_UP
 from unittest.mock import patch
 
 from flask import Flask
+
+
+# These are explicit test-only values. Production must receive the required
+# secrets from its environment and fail closed when any are absent.
+os.environ.setdefault('SECRET_KEY', 'test-flask-session-key')
+os.environ.setdefault('JWT_SECRET', 'test-jwt-key')
+os.environ.setdefault('ADMIN_SECRET_KEY', 'test-review-admin-key')
 
 from src.models.admin_user import AdminUser
 from src.models.order import Order

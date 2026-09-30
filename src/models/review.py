@@ -1,6 +1,6 @@
 """
-Modelo de Reseña para Mikel's Earth
-Permite a los clientes dejar reseñas de productos y recibir un cupón de agradecimiento.
+Modelo de Reseña para Mikel's Fruit
+Permite a los clientes dejar reseñas de productos.
 """
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
@@ -38,7 +38,7 @@ class Review(db.Model):
     # Referencia al pedido (opcional)
     order_number = db.Column(db.String(50), nullable=True)
     
-    # Cupón de agradecimiento generado
+    # Campo legado: las nuevas reseñas no generan cupones.
     reward_coupon_code = db.Column(db.String(50), nullable=True)
     
     # Timestamps
