@@ -2,6 +2,9 @@
 from flask import Blueprint, request, jsonify
 from src.services.email_dispatcher import dispatch_newsletter_subscription_notification, dispatch_newsletter_welcome, dispatch_add_contact
 from src.models.coupon import Coupon
+from src.models.newsletter_consent import NewsletterConsent
+from src.models.user import db
+from datetime import datetime
 import re
 import time
 from collections import defaultdict
@@ -42,7 +45,9 @@ def _is_newsletter_rate_limited(ip):
 def subscribe_newsletter():
     """
     Endpoint para suscribirse al newsletter.
-    Acepta: email (obligatorio), first_name, last_name (obligatorios desde frontend), phone (opcional)
+    Acepta: email (obligatorio), first_name, last_name (obligatorios desde frontend), phone (opcional).
+    Las suscripciones originadas en el popup requieren además el consentimiento
+    expreso de privacidad y registran, por separado, la elección de WhatsApp.
     PROTECCIÓN: Un email solo puede suscribirse UNA vez. Si ya tiene cupón (usado o no), se rechaza.
     """
     try:
@@ -54,16 +59,39 @@ def subscribe_newsletter():
             print(f"\u26a0\ufe0f Newsletter rate limited: {client_ip}")
             return jsonify({'success': True, 'message': 'Subscription successful', 'coupon_code': 'BIENVENIDA10'}), 200
 
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         email = data.get('email')
         first_name = data.get('first_name', '').strip()
         last_name = data.get('last_name', '').strip()
         phone = data.get('phone', '').strip()
         coupon_code = data.get('coupon_code')  # Cupón generado por el microservicio
         source = data.get('source', 'website')
+        privacy_policy_accepted = data.get('privacy_policy_accepted')
+        whatsapp_marketing_accepted = data.get('whatsapp_marketing_accepted') is True
         
         if not email:
             return jsonify({'error': 'Email is required'}), 400
+
+        if source == 'popup' and privacy_policy_accepted is not True:
+            return jsonify({
+                'error': 'Debes aceptar la política de privacidad para suscribirte.'
+            }), 400
+
+        if source == 'popup':
+            consent_recorded_at = datetime.utcnow()
+            consent = NewsletterConsent(
+                email=email.lower().strip(),
+                first_name=first_name,
+                last_name=last_name,
+                phone=phone or None,
+                source=source,
+                privacy_policy_accepted=True,
+                privacy_policy_recorded_at=consent_recorded_at,
+                whatsapp_marketing_accepted=whatsapp_marketing_accepted,
+                whatsapp_marketing_recorded_at=consent_recorded_at,
+            )
+            db.session.add(consent)
+            db.session.commit()
 
         # Anti-spam: gibberish name check
         if _is_gibberish(first_name) or _is_gibberish(last_name):
@@ -98,17 +126,27 @@ def subscribe_newsletter():
                 # Si falla, usar código genérico como fallback
                 coupon_code = "BIENVENIDA10"
         
-        # Añadir contacto a Klaviyo con nombre, apellidos y teléfono
+        # El teléfono solo se entrega al proveedor de marketing cuando existe
+        # consentimiento específico para comunicaciones comerciales por WhatsApp.
+        marketing_phone = phone if whatsapp_marketing_accepted else None
+
+        # Añadir contacto a Klaviyo con nombre, apellidos y teléfono consentido.
         contact_result = dispatch_add_contact(
             email, 
             first_name=first_name, 
             last_name=last_name, 
-            phone=phone,
+            phone=marketing_phone,
             source=source
         )
         
         # Enviar notificación a info@mikels.es (Klaviyo + Brevo fallback)
-        dispatch_newsletter_subscription_notification(email, coupon_code, first_name=first_name, last_name=last_name, phone=phone)
+        dispatch_newsletter_subscription_notification(
+            email,
+            coupon_code,
+            first_name=first_name,
+            last_name=last_name,
+            phone=marketing_phone,
+        )
         
         # Enviar email de bienvenida al suscriptor con código de descuento único (Klaviyo + Brevo fallback)
         dispatch_newsletter_welcome(email, coupon_code)
