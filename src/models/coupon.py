@@ -1,7 +1,7 @@
 """
 Modelo de Cupón para descuentos - Sistema completo de gestión
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from src.models.user import db
 
 
@@ -157,6 +157,38 @@ class Coupon(db.Model):
         db.session.add(coupon)
         db.session.commit()
         
+        return coupon
+
+    @classmethod
+    def create_welcome_coupon(cls, email, discount_percent=10, valid_days=30):
+        """Create one expiring, single-use welcome coupon without committing.
+
+        The caller owns the transaction so it can link the coupon to the
+        canonical newsletter subscriber identity atomically.
+        """
+        if not email:
+            raise ValueError('Email is required for a welcome coupon')
+
+        max_attempts = 10
+        for _ in range(max_attempts):
+            code = cls.generate_code()
+            if not cls.query.filter_by(code=code).first():
+                break
+        else:
+            raise RuntimeError('Could not allocate a unique welcome coupon code')
+
+        coupon = cls(
+            code=code,
+            email=email,
+            description='Cupón de bienvenida newsletter',
+            discount_type='percentage',
+            discount_value=discount_percent,
+            max_uses=1,
+            max_uses_per_customer=1,
+            active=True,
+            expires_at=datetime.utcnow() + timedelta(days=valid_days),
+        )
+        db.session.add(coupon)
         return coupon
     
     @classmethod

@@ -109,10 +109,35 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
         return False
 
 
-def add_contact_to_klaviyo(email, first_name=None, last_name=None, phone=None, source=None):
+def _find_klaviyo_profile_id(email):
+    """Return the Klaviyo profile ID for an email without exposing profile data."""
+    response = requests.get(
+        f"{KLAVIYO_API_URL}/profiles/",
+        headers=_get_headers(),
+        params={"filter": f"equals(email,'{email}')", "page[size]": 1},
+        timeout=15,
+    )
+    if response.status_code != 200:
+        print(f"⚠️ [KLAVIYO] Error buscando perfil: {response.status_code} - {response.text}")
+        return None
+
+    profiles = response.json().get('data', [])
+    return profiles[0].get('id') if profiles else None
+
+
+def add_contact_to_klaviyo(
+    email,
+    first_name=None,
+    last_name=None,
+    phone=None,
+    source=None,
+    whatsapp_marketing_accepted=False,
+    subscribe_email=True,
+):
     """
-    Añade o actualiza un perfil en Klaviyo, lo suscribe a email marketing
-    y lo añade a la lista 'Newsletter Mikel's Earth'.
+    Añade o actualiza un perfil en Klaviyo y, si procede, lo suscribe al
+    newsletter por email. El teléfono se borra al retirar consentimiento de
+    WhatsApp para que no permanezca disponible para acciones comerciales.
     
     Args:
         email: Email del contacto
@@ -129,7 +154,7 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, phone=None, s
         print("ERROR: KLAVIYO_API_KEY no configurada")
         return {"success": False, "error": "API key not configured"}
     
-    # ID de la lista "Newsletter Mikel's Earth" en Klaviyo
+    # ID de la lista newsletter de Mikel's Fruit en Klaviyo.
     NEWSLETTER_LIST_ID = os.getenv('KLAVIYO_NEWSLETTER_LIST_ID', 'WWPsb2')
     
     # Primero crear/actualizar el perfil
@@ -138,12 +163,14 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, phone=None, s
         profile_attrs["first_name"] = first_name
     if last_name:
         profile_attrs["last_name"] = last_name
-    if phone:
+    if phone and whatsapp_marketing_accepted:
         profile_attrs["phone_number"] = phone
     
     profile_properties = {}
     if source:
         profile_properties["Source"] = source
+    profile_properties["NewsletterWhatsAppMarketingConsent"] = bool(whatsapp_marketing_accepted)
+    profile_properties["NewsletterWhatsAppMarketingRecordedAt"] = datetime.utcnow().isoformat()
     
     profile_payload = {
         "data": {
@@ -156,22 +183,39 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, phone=None, s
     }
     
     try:
-        # Crear o actualizar perfil
-        response = requests.post(
-            f"{KLAVIYO_API_URL}/profiles",
-            headers=_get_headers(),
-            json=profile_payload
-        )
-        
-        if response.status_code in [200, 201, 202, 204, 409]:
+        profile_id = _find_klaviyo_profile_id(email)
+        if profile_id:
+            # Klaviyo documents that an explicit null clears a profile field.
+            # This is required when a subscriber withdraws WhatsApp permission.
+            profile_payload['data']['id'] = profile_id
+            if not whatsapp_marketing_accepted:
+                profile_payload['data']['attributes']['phone_number'] = None
+            response = requests.patch(
+                f"{KLAVIYO_API_URL}/profiles/{profile_id}",
+                headers=_get_headers(),
+                json=profile_payload,
+                timeout=15,
+            )
+        else:
+            response = requests.post(
+                f"{KLAVIYO_API_URL}/profiles",
+                headers=_get_headers(),
+                json=profile_payload,
+                timeout=15,
+            )
+
+        if response.status_code in [200, 201, 202, 204]:
             print(f"✅ [KLAVIYO] Perfil creado/actualizado para {email}")
-            
-            # Suscribir al email marketing Y añadir a la lista Newsletter
+
+            if not subscribe_email:
+                return {"success": True, "id": profile_id}
+
+            # Suscribir al email marketing y añadir a la lista Newsletter.
             subscribe_payload = {
                 "data": {
                     "type": "profile-subscription-bulk-create-job",
                     "attributes": {
-                        "custom_source": "Newsletter Website",
+                        "custom_source": "Mikel's Fruit Website",
                         "profiles": {
                             "data": [
                                 {
@@ -204,7 +248,8 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, phone=None, s
             sub_response = requests.post(
                 f"{KLAVIYO_API_URL}/profile-subscription-bulk-create-jobs",
                 headers=_get_headers(),
-                json=subscribe_payload
+                json=subscribe_payload,
+                timeout=15,
             )
             
             if sub_response.status_code in [200, 201, 202, 204]:
@@ -212,7 +257,7 @@ def add_contact_to_klaviyo(email, first_name=None, last_name=None, phone=None, s
             else:
                 print(f"⚠️ [KLAVIYO] Error suscribiendo {email}: {sub_response.status_code} - {sub_response.text}")
             
-            return {"success": True, "id": None}
+            return {"success": True, "id": profile_id}
         else:
             print(f"❌ [KLAVIYO] Error creando perfil: {response.status_code} - {response.text}")
             return {"success": False, "error": response.text}

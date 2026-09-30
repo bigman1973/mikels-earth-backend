@@ -215,7 +215,7 @@ def create_horeca_order():
             except Exception as e:
                 print(f"Error suscribiendo al newsletter: {str(e)}")
         
-        # Preparar email para Mikel's Earth
+        # Preparar email para Mikel's Fruit
         email_content = f"""
         <h2>🏨 Nuevo Pedido HORECA</h2>
         
@@ -255,7 +255,7 @@ def create_horeca_order():
         <p><small>Fecha de solicitud: {datetime.now().strftime('%d/%m/%Y %H:%M')}</small></p>
         """
         
-        # Enviar email a Mikel's Earth
+        # Enviar email a Mikel's Fruit
         api_key = os.getenv('BREVO_API_KEY')
         if not api_key:
             print("ERROR: BREVO_API_KEY no configurada")
@@ -263,7 +263,7 @@ def create_horeca_order():
         
         api_key = api_key.strip().replace('\\n', '').replace('\\r', '').replace(' ', '')
         
-        # Email a Mikel's Earth
+        # Email a Mikel's Fruit
         response_admin = requests.post(
             "https://api.brevo.com/v3/smtp/email",
             headers={
@@ -272,7 +272,7 @@ def create_horeca_order():
                 "content-type": "application/json"
             },
             json={
-                "sender": {"name": "Mikel's Earth HORECA", "email": "noreply@mikels.es"},
+                "sender": {"name": "Mikel's Fruit HORECA", "email": "noreply@mikels.es"},
                 "to": [{"email": "info@mikels.es"}],
                 "subject": f"🏨 Nuevo Pedido HORECA - {data['establishmentName']}",
                 "htmlContent": email_content
@@ -304,10 +304,10 @@ def create_horeca_order():
             <li>📱 WhatsApp: <a href="https://wa.me/436789070062172">+43 6789 0700 62172</a></li>
         </ul>
         
-        <p>Gracias por confiar en Mikel's Earth.</p>
+        <p>Gracias por confiar en Mikel's Fruit.</p>
         
         <p>Un saludo,<br>
-        <strong>Equipo Mikel's Earth</strong><br>
+        <strong>Equipo Mikel's Fruit</strong><br>
         <em>Del campo a tu mesa desde 1819</em></p>
         """
         
@@ -319,9 +319,9 @@ def create_horeca_order():
                 "content-type": "application/json"
             },
             json={
-                "sender": {"name": "Mikel's Earth", "email": "noreply@mikels.es"},
+                "sender": {"name": "Mikel's Fruit", "email": "noreply@mikels.es"},
                 "to": [{"email": data['email']}],
-                "subject": "Solicitud de Pedido HORECA Recibida - Mikel's Earth",
+                "subject": "Solicitud de Pedido HORECA Recibida - Mikel's Fruit",
                 "htmlContent": client_email_content
             },
             timeout=10

@@ -34,6 +34,7 @@ from src.models.product_notification import ProductNotification  # Modelo notifi
 from src.models.admin_user import AdminUser  # Modelo usuarios admin
 from src.models.web_product import WebProduct  # Catálogo de productos web
 from src.models.newsletter_consent import NewsletterConsent  # Registro auditable de consentimientos
+from src.models.newsletter_subscriber import NewsletterSubscriber  # Una bienvenida por identidad de email
 
 # Load environment variables
 load_dotenv()
