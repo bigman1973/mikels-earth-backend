@@ -491,8 +491,8 @@ def stripe_webhook():
                 dispatch_order_notification(order_data)
                 dispatch_order_confirmation(order_data)
                 
-                # El Flow de Klaviyo aplica la espera de 10 días antes de la
-                # solicitud de reseña. El evento se registra al confirmar el pago.
+                # El evento se registra al confirmar el pago. La espera antes de
+                # solicitar la reseña se configura únicamente en el Flow de Klaviyo.
                 try:
                     from src.services.email_dispatcher import dispatch_post_purchase_event, dispatch_review_request
                     dispatch_post_purchase_event(order_data)

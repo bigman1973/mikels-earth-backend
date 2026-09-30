@@ -588,7 +588,7 @@ def klaviyo_notify_product_request(product_name, customer_name, customer_email, 
 def klaviyo_send_review_request(customer_email, customer_name, order_number, items):
     """
     Envía evento 'Mikels Review Request' a Klaviyo.
-    Se dispara 7 días después de la compra para pedir reseña.
+    El evento se registra al pagar; la espera se controla únicamente en el Flow.
     """
     items_html = _build_items_html(items)
     

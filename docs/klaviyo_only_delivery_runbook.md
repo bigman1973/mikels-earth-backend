@@ -63,7 +63,7 @@ Las plantillas existentes se pueden reutilizar. Renombrar todas las referencias 
 | `Mikels Product Notification Confirmation` | Confirmación de aviso de producto | Transaccional | Sin filtro de consentimiento marketing; activar envío. |
 | `Product Back In Stock` | Producto disponible | Transaccional solicitado | Sin filtro de consentimiento marketing; activar envío. |
 | `Mikels HORECA Confirmation` | Confirmación HORECA | Transaccional | Crear Flow y activar envío. |
-| `Mikels Review Request` | Solicitud de opinión | Marketing / relación postventa | Añadir espera de **10 días** dentro del Flow; activar envío. |
+| `Mikels Review Request` | Solicitud de opinión | Marketing / relación postventa | Mantener la espera dentro del Flow; su duración queda pendiente de decisión basada en analítica. |
 | `Started Checkout` | Carrito abandonado | Marketing consentido | Mantener un solo Flow y este nombre exacto de evento. |
 | `Mikels Post Purchase` | Postcompra | Marketing consentido | Mantener las condiciones comerciales aprobadas. |
 | eventos `... Internal` y `Mikels Blog Administration` | Avisos operativos a `info@mikels.es` | Operativo | Crear/validar Flows internos si se desean notificaciones por correo. |

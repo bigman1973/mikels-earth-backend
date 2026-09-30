@@ -41,7 +41,7 @@ class BrevoRetirementTests(unittest.TestCase):
         self.assertTrue(send_event.call_args.kwargs["critical"])
 
     @patch("src.services.klaviyo_service.send_klaviyo_event")
-    def test_review_request_is_critical_and_keeps_ten_day_delay_in_flow(self, send_event):
+    def test_review_request_is_critical_and_defers_delay_to_flow(self, send_event):
         send_event.return_value = True
         result = klaviyo_service.klaviyo_send_review_request(
             "cliente@example.com", "Cliente Prueba", "MKL-100", [{"name": "Producto", "quantity": 1}]
