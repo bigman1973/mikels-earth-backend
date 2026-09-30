@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from flask import Flask
 
@@ -27,9 +27,13 @@ class NewsletterConsentTests(unittest.TestCase):
             db.create_all()
 
         newsletter_routes._newsletter_rate_store.clear()
+        self.turnstile_patcher = patch('src.routes.newsletter_routes.verify_turnstile')
+        self.turnstile = self.turnstile_patcher.start()
+        self.turnstile.return_value = Mock(accepted=True, reason='accepted')
         self.client = self.app.test_client()
 
     def tearDown(self):
+        self.turnstile_patcher.stop()
         with self.app.app_context():
             db.session.remove()
             db.drop_all()

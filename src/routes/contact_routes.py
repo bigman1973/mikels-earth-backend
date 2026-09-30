@@ -3,6 +3,7 @@ Rutas para formulario de contacto con protección anti-spam
 """
 from flask import Blueprint, request, jsonify
 from src.services.email_dispatcher import dispatch_contact_notification, dispatch_contact_confirmation
+from src.services.turnstile_service import verify_turnstile
 import re
 import time
 from collections import defaultdict
@@ -115,7 +116,7 @@ def send_message():
                 'message': 'Mensaje enviado correctamente'
             }), 200
         
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         
         # Anti-spam checks
         is_spam, spam_reason = _is_spam_contact(data)
@@ -125,6 +126,18 @@ def send_message():
                 'success': True,
                 'message': 'Mensaje enviado correctamente'
             }), 200
+
+        turnstile_result = verify_turnstile(
+            data.get('turnstile_token'),
+            client_ip,
+            expected_action='contact_form',
+        )
+        if not turnstile_result.accepted:
+            if turnstile_result.reason == 'not_configured':
+                print('🚨 Contact form blocked: Turnstile is not configured')
+                return jsonify({'error': 'El formulario no está disponible temporalmente. Inténtalo más tarde.'}), 503
+            print(f"🚫 Contact form blocked by Turnstile ({turnstile_result.reason}): IP={client_ip}")
+            return jsonify({'error': 'No se ha podido validar el envío. Recarga la página e inténtalo de nuevo.'}), 400
         
         name = data.get('name')
         email = data.get('email')

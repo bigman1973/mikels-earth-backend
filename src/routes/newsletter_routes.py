@@ -6,6 +6,7 @@ from src.models.newsletter_consent import NewsletterConsent
 from src.models.newsletter_subscriber import NewsletterSubscriber
 from src.models.user import db
 from src.services.email_identity import normalize_email_address, newsletter_email_key
+from src.services.turnstile_service import verify_turnstile
 from datetime import datetime
 import re
 import time
@@ -82,6 +83,23 @@ def subscribe_newsletter():
                 'error': 'Debes aceptar la política de privacidad para suscribirte.'
             }), 400
 
+        # Anti-spam: gibberish name check
+        if _is_gibberish(first_name) or _is_gibberish(last_name):
+            print(f"🚫 Newsletter spam blocked (gibberish): {first_name} {last_name} / {email} / IP={client_ip}")
+            return jsonify({'success': True, 'message': 'Subscription successful'}), 200
+
+        turnstile_result = verify_turnstile(
+            data.get('turnstile_token'),
+            client_ip,
+            expected_action='newsletter_signup',
+        )
+        if not turnstile_result.accepted:
+            if turnstile_result.reason == 'not_configured':
+                print('🚨 Newsletter signup blocked: Turnstile is not configured')
+                return jsonify({'error': 'El formulario no está disponible temporalmente. Inténtalo más tarde.'}), 503
+            print(f"🚫 Newsletter signup blocked by Turnstile ({turnstile_result.reason}): IP={client_ip}")
+            return jsonify({'error': 'No se ha podido validar el envío. Recarga la página e inténtalo de nuevo.'}), 400
+
         if source == 'popup':
             consent_recorded_at = datetime.utcnow()
             consent = NewsletterConsent(
@@ -97,11 +115,6 @@ def subscribe_newsletter():
             )
             db.session.add(consent)
             db.session.commit()
-
-        # Anti-spam: gibberish name check
-        if _is_gibberish(first_name) or _is_gibberish(last_name):
-            print(f"🚫 Newsletter spam blocked (gibberish): {first_name} {last_name} / {email} / IP={client_ip}")
-            return jsonify({'success': True, 'message': 'Subscription successful'}), 200
 
         email_key = newsletter_email_key(email)
         subscriber = NewsletterSubscriber.query.filter_by(email_key=email_key).first()
