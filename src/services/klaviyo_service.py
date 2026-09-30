@@ -27,87 +27,27 @@ def _get_headers():
     }
 
 
-def send_klaviyo_event(metric_name, profile_email, properties, value=None, unique_id=None, profile_attrs=None):
-    """
-    Envía un evento a Klaviyo via la Events API.
-    
-    Args:
-        metric_name: Nombre del evento/métrica (ej: "Placed Order", "Newsletter Subscription")
-        profile_email: Email del perfil asociado al evento
-        properties: Dict con las propiedades del evento (datos del pedido, etc.)
-        value: Valor monetario del evento (opcional)
-        unique_id: ID único para deduplicación (opcional)
-        profile_attrs: Dict con atributos adicionales del perfil (first_name, etc.)
-    
-    Returns:
-        True si el evento se envió correctamente, False en caso contrario
-    """
-    api_key = _get_api_key()
-    if not api_key:
-        print("ERROR: KLAVIYO_API_KEY no configurada")
-        return False
-    
-    # Construir el perfil
-    profile_data = {
-        "type": "profile",
-        "attributes": {
-            "email": profile_email
-        }
-    }
-    
-    # Añadir atributos adicionales del perfil si los hay
-    if profile_attrs:
-        for key, val in profile_attrs.items():
-            profile_data["attributes"][key] = val
-    
-    # Construir el payload del evento
-    event_attributes = {
-        "properties": properties,
-        "metric": {
-            "data": {
-                "type": "metric",
-                "attributes": {
-                    "name": metric_name
-                }
-            }
-        },
-        "profile": {
-            "data": profile_data
-        },
-        "time": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
-    }
-    
-    if value is not None:
-        event_attributes["value"] = value
-    
-    if unique_id:
-        event_attributes["unique_id"] = unique_id
-    
-    payload = {
-        "data": {
-            "type": "event",
-            "attributes": event_attributes
-        }
-    }
-    
-    try:
-        response = requests.post(
-            f"{KLAVIYO_API_URL}/events",
-            headers=_get_headers(),
-            json=payload
-        )
-        
-        if response.status_code == 202:
-            print(f"✅ [KLAVIYO] Evento '{metric_name}' enviado para {profile_email}")
-            return True
-        else:
-            print(f"❌ [KLAVIYO] Error enviando evento '{metric_name}': {response.status_code} - {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ [KLAVIYO] Excepción enviando evento '{metric_name}': {str(e)}")
-        return False
+def send_klaviyo_event(metric_name, profile_email, properties, value=None, unique_id=None, profile_attrs=None, critical=False):
+    """Persist and send a Klaviyo event through the audited delivery ledger.
 
+    True means Klaviyo accepted the event with HTTP 202. Any other outcome is
+    recorded with its provider response and queued for bounded retry.
+    """
+    from src.services.klaviyo_delivery_service import queue_and_send_event
+
+    try:
+        return queue_and_send_event(
+            event_name=metric_name,
+            profile_email=profile_email,
+            properties=properties,
+            value=value,
+            unique_id=unique_id,
+            profile_attrs=profile_attrs,
+            critical=critical,
+        )
+    except Exception as exc:
+        print(f"[KLAVIYO] event dispatch exception metric={metric_name}: {exc}")
+        return False
 
 def _find_klaviyo_profile_id(email):
     """Return the Klaviyo profile ID for an email without exposing profile data."""
@@ -413,7 +353,8 @@ def klaviyo_send_order_confirmation(order_data):
         properties=properties,
         value=order_data.get('total', 0),
         unique_id=f"order-{order_data.get('order_number', '')}",
-        profile_attrs=profile_attrs
+        profile_attrs=profile_attrs,
+        critical=True,
     )
 
 
@@ -499,7 +440,8 @@ def klaviyo_send_newsletter_welcome(email, coupon_code="BIENVENIDA10"):
     return send_klaviyo_event(
         metric_name="Mikels Newsletter Welcome",
         profile_email=email,
-        properties=properties
+        properties=properties,
+        critical=True,
     )
 
 
@@ -547,7 +489,8 @@ def klaviyo_send_contact_confirmation(name, email, message=''):
         metric_name="Mikels Contact Confirmation",
         profile_email=email,
         properties=properties,
-        profile_attrs={"first_name": name.split(' ')[0] if name else ''}
+        profile_attrs={"first_name": name.split(' ')[0] if name else ''},
+        critical=True,
     )
 
 
@@ -610,7 +553,8 @@ def klaviyo_send_workshop_visit_confirmation(nombre, email, interes='visita'):
         metric_name="Mikels Workshop Visit Confirmation",
         profile_email=email,
         properties=properties,
-        profile_attrs={"first_name": nombre.split(' ')[0] if nombre else ''}
+        profile_attrs={"first_name": nombre.split(' ')[0] if nombre else ''},
+        critical=True,
     )
 
 
@@ -638,67 +582,6 @@ def klaviyo_notify_product_request(product_name, customer_name, customer_email, 
         metric_name="Mikels Product Notification Request Internal",
         profile_email=owner_email,
         properties=properties
-    )
-
-
-def klaviyo_track_started_checkout(checkout_data):
-    """
-    Envía evento 'Mikels Started Checkout' a Klaviyo.
-    Se dispara cuando el cliente inicia el checkout (crea sesión de Stripe).
-    Si el cliente NO completa la compra, Klaviyo disparará el Flow de carrito abandonado.
-    """
-    customer_email = checkout_data.get('customer_email')
-    if not customer_email:
-        print("⚠️ [KLAVIYO] No se puede trackear Started Checkout: email no disponible")
-        return False
-    
-    items = checkout_data.get('items', [])
-    subtotal = checkout_data.get('subtotal', 0)
-    total = checkout_data.get('total', 0)
-    discount_code = checkout_data.get('discount_code', '')
-    discount_amount = checkout_data.get('discount_amount', 0)
-    
-    items_html = _build_items_html(items)
-    
-    # URL para volver al checkout
-    checkout_url = checkout_data.get('checkout_url', 'https://mikels.es/checkout')
-    
-    properties = {
-        "Items": items,
-        "ItemsHtml": items_html,
-        "Subtotal": f"{subtotal:.2f}\u20ac",
-        "Total": f"{total:.2f}\u20ac",
-        "CustomerName": checkout_data.get('customer_name', ''),
-        "CustomerEmail": customer_email,
-        "CustomerPhone": checkout_data.get('customer_phone', ''),
-        "DiscountCode": discount_code,
-        "DiscountAmount": f"{discount_amount:.2f}\u20ac" if discount_amount else '',
-        "CheckoutURL": checkout_url,
-        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
-        "Source": "mikels-earth-backend",
-        # Aliases en snake_case para compatibilidad
-        "items_html": items_html,
-        "total": f"{total:.2f}€",
-        "subtotal": f"{subtotal:.2f}€",
-        "customer_name": checkout_data.get('customer_name', ''),
-        "checkout_url": checkout_url
-    }
-    
-    profile_attrs = {}
-    customer_name = checkout_data.get('customer_name', '')
-    if customer_name:
-        parts = customer_name.split(' ', 1)
-        profile_attrs["first_name"] = parts[0]
-        if len(parts) > 1:
-            profile_attrs["last_name"] = parts[1]
-    
-    return send_klaviyo_event(
-        metric_name="Mikels Started Checkout",
-        profile_email=customer_email,
-        properties=properties,
-        value=total,
-        unique_id=f"checkout-{checkout_data.get('order_number', '')}",
-        profile_attrs=profile_attrs
     )
 
 
@@ -735,7 +618,8 @@ def klaviyo_send_review_request(customer_email, customer_name, order_number, ite
         profile_email=customer_email,
         properties=properties,
         unique_id=f"review-request-{order_number}",
-        profile_attrs=profile_attrs
+        profile_attrs=profile_attrs,
+        critical=True,
     )
 
 
@@ -756,7 +640,8 @@ def klaviyo_send_product_notification_confirmation(product_name, customer_name, 
         metric_name="Mikels Product Notification Confirmation",
         profile_email=customer_email,
         properties=properties,
-        profile_attrs={"first_name": customer_name.split(' ')[0] if customer_name else ''}
+        profile_attrs={"first_name": customer_name.split(' ')[0] if customer_name else ''},
+        critical=True,
     )
 
 
@@ -971,5 +856,51 @@ def klaviyo_track_product_back_in_stock(email, name, product_name, product_id):
         profile_email=email,
         properties=properties,
         unique_id=f"back-in-stock-{product_id}-{email}-{datetime.now().strftime('%Y%m%d')}",
-        profile_attrs=profile_attrs
+        profile_attrs=profile_attrs,
+        critical=True,
+    )
+
+
+def klaviyo_notify_horeca_request(data):
+    """Notify the internal commercial team of a HORECA request via Klaviyo."""
+    owner_email = os.getenv('OWNER_EMAIL', 'info@mikels.es')
+    event_time = datetime.utcnow().isoformat()
+    return send_klaviyo_event(
+        metric_name="Mikels HORECA Request Internal",
+        profile_email=owner_email,
+        properties={
+            "EstablishmentName": data.get("establishmentName", ""),
+            "EstablishmentType": data.get("establishmentType", ""),
+            "ContactName": data.get("contactName", ""),
+            "ContactEmail": data.get("email", ""),
+            "ContactPhone": data.get("phone", ""),
+            "Address": data.get("address", ""),
+            "City": data.get("city", ""),
+            "PostalCode": data.get("postalCode", ""),
+            "Province": data.get("province", ""),
+            "Quantity5L": data.get("quantity5L", 0),
+            "QuantityTemprano": data.get("quantityTemprano", 0),
+            "Comments": data.get("comments", ""),
+            "Source": "mikels-backend",
+        },
+        unique_id=f"horeca-internal-{data.get('email', '')}-{event_time}",
+    )
+
+
+def klaviyo_send_horeca_confirmation(data):
+    """Send the transactional HORECA request acknowledgement via Klaviyo."""
+    name = data.get("contactName", "")
+    return send_klaviyo_event(
+        metric_name="Mikels HORECA Confirmation",
+        profile_email=data.get("email", ""),
+        properties={
+            "EstablishmentName": data.get("establishmentName", ""),
+            "ContactName": name,
+            "Quantity5L": data.get("quantity5L", 0),
+            "QuantityTemprano": data.get("quantityTemprano", 0),
+            "Source": "mikels-backend",
+        },
+        unique_id=f"horeca-confirmation-{data.get('email', '')}-{datetime.utcnow().isoformat()}",
+        profile_attrs={"first_name": name.split(" ")[0] if name else ""},
+        critical=True,
     )

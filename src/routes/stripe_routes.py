@@ -491,12 +491,19 @@ def stripe_webhook():
                 dispatch_order_notification(order_data)
                 dispatch_order_confirmation(order_data)
                 
-                # Generar cupón de 10% para próxima compra y enviar evento a Klaviyo
+                # El Flow de Klaviyo aplica la espera de 10 días antes de la
+                # solicitud de reseña. El evento se registra al confirmar el pago.
                 try:
-                    from src.services.email_dispatcher import dispatch_post_purchase_event
+                    from src.services.email_dispatcher import dispatch_post_purchase_event, dispatch_review_request
                     dispatch_post_purchase_event(order_data)
-                except Exception as coupon_post_err:
-                    print(f"⚠️ Error dispatching post-purchase event: {coupon_post_err}")
+                    dispatch_review_request(
+                        customer_email=order_data.get('customer_email'),
+                        customer_name=order_data.get('customer_name', ''),
+                        order_number=order_data.get('order_number', ''),
+                        items=order_data.get('items', []),
+                    )
+                except Exception as post_purchase_err:
+                    print(f"⚠️ Error dispatching post-purchase Klaviyo events: {post_purchase_err}")
                 
                 # Marcar cupón como usado si se usó uno (todos los tipos)
                 discount_code = session['metadata'].get('discount_code', '').strip()

@@ -3,8 +3,6 @@ Rutas del Blog para Mikel's Earth
 Incluye endpoints públicos, webhook de Brevo y panel admin
 """
 import os
-import hashlib
-import hmac
 import jwt
 import uuid
 try:
@@ -32,7 +30,6 @@ blog_bp = Blueprint('blog', __name__)
 ADMIN_USERNAME = os.getenv('BLOG_ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.getenv('BLOG_ADMIN_PASSWORD', 'mikels2026')
 JWT_SECRET = os.getenv('JWT_SECRET', 'mikels-blog-secret-key-2026')
-BREVO_WEBHOOK_KEY = os.getenv('BREVO_WEBHOOK_KEY', '')
 
 # Configuración S3 para subida de imágenes
 S3_BUCKET = os.getenv('S3_BUCKET', 'mikels-earth-blog')
@@ -89,20 +86,6 @@ def token_required(f):
         return f(current_user, *args, **kwargs)
     
     return decorated
-
-
-def verify_brevo_webhook(request_data, signature):
-    """Verifica la firma del webhook de Brevo"""
-    if not BREVO_WEBHOOK_KEY:
-        return True
-    
-    expected_signature = hmac.new(
-        BREVO_WEBHOOK_KEY.encode(),
-        request_data,
-        hashlib.sha256
-    ).hexdigest()
-    
-    return hmac.compare_digest(signature, expected_signature)
 
 
 # ============================================
@@ -172,92 +155,6 @@ def get_categories():
         })
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-# ============================================
-# WEBHOOK DE BREVO
-# ============================================
-
-@blog_bp.route('/webhook/brevo', methods=['POST'])
-def brevo_webhook():
-    """Recibe emails de Brevo y los procesa"""
-    try:
-        signature = request.headers.get('X-Mailin-Signature', '')
-        if BREVO_WEBHOOK_KEY and not verify_brevo_webhook(request.data, signature):
-            return jsonify({'error': 'Firma inválida'}), 401
-        
-        data = request.json
-        
-        subject = data.get('Subject', data.get('subject', ''))
-        html_content = data.get('Html', data.get('html', ''))
-        text_content = data.get('Text', data.get('text', ''))
-        attachments = data.get('Attachments', data.get('attachments', []))
-        
-        content = html_content if html_content else f'<p>{text_content}</p>'
-        
-        if subject.upper().startswith('[DELETE]'):
-            slug_to_delete = subject[8:].strip().lower()
-            slug_to_delete = BlogPost.generate_slug(slug_to_delete)
-            
-            post = BlogPost.query.filter_by(slug=slug_to_delete).first()
-            if post:
-                db.session.delete(post)
-                db.session.commit()
-                return jsonify({'success': True, 'action': 'deleted', 'slug': slug_to_delete})
-            else:
-                return jsonify({'success': False, 'error': f'Post no encontrado'}), 404
-        
-        is_draft = subject.upper().startswith('[DRAFT]')
-        if is_draft:
-            subject = subject[7:].strip()
-        
-        category = None
-        if '[' in subject and ']' in subject:
-            start = subject.index('[')
-            end = subject.index(']')
-            category = subject[start+1:end].strip()
-            subject = subject[end+1:].strip()
-        
-        slug = BlogPost.generate_slug(subject)
-        
-        existing_post = BlogPost.query.filter_by(slug=slug).first()
-        if existing_post:
-            existing_post.title = subject
-            existing_post.content = content
-            existing_post.excerpt = BlogPost.generate_excerpt(content)
-            existing_post.category = category
-            existing_post.updated_at = datetime.utcnow()
-            
-            if not is_draft and existing_post.status == 'draft':
-                existing_post.status = 'published'
-                existing_post.published_at = datetime.utcnow()
-            
-            db.session.commit()
-            return jsonify({'success': True, 'action': 'updated', 'post': existing_post.to_summary()})
-        
-        new_post = BlogPost(
-            title=subject,
-            slug=slug,
-            content=content,
-            excerpt=BlogPost.generate_excerpt(content),
-            category=category,
-            status='draft' if is_draft else 'published',
-            published_at=None if is_draft else datetime.utcnow()
-        )
-        
-        if attachments and len(attachments) > 0:
-            first_attachment = attachments[0]
-            if isinstance(first_attachment, dict):
-                new_post.featured_image = first_attachment.get('url', first_attachment.get('Url', ''))
-        
-        db.session.add(new_post)
-        db.session.commit()
-        
-        return jsonify({'success': True, 'action': 'created', 'post': new_post.to_summary()})
-    
-    except Exception as e:
-        print(f"Error en webhook de Brevo: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 

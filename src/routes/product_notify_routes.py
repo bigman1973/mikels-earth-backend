@@ -117,15 +117,19 @@ def notify_product_available():
         for sub in subscribers:
             try:
                 # Enviar evento a Klaviyo (dispara email "ya está disponible")
-                dispatch_product_back_in_stock(
+                accepted = dispatch_product_back_in_stock(
                     email=sub.email,
                     name=sub.name,
                     product_name=product_name,
                     product_id=product_id
                 )
-                # Marcar como notificado
-                sub.notified = True
-                notified_count += 1
+                # Only an HTTP 202 accepted by Klaviyo may consume this pending
+                # notification. Failed events stay pending for the ledger retry.
+                if accepted:
+                    sub.notified = True
+                    notified_count += 1
+                else:
+                    errors.append({'email': sub.email, 'error': 'Klaviyo no aceptó el evento; queda pendiente de reintento.'})
             except Exception as e:
                 errors.append({'email': sub.email, 'error': str(e)})
 

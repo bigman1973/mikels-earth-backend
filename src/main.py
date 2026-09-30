@@ -35,6 +35,7 @@ from src.models.admin_user import AdminUser  # Modelo usuarios admin
 from src.models.web_product import WebProduct  # Catálogo de productos web
 from src.models.newsletter_consent import NewsletterConsent  # Registro auditable de consentimientos
 from src.models.newsletter_subscriber import NewsletterSubscriber  # Una bienvenida por identidad de email
+from src.models.klaviyo_delivery import KlaviyoDelivery  # Ledger de entrega Klaviyo
 
 # Load environment variables
 load_dotenv()
@@ -773,27 +774,6 @@ def debug_clients():
     except Exception as e:
         return jsonify({'error': str(e), 'type': type(e).__name__}), 500
 
-
-@app.route('/api/test-email', methods=['GET'])
-def test_email():
-    """Endpoint temporal de diagnóstico para probar envío de email"""
-    from src.services.email_service import send_email
-    import os
-    api_key = os.getenv('BREVO_API_KEY', 'NOT SET')
-    key_preview = api_key[:10] + '...' if len(api_key) > 10 else api_key
-    to_email = request.args.get('to', 'info@mikels.es')
-    result = send_email(
-        to_email,
-        'TEST - Prueba de email desde backend',
-        '<h1>Email de prueba</h1><p>Si recibes esto, Brevo funciona correctamente.</p><p>Fecha: ' + datetime.now().isoformat() + '</p><p>Enviado a: ' + to_email + '</p>'
-    )
-    return jsonify({
-        'email_sent': result,
-        'to': to_email,
-        'brevo_key_configured': api_key != 'NOT SET' and len(api_key) > 5,
-        'brevo_key_preview': key_preview,
-        'timestamp': datetime.now().isoformat()
-    }), 200
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
