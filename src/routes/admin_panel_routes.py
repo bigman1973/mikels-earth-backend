@@ -1062,6 +1062,26 @@ def get_orders():
     })
 
 
+@admin_panel_bp.route('/orders/<int:order_id>/stock-movements', methods=['GET'])
+@admin_required
+def get_order_stock_movements(order_id):
+    """Devuelve la trazabilidad inmutable de stock originada por un pedido."""
+    from src.models.order import Order
+    from src.models.stock import StockMovement
+
+    order = Order.query.get(order_id)
+    if not order:
+        return jsonify({'error': 'Pedido no encontrado'}), 404
+
+    movements = StockMovement.query.filter_by(order_id=order_id).order_by(
+        StockMovement.created_at.asc(), StockMovement.id.asc()
+    ).all()
+    return jsonify({
+        'order_number': order.order_number,
+        'movements': [movement.to_dict() for movement in movements],
+    })
+
+
 @admin_panel_bp.route('/orders/<int:order_id>/create-in-holded', methods=['POST'])
 @admin_required
 @role_required('admin', 'sales')
@@ -1408,7 +1428,12 @@ def sync_stripe_refunds():
                             order.payment_status = 'refunded'
                             order.order_status = 'cancelled'
                             refund_amount = charge.amount_refunded / 100
-                            order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Reembolso total {refund_amount}\u20ac detectado - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
+                            from src.services.stock_service import restock_fully_refunded_order
+                            restock_fully_refunded_order(
+                                order.id,
+                                f'stripe_refund_sync:{order.stripe_payment_intent_id}',
+                            )
+                            order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Reembolso total {refund_amount}€ detectado - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
                             updated.append({'order': order.order_number, 'new_status': 'refunded', 'amount': refund_amount})
                         elif charge.amount_refunded > 0:
                             order.payment_status = 'partially_refunded'

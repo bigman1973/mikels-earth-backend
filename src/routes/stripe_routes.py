@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 import stripe
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 import secrets
 from sqlalchemy import or_
@@ -67,6 +67,7 @@ def create_checkout_session():
             if db_product:
                 # Captura autoritativa de identidad en el momento de compra.
                 # El navegador no decide el SKU que acabará en el pedido.
+                item['id'] = db_product.id
                 item['sku'] = db_product.sku or ''
                 item['slug'] = db_product.slug
                 # Comparar precio (tolerancia de 0.01€ por redondeos)
@@ -78,7 +79,11 @@ def create_checkout_session():
                     })
                     # Corregir el precio al actual de la DB
                     item['price'] = float(as_eur(db_product.price, field='precio maestro'))
-            # Si no se encuentra el producto, se permite (puede ser envío, etc.)
+            else:
+                return jsonify({
+                    'error': 'PRODUCT_NOT_FOUND',
+                    'message': 'Uno de los productos ya no está disponible. Actualiza tu carrito.',
+                }), 409
         
         if price_errors:
             # Devolver error con los precios actualizados para que el frontend actualice el carrito
@@ -91,7 +96,7 @@ def create_checkout_session():
         
         # Generate order number
         order_number = generate_order_number()
-        
+
         # Calculate subtotal and total
         subtotal = sum(
             (as_eur(item['price'], field='precio') * Decimal(str(item['quantity'])))
@@ -101,6 +106,29 @@ def create_checkout_session():
         total = as_eur(subtotal - discount_amount, field='total')
         if total < 0:
             return jsonify({'error': 'El descuento no puede superar el subtotal'}), 400
+
+        # Reserve availability before opening Stripe Checkout. This prevents two
+        # concurrent browser sessions from buying the same last web unit. The
+        # reservation does not decrement stock; that happens only after Stripe
+        # confirms payment in the webhook.
+        from src.models.user import db
+        from src.services.stock_service import (
+            StockUnavailableError,
+            bind_reservation_to_session,
+            release_checkout_reservation,
+            reserve_checkout_stock,
+        )
+        stock_checkout_token = secrets.token_urlsafe(24)
+        reservation_expires_at = datetime.utcnow() + timedelta(minutes=30)
+        try:
+            reserve_checkout_stock(items, stock_checkout_token, reservation_expires_at)
+            db.session.commit()
+        except StockUnavailableError as stock_error:
+            return jsonify({
+                'error': 'OUT_OF_STOCK',
+                'message': 'Alguno de los productos ya no tiene unidades suficientes. Actualiza tu carrito.',
+                'unavailable': stock_error.unavailable,
+            }), 409
         
         # Create line items
         line_items = []
@@ -131,7 +159,9 @@ def create_checkout_session():
             'payment_method_types': ['card'],
             'line_items': line_items,
             'mode': 'payment',
-            'success_url': f'{frontend_url}/pedido-confirmado?session_id={{CHECKOUT_SESSION_ID}}',
+            # The customer confirmation component lives at /order-success.
+            # Keep Stripe's redirect on that real, public route.
+            'success_url': f'{frontend_url}/order-success?session_id={{CHECKOUT_SESSION_ID}}',
             'cancel_url': f'{frontend_url}/checkout?cancelled=true',
             'customer_email': customer_info['email'],
             'shipping_address_collection': {
@@ -159,7 +189,8 @@ def create_checkout_session():
                 'fiscal_address': (data.get('invoice_data') or {}).get('fiscalAddress', ''),
                 'fiscal_city': (data.get('invoice_data') or {}).get('fiscalCity', ''),
                 'fiscal_postal_code': (data.get('invoice_data') or {}).get('fiscalPostalCode', ''),
-                'locale': data.get('locale', 'es')
+                'locale': data.get('locale', 'es'),
+                'stock_checkout_token': stock_checkout_token,
             }
         }
         
@@ -174,7 +205,12 @@ def create_checkout_session():
             )
             session_params['discounts'] = [{'coupon': coupon.id}]
         
-        session = stripe.checkout.Session.create(**session_params)
+        try:
+            session = stripe.checkout.Session.create(**session_params)
+            bind_reservation_to_session(stock_checkout_token, session.id)
+        except Exception:
+            release_checkout_reservation(stock_checkout_token)
+            raise
         
         # Track "Started Checkout" en Klaviyo para el Flow de carrito abandonado
         try:
@@ -319,6 +355,19 @@ def stripe_webhook():
             # One-time payment completed
             order_number = session['metadata'].get('order_number')
             print(f"Order {order_number} paid successfully")
+
+            # Stripe retries webhook delivery. A paid Checkout session must
+            # create one order, decrement stock once and send one set of
+            # confirmations — never one of each per retry.
+            from src.models.order import Order
+            from src.models.user import db
+            existing_order = Order.query.filter(
+                (Order.stripe_checkout_session_id == session['id'])
+                | (Order.stripe_payment_intent_id == session.get('payment_intent', ''))
+            ).first()
+            if existing_order:
+                print(f"ℹ️ Checkout session {session['id']} was already processed as {existing_order.order_number}")
+                return jsonify({'status': 'success', 'duplicate': True})
             
             # Obtener detalles del pedido
             try:
@@ -460,8 +509,6 @@ def stripe_webhook():
                 
                 # Guardar pedido en la base de datos
                 try:
-                    from src.models.order import Order
-                    from src.models.user import db
                     new_order = Order(
                         order_number=order_number,
                         customer_email=order_data['customer_email'],
@@ -489,11 +536,26 @@ def stripe_webhook():
                     )
                     new_order.paid_at = datetime.utcnow()
                     db.session.add(new_order)
+                    db.session.flush()
+
+                    # Payment is the only point at which published web stock is
+                    # decremented. The token is created before Checkout and is
+                    # idempotently consumed here, so duplicate webhooks cannot
+                    # subtract a second time.
+                    from src.services.stock_service import consume_paid_reservation
+                    consume_paid_reservation(
+                        session['metadata'].get('stock_checkout_token', ''),
+                        new_order.id,
+                        session['id'],
+                    )
                     db.session.commit()
                     print(f"✅ Order {order_number} saved to database (invoice: {needs_invoice})")
                 except Exception as db_error:
                     print(f"⚠️ Error saving order to database: {str(db_error)}")
-                    # No fallar el webhook por error de BBDD
+                    db.session.rollback()
+                    # Return an error so Stripe retries rather than sending a
+                    # confirmation for an order whose stock was not recorded.
+                    return jsonify({'error': 'No se pudo registrar el pedido'}), 500
                 
                 # Enviar notificaciones por WhatsApp
                 notify_new_order(order_data)
@@ -612,6 +674,8 @@ def stripe_webhook():
                 if is_full_refund:
                     order.payment_status = 'refunded'
                     order.order_status = 'cancelled'
+                    from src.services.stock_service import restock_fully_refunded_order
+                    restock_fully_refunded_order(order.id, payment_intent_id)
                 else:
                     order.payment_status = 'partially_refunded'
                 
@@ -659,13 +723,36 @@ def get_session_status(session_id):
     """Get checkout session status"""
     try:
         session = stripe.checkout.Session.retrieve(session_id)
-        
-        return jsonify({
+        customer_details = getattr(session, 'customer_details', None)
+        customer_email = getattr(customer_details, 'email', None) if customer_details else None
+        response = {
             'status': session.status,
             'payment_status': session.payment_status,
-            'customer_email': session.customer_details.email if session.customer_details else None,
-            'metadata': session.metadata
-        })
+            'customer_email': customer_email,
+        }
+
+        # Only disclose personal order details after Stripe has confirmed the
+        # payment and an order record exists for this exact Checkout session.
+        # The browser retries while the webhook persists it.
+        if session.payment_status == 'paid':
+            from src.models.order import Order
+            order = Order.query.filter_by(stripe_checkout_session_id=session_id).first()
+            response['order_pending'] = order is None
+            if order:
+                response['customer_email'] = order.customer_email
+                response['order'] = {
+                    'order_number': order.order_number,
+                    'items': order.items or [],
+                    'subtotal': order.subtotal,
+                    'shipping_cost': order.shipping_cost or 0.0,
+                    'total': order.total,
+                    'currency': order.currency or 'EUR',
+                    'shipping_address': order.shipping_address,
+                    'shipping_city': order.shipping_city,
+                    'shipping_postal_code': order.shipping_postal_code,
+                    'shipping_country': order.shipping_country,
+                }
+        return jsonify(response)
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

@@ -48,6 +48,7 @@ from src.models.admin_user import AdminUser  # Modelo usuarios admin
 from src.models.web_product import WebProduct  # Catálogo de productos web
 from src.models.newsletter_consent import NewsletterConsent  # Registro auditable de consentimientos
 from src.models.newsletter_subscriber import NewsletterSubscriber  # Una bienvenida por identidad de email
+from src.models.stock import StockReservation, StockMovement  # Reservas y trazabilidad de stock web
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 app.config['SECRET_KEY'] = os.environ['SECRET_KEY'].strip()

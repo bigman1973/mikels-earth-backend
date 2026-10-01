@@ -45,6 +45,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                     sku=f'MIKTEST{index:02d}',
                     price=float(price),
                     category='Prueba',
+                    stock=999,
                     active=True,
                     visible_in_store=True,
                 ))

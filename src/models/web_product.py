@@ -123,7 +123,10 @@ class WebProduct(db.Model):
         }
         
         # Campos opcionales - solo incluir si tienen valor
-        if self.sold_out:
+        # El stock web es la disponibilidad comercial publicada. Un producto
+        # con cero unidades nunca puede anunciarse como comprable aunque una
+        # marca manual anterior haya quedado desactualizada.
+        if self.sold_out or int(self.stock or 0) <= 0:
             result['soldOut'] = True
         if self.sold_out_message:
             result['soldOutMessage'] = self.sold_out_message
