@@ -2,10 +2,12 @@ from flask import Blueprint, request, jsonify
 import stripe
 import os
 from datetime import datetime
+from decimal import Decimal
 import secrets
 from sqlalchemy import or_
 from src.services.whatsapp_service import notify_new_order, notify_new_subscription
 from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification, dispatch_started_checkout_event
+from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents, MoneyValueError
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
@@ -44,7 +46,7 @@ def create_checkout_session():
         items = data['items']
         customer_info = data['customer_info']
         discount_code = data.get('discount_code')
-        discount_amount = data.get('discount_amount', 0)
+        discount_amount = as_eur(data.get('discount_amount', 0), field='descuento')
         
         # ===== VALIDACIÓN DE PRECIOS CONTRA LA BASE DE DATOS =====
         # Evita que se pueda comprar a un precio desactualizado
@@ -68,14 +70,14 @@ def create_checkout_session():
                 item['sku'] = db_product.sku or ''
                 item['slug'] = db_product.slug
                 # Comparar precio (tolerancia de 0.01€ por redondeos)
-                if abs(float(item_price) - float(db_product.price)) > 0.01:
+                if abs(as_eur(item_price, field='precio') - as_eur(db_product.price, field='precio maestro')) > Decimal('0.01'):
                     price_errors.append({
                         'product': item.get('name', db_product.name),
                         'sent_price': item_price,
                         'current_price': db_product.price
                     })
                     # Corregir el precio al actual de la DB
-                    item['price'] = float(db_product.price)
+                    item['price'] = float(as_eur(db_product.price, field='precio maestro'))
             # Si no se encuentra el producto, se permite (puede ser envío, etc.)
         
         if price_errors:
@@ -91,8 +93,14 @@ def create_checkout_session():
         order_number = generate_order_number()
         
         # Calculate subtotal and total
-        subtotal = sum(item['price'] * item['quantity'] for item in items)
-        total = subtotal - discount_amount
+        subtotal = sum(
+            (as_eur(item['price'], field='precio') * Decimal(str(item['quantity'])))
+            for item in items
+        )
+        subtotal = as_eur(subtotal, field='subtotal')
+        total = as_eur(subtotal - discount_amount, field='total')
+        if total < 0:
+            return jsonify({'error': 'El descuento no puede superar el subtotal'}), 400
         
         # Create line items
         line_items = []
@@ -109,7 +117,9 @@ def create_checkout_session():
                         **(({'description': item['weight']} if item.get('weight') else {})),
                         'metadata': product_metadata,
                     },
-                    'unit_amount': int(item['price'] * 100),  # Convert to cents
+                    # Stripe accepts only integer cents.  Never derive these
+                    # from binary floating point (17.15 * 100 truncates to 1714).
+                    'unit_amount': eur_to_cents(item['price'], field='precio'),
                 },
                 'quantity': item['quantity'],
             })
@@ -121,7 +131,7 @@ def create_checkout_session():
             'payment_method_types': ['card'],
             'line_items': line_items,
             'mode': 'payment',
-            'success_url': f'{frontend_url}/order-success?session_id={{CHECKOUT_SESSION_ID}}',
+            'success_url': f'{frontend_url}/pedido-confirmado?session_id={{CHECKOUT_SESSION_ID}}',
             'cancel_url': f'{frontend_url}/checkout?cancelled=true',
             'customer_email': customer_info['email'],
             'shipping_address_collection': {
@@ -140,9 +150,9 @@ def create_checkout_session():
                 'shipping_country': customer_info.get('country', 'España'),
                 'customer_notes': customer_info.get('notes', ''),
                 'discount_code': discount_code or '',
-                'discount_amount': str(discount_amount),
-                'subtotal': str(subtotal),
-                'total': str(total),
+                'discount_amount': eur_metadata(discount_amount, field='descuento'),
+                'subtotal': eur_metadata(subtotal, field='subtotal'),
+                'total': eur_metadata(total, field='total'),
                 'needs_invoice': str(data.get('needs_invoice', False)),
                 'fiscal_name': (data.get('invoice_data') or {}).get('fiscalName', ''),
                 'fiscal_nif': (data.get('invoice_data') or {}).get('nif', ''),
@@ -157,7 +167,7 @@ def create_checkout_session():
         if discount_code and discount_amount > 0:
             # Create a coupon in Stripe for this specific checkout
             coupon = stripe.Coupon.create(
-                amount_off=int(discount_amount * 100),  # Convert to cents
+                amount_off=eur_to_cents(discount_amount, field='descuento'),
                 currency='eur',
                 duration='once',
                 name=discount_code
@@ -173,10 +183,10 @@ def create_checkout_session():
                 'customer_name': customer_info.get('name', ''),
                 'customer_phone': customer_info.get('phone', ''),
                 'items': items,
-                'subtotal': subtotal,
-                'total': total,
+                'subtotal': float(subtotal),
+                'total': float(total),
                 'discount_code': discount_code or '',
-                'discount_amount': discount_amount,
+                'discount_amount': float(discount_amount),
                 'order_number': order_number,
                 'checkout_url': f"{frontend_url}/checkout"
             }
@@ -240,7 +250,7 @@ def create_subscription_checkout():
         
         # Create Stripe Price for subscription
         price = stripe.Price.create(
-            unit_amount=int(item['price'] * 100),
+            unit_amount=eur_to_cents(item['price'], field='precio de suscripción'),
             currency='eur',
             recurring=interval_config,
             product_data={
@@ -258,7 +268,7 @@ def create_subscription_checkout():
                 'quantity': item['quantity'],
             }],
             mode='subscription',
-            success_url=f'{frontend_url}/subscription-success?session_id={{CHECKOUT_SESSION_ID}}',
+            success_url=f'{frontend_url}/suscripcion-exitosa?session_id={{CHECKOUT_SESSION_ID}}',
             cancel_url=f'{frontend_url}/checkout?cancelled=true',
             customer_email=customer_info['email'],
             metadata={
@@ -321,7 +331,8 @@ def stripe_webhook():
                 for item in line_items.data:
                     # amount_total es el total de la línea (precio × cantidad)
                     # Guardamos el precio unitario para que el desglose sea correcto
-                    unit_price = (item.amount_total / 100) / item.quantity if item.quantity else item.amount_total / 100
+                    line_total = cents_to_eur(item.amount_total, field='importe de línea Stripe')
+                    unit_price = line_total / Decimal(str(item.quantity or 1))
                     stripe_product = getattr(getattr(item, 'price', None), 'product', None)
                     product_metadata = getattr(stripe_product, 'metadata', None) or {}
                     sku = product_metadata.get('sku', '')
@@ -347,12 +358,12 @@ def stripe_webhook():
                     order_item = {
                         'name': item.description,
                         'quantity': item.quantity,
-                        'price': round(unit_price, 2),
+                        'price': float(as_eur(unit_price, field='precio unitario')),
                         # Stripe has already allocated any checkout coupon over
                         # its line items. Preserve the exact gross line amount
                         # so fiscal pack expansion can distribute that charged
                         # amount without losing cents when quantity is > 1.
-                        'gross_total': round(item.amount_total / 100, 2),
+                        'gross_total': float(line_total),
                         'sku': sku
                     }
                     if product_slug:
@@ -396,16 +407,16 @@ def stripe_webhook():
                 discount_amount_str = session['metadata'].get('discount_amount', '0')
                 
                 try:
-                    subtotal = float(subtotal_str) if subtotal_str else 0
-                except (ValueError, TypeError):
-                    subtotal = 0
+                    subtotal = as_eur(subtotal_str, field='subtotal') if subtotal_str else Decimal('0.00')
+                except MoneyValueError:
+                    subtotal = Decimal('0.00')
                 
                 try:
-                    discount_amount = float(discount_amount_str) if discount_amount_str else 0
-                except (ValueError, TypeError):
-                    discount_amount = 0
+                    discount_amount = as_eur(discount_amount_str, field='descuento') if discount_amount_str else Decimal('0.00')
+                except MoneyValueError:
+                    discount_amount = Decimal('0.00')
                 
-                total = session['amount_total'] / 100 if session.get('amount_total') else 0
+                total = cents_to_eur(session['amount_total'], field='total Stripe') if session.get('amount_total') else Decimal('0.00')
                 
                 order_data = {
                     'order_number': order_number,
@@ -461,9 +472,9 @@ def stripe_webhook():
                         shipping_postal_code=shipping_postal,
                         shipping_country=shipping_country,
                         items=items,
-                        subtotal=order_data['subtotal'],
-                        shipping_cost=0 if total >= 40 else 4.95,
-                        total=total,
+                        subtotal=float(order_data['subtotal']),
+                        shipping_cost=0.0 if total >= Decimal('40.00') else 4.95,
+                        total=float(total),
                         stripe_payment_intent_id=order_data.get('stripe_payment_intent_id', ''),
                         stripe_checkout_session_id=session['id'],
                         payment_status='paid',
