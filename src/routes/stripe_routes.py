@@ -562,7 +562,14 @@ def stripe_webhook():
                 
                 # Enviar notificaciones por Email (Klaviyo + Brevo fallback)
                 dispatch_order_notification(order_data)
-                dispatch_order_confirmation(order_data)
+                confirmation_accepted = dispatch_order_confirmation(order_data)
+                if confirmation_accepted:
+                    try:
+                        new_order.email_sent = True
+                        db.session.commit()
+                    except Exception as email_status_error:
+                        db.session.rollback()
+                        print(f"⚠️ Error registrando la aceptación de confirmación: {email_status_error}")
                 
                 # Generar cupón de 10% para próxima compra y enviar evento a Klaviyo
                 try:
@@ -751,6 +758,7 @@ def get_session_status(session_id):
                     'shipping_city': order.shipping_city,
                     'shipping_postal_code': order.shipping_postal_code,
                     'shipping_country': order.shipping_country,
+                    'confirmation_sent': bool(order.email_sent),
                 }
         return jsonify(response)
         

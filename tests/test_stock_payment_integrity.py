@@ -125,6 +125,7 @@ class StockPaymentIntegrityTests(unittest.TestCase):
                 currency='EUR',
                 stripe_checkout_session_id='cs_test_confirmation',
                 payment_status='paid',
+                email_sent=True,
             ))
             db.session.commit()
 
@@ -135,6 +136,7 @@ class StockPaymentIntegrityTests(unittest.TestCase):
         self.assertEqual(data['order']['items'][0]['price'], 17.15)
         self.assertEqual(data['order']['shipping_address'], 'Calle 1')
         self.assertEqual(data['customer_email'], 'cliente@example.com')
+        self.assertTrue(data['order']['confirmation_sent'])
 
     @patch('src.services.email_dispatcher.dispatch_post_purchase_event')
     @patch('src.routes.stripe_routes.dispatch_order_confirmation')
