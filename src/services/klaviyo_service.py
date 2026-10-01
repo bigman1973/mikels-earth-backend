@@ -5,6 +5,7 @@ Envía eventos transaccionales y gestiona contactos via Klaviyo API
 import os
 import requests
 from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 KLAVIYO_API_URL = "https://a.klaviyo.com/api"
 KLAVIYO_REVISION = "2024-10-15"
@@ -271,6 +272,17 @@ def add_contact_to_klaviyo(
 # Funciones de alto nivel para cada tipo de email/evento
 # ============================================================
 
+
+def _format_eur(value):
+    """Return a customer-facing euro amount in Spanish notation."""
+    try:
+        amount = Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        amount = Decimal('0.00')
+
+    formatted = f'{amount:,.2f}'
+    return formatted.replace(',', 'X').replace('.', ',').replace('X', '.') + ' €'
+
 def _build_items_html(items):
     """
     Construye HTML con la tabla de productos del pedido para usar en plantillas de email.
@@ -283,7 +295,7 @@ def _build_items_html(items):
         name = item.get('name', 'Producto')
         qty = item.get('quantity', 1)
         price = item.get('price', 0)
-        html_parts.append(f'{name} x{qty} — {price:.2f}€')
+        html_parts.append(f'{name} x{qty} — {_format_eur(price)}')
     
     return '<br/>'.join(html_parts)
 
@@ -311,11 +323,11 @@ def klaviyo_notify_new_order(order_data):
         "CustomerPhone": order_data.get('customer_phone', 'N/A'),
         "Items": items,
         "ItemsHtml": items_html,
-        "Subtotal": f"{subtotal:.2f}\u20ac",
-        "Total": f"{total:.2f}\u20ac",
+        "Subtotal": _format_eur(subtotal),
+        "Total": _format_eur(total),
         "ShippingAddress": order_data.get('shipping_address', 'N/A'),
         "DiscountCode": discount_code,
-        "DiscountAmount": f"{discount_amount:.2f}\u20ac" if discount_amount else '',
+        "DiscountAmount": _format_eur(discount_amount) if discount_amount else '',
         "DiscountText": f"Descuento ({discount_code})" if discount_code else '',
         "NeedsInvoice": order_data.get('needs_invoice', False),
         "InvoiceData": order_data.get('invoice_data', {}),
@@ -327,12 +339,12 @@ def klaviyo_notify_new_order(order_data):
         "customer_phone": order_data.get('customer_phone', 'N/A'),
         "phone": order_data.get('customer_phone', 'N/A'),
         "items_html": items_html,
-        "total": f"{total:.2f}€",
-        "subtotal": f"{subtotal:.2f}€",
+        "total": _format_eur(total),
+        "subtotal": _format_eur(subtotal),
         "shipping_address": order_data.get('shipping_address', 'N/A'),
         "date": datetime.now().strftime('%d/%m/%Y %H:%M'),
         "discount_code": discount_code,
-        "discount_amount": f"{discount_amount:.2f}€" if discount_amount else '',
+        "discount_amount": _format_eur(discount_amount) if discount_amount else '',
         "stripe_url": order_data.get('stripe_url', '')
     }
     
@@ -364,19 +376,19 @@ def klaviyo_send_order_confirmation(order_data):
     
     order_number = order_data.get('order_number', 'N/A')
     items_html = _build_items_html(items)
-    shipping_text = "GRATIS" if total >= 40 else "4.95\u20ac"
+    shipping_text = "GRATIS" if total >= 40 else _format_eur('4.95')
     properties = {
         "OrderNumber": order_number,
         "order_id": order_number,  # Alias para compatibilidad con subjects
         "CustomerName": order_data.get('customer_name', 'N/A'),
         "Items": items,
         "ItemsHtml": items_html,
-        "Subtotal": f"{subtotal:.2f}\u20ac",
-        "Total": f"{total:.2f}\u20ac",
+        "Subtotal": _format_eur(subtotal),
+        "Total": _format_eur(total),
         "ShippingAddress": order_data.get('shipping_address', 'N/A'),
         "ShippingText": shipping_text,
         "DiscountCode": discount_code,
-        "DiscountAmount": f"{discount_amount:.2f}\u20ac" if discount_amount else '',
+        "DiscountAmount": _format_eur(discount_amount) if discount_amount else '',
         "DiscountText": f"Descuento ({discount_code})" if discount_code else '',
         "NeedsInvoice": order_data.get('needs_invoice', False),
         "BillingName": invoice_data.get('name', '') if invoice_data else '',
@@ -390,13 +402,13 @@ def klaviyo_send_order_confirmation(order_data):
         "customer_phone": order_data.get('customer_phone', 'N/A'),
         "phone": order_data.get('customer_phone', 'N/A'),
         "items_html": items_html,
-        "total": f"{total:.2f}€",
-        "subtotal": f"{subtotal:.2f}€",
+        "total": _format_eur(total),
+        "subtotal": _format_eur(subtotal),
         "shipping": shipping_text,
         "shipping_address": order_data.get('shipping_address', 'N/A'),
         "date": datetime.now().strftime('%d/%m/%Y %H:%M'),
         "discount_code": discount_code,
-        "discount_amount": f"{discount_amount:.2f}€" if discount_amount else ''
+        "discount_amount": _format_eur(discount_amount) if discount_amount else ''
     }
     
     profile_attrs = {}
@@ -442,7 +454,7 @@ def klaviyo_notify_new_subscription(subscription_data):
         "CustomerEmail": subscription_data.get('customer_email', 'N/A'),
         "ProductName": subscription_data.get('product_name', 'N/A'),
         "Frequency": frequency_text,
-        "Price": f"{price:.2f}\u20ac" if price else 'N/A',
+        "Price": _format_eur(price) if price else 'N/A',
         "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
         "Source": "mikels-earth-backend",
         # Aliases en snake_case para compatibilidad con plantillas existentes
@@ -450,7 +462,7 @@ def klaviyo_notify_new_subscription(subscription_data):
         "customer_email": subscription_data.get('customer_email', 'N/A'),
         "product_name": subscription_data.get('product_name', 'N/A'),
         "frequency": frequency_text,
-        "amount": f"{price:.2f}\u20ac" if price else 'N/A'
+        "amount": _format_eur(price) if price else 'N/A'
     }
     
     return send_klaviyo_event(
@@ -836,6 +848,7 @@ def klaviyo_track_started_checkout(
             'ProductName': item.get('name', 'Producto'),
             'ProductImage': item.get('image', ''),
             'Price': item.get('price', 0),
+            'PriceFormatted': _format_eur(item.get('price', 0)),
             'Quantity': item.get('quantity', 1),
             'ProductURL': f"https://www.mikels.es/producto/{item.get('slug', '')}",
         })
@@ -846,6 +859,7 @@ def klaviyo_track_started_checkout(
         'ItemsHtml': rendered_items_html,
         'Items': items_for_event,
         'Total': f'{float(total):.2f}',
+        'TotalFormatted': _format_eur(total),
         'TotalNumeric': float(total),
         'CustomerName': customer_name or '',
         'CartToken': cart_token,
@@ -857,6 +871,7 @@ def klaviyo_track_started_checkout(
         'items_html': rendered_items_html,
         'items': items_for_event,
         'total': f'{float(total):.2f}',
+        'total_formatted': _format_eur(total),
         'customer_name': customer_name or '',
     }
 
