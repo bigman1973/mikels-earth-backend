@@ -641,67 +641,6 @@ def klaviyo_notify_product_request(product_name, customer_name, customer_email, 
     )
 
 
-def klaviyo_track_started_checkout(checkout_data):
-    """
-    Envía evento 'Mikels Started Checkout' a Klaviyo.
-    Se dispara cuando el cliente inicia el checkout (crea sesión de Stripe).
-    Si el cliente NO completa la compra, Klaviyo disparará el Flow de carrito abandonado.
-    """
-    customer_email = checkout_data.get('customer_email')
-    if not customer_email:
-        print("⚠️ [KLAVIYO] No se puede trackear Started Checkout: email no disponible")
-        return False
-    
-    items = checkout_data.get('items', [])
-    subtotal = checkout_data.get('subtotal', 0)
-    total = checkout_data.get('total', 0)
-    discount_code = checkout_data.get('discount_code', '')
-    discount_amount = checkout_data.get('discount_amount', 0)
-    
-    items_html = _build_items_html(items)
-    
-    # URL para volver al checkout
-    checkout_url = checkout_data.get('checkout_url', 'https://mikels.es/checkout')
-    
-    properties = {
-        "Items": items,
-        "ItemsHtml": items_html,
-        "Subtotal": f"{subtotal:.2f}\u20ac",
-        "Total": f"{total:.2f}\u20ac",
-        "CustomerName": checkout_data.get('customer_name', ''),
-        "CustomerEmail": customer_email,
-        "CustomerPhone": checkout_data.get('customer_phone', ''),
-        "DiscountCode": discount_code,
-        "DiscountAmount": f"{discount_amount:.2f}\u20ac" if discount_amount else '',
-        "CheckoutURL": checkout_url,
-        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
-        "Source": "mikels-earth-backend",
-        # Aliases en snake_case para compatibilidad
-        "items_html": items_html,
-        "total": f"{total:.2f}€",
-        "subtotal": f"{subtotal:.2f}€",
-        "customer_name": checkout_data.get('customer_name', ''),
-        "checkout_url": checkout_url
-    }
-    
-    profile_attrs = {}
-    customer_name = checkout_data.get('customer_name', '')
-    if customer_name:
-        parts = customer_name.split(' ', 1)
-        profile_attrs["first_name"] = parts[0]
-        if len(parts) > 1:
-            profile_attrs["last_name"] = parts[1]
-    
-    return send_klaviyo_event(
-        metric_name="Mikels Started Checkout",
-        profile_email=customer_email,
-        properties=properties,
-        value=total,
-        unique_id=f"checkout-{checkout_data.get('order_number', '')}",
-        profile_attrs=profile_attrs
-    )
-
-
 def klaviyo_send_review_request(customer_email, customer_name, order_number, items):
     """
     Envía evento 'Mikels Review Request' a Klaviyo.
@@ -849,63 +788,93 @@ def klaviyo_send_post_purchase_event(order_data):
     )
 
 
-def klaviyo_track_started_checkout(email, customer_name, items, total, checkout_url, items_html, cart_token):
+def klaviyo_track_started_checkout(
+    checkout_data=None,
+    *,
+    email=None,
+    customer_name='',
+    items=None,
+    total=0,
+    checkout_url=None,
+    items_html=None,
+    cart_token=None,
+):
+    """Send the one canonical ``Mikels Started Checkout`` event to Klaviyo.
+
+    Both public paths use this function: the Stripe checkout-session route and
+    the persistent abandoned-cart route.  ``checkout_data`` remains accepted
+    for the original Stripe-style dictionary call contract; keyword arguments
+    are the explicit contract used by the dispatcher.  They produce the same
+    metric name and properties, so both paths trigger the same Klaviyo Flow.
     """
-    Envía evento 'Started Checkout' a Klaviyo para el flow de carrito abandonado.
-    
-    Propiedades del evento:
-    - CheckoutURL: URL persistente para recuperar el carrito
-    - ItemsHtml: HTML con los productos (nombre, imagen, precio) para el email
-    - Items: Array con los productos
-    - Total: Importe total del carrito
-    - CustomerName: Nombre del cliente
-    - CartToken: Token único del carrito
-    """
-    # Preparar items para el evento
+    if checkout_data is not None:
+        if not isinstance(checkout_data, dict):
+            raise ValueError('checkout_data must be a dictionary')
+        email = checkout_data.get('customer_email') or checkout_data.get('email') or email
+        customer_name = checkout_data.get('customer_name', customer_name)
+        items = checkout_data.get('items', items)
+        total = checkout_data.get('total', total)
+        checkout_url = checkout_data.get('checkout_url', checkout_url)
+        items_html = checkout_data.get('items_html', items_html)
+        cart_token = (
+            checkout_data.get('cart_token')
+            or checkout_data.get('order_number')
+            or cart_token
+        )
+
+    if not email:
+        print("[KLAVIYO] Started Checkout omitted: email unavailable")
+        return False
+
+    items = items or []
+    checkout_url = checkout_url or 'https://www.mikels.es/tienda'
+    cart_token = cart_token or f'email-{email.lower()}'
+
     items_for_event = []
     for item in items:
         items_for_event.append({
-            "ProductName": item.get('name', 'Producto'),
-            "ProductImage": item.get('image', ''),
-            "Price": item.get('price', 0),
-            "Quantity": item.get('quantity', 1),
-            "ProductURL": f"https://www.mikels.es/producto/{item.get('slug', '')}"
+            'ProductName': item.get('name', 'Producto'),
+            'ProductImage': item.get('image', ''),
+            'Price': item.get('price', 0),
+            'Quantity': item.get('quantity', 1),
+            'ProductURL': f"https://www.mikels.es/producto/{item.get('slug', '')}",
         })
-    
+
+    rendered_items_html = items_html if items_html is not None else _build_items_html(items)
     properties = {
-        "CheckoutURL": checkout_url,
-        "ItemsHtml": items_html,
-        "Items": items_for_event,
-        "Total": f"{total:.2f}",
-        "TotalNumeric": total,
-        "CustomerName": customer_name or '',
-        "CartToken": cart_token,
-        "ItemCount": sum(item.get('quantity', 1) for item in items),
-        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
-        "Source": "mikels-earth-frontend",
-        # Aliases en snake_case para compatibilidad
-        "checkout_url": checkout_url,
-        "items_html": items_html,
-        "items": items_for_event,
-        "total": f"{total:.2f}",
-        "customer_name": customer_name or ''
+        'CheckoutURL': checkout_url,
+        'ItemsHtml': rendered_items_html,
+        'Items': items_for_event,
+        'Total': f'{float(total):.2f}',
+        'TotalNumeric': float(total),
+        'CustomerName': customer_name or '',
+        'CartToken': cart_token,
+        'ItemCount': sum(item.get('quantity', 1) for item in items),
+        'Date': datetime.now().strftime('%d/%m/%Y %H:%M'),
+        'Source': 'mikels-earth-backend',
+        # Lowercase aliases preserve existing template compatibility.
+        'checkout_url': checkout_url,
+        'items_html': rendered_items_html,
+        'items': items_for_event,
+        'total': f'{float(total):.2f}',
+        'customer_name': customer_name or '',
     }
-    
+
     profile_attrs = {}
     if customer_name:
         parts = customer_name.split(' ', 1)
-        profile_attrs["first_name"] = parts[0]
+        profile_attrs['first_name'] = parts[0]
         if len(parts) > 1:
-            profile_attrs["last_name"] = parts[1]
-    
+            profile_attrs['last_name'] = parts[1]
+
     return send_klaviyo_event(
-        metric_name="Started Checkout",
+        metric_name='Mikels Started Checkout',
         profile_email=email,
         properties=properties,
-        unique_id=f"started-checkout-{cart_token}",
-        profile_attrs=profile_attrs
+        value=float(total),
+        unique_id=f'started-checkout-{cart_token}',
+        profile_attrs=profile_attrs,
     )
-
 
 def klaviyo_track_product_notify_subscribe(email, name, product_name, product_id):
     """
