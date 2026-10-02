@@ -278,14 +278,21 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             quantity=1,
             description='Precio mostrado 17.15',
             price=SimpleNamespace(product=SimpleNamespace(metadata={
-                'sku': 'MIKTEST01', 'slug': 'aceite-temprano-sin-filtrar',
+                'sku': 'MIKTEST01',
+                'slug': 'aceite-temprano-sin-filtrar',
+                'checkout_line_key': '0',
             })),
         )])
 
         with self.app.app_context():
             db.session.add(CheckoutTaxSnapshot(
                 checkout_token='tax-test-exact-charge',
-                rules={'MIKTEST01': {'kind': 'single', 'rate': '0.04'}},
+                rules={
+                    'MIKTEST01': {'kind': 'single', 'rate': '0.04'},
+                    '__checkout_pricing__': {
+                        '0': {'receipt_line_total': '17.15'},
+                    },
+                },
                 expires_at=datetime.utcnow() + timedelta(minutes=30),
             ))
             db.session.commit()
@@ -302,7 +309,84 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             self.assertEqual(Decimal(str(order.to_dict()['total'])), Decimal('17.15'))
             self.assertEqual(Decimal(str(order.items[0]['price'])), Decimal('17.15'))
             self.assertEqual(Decimal(str(order.items[0]['gross_total'])), Decimal('17.15'))
+            self.assertEqual(Decimal(str(order.items[0]['receipt_line_total'])), Decimal('17.15'))
             self.assertEqual(Decimal(str(order.discount_amount)), Decimal('0.00'))
+
+    @patch('src.services.email_dispatcher.dispatch_post_purchase_event')
+    @patch('src.routes.stripe_routes.dispatch_order_confirmation')
+    @patch('src.routes.stripe_routes.dispatch_order_notification')
+    @patch('src.routes.stripe_routes.notify_new_order')
+    @patch('src.routes.stripe_routes.stripe.checkout.Session.list_line_items')
+    @patch('src.routes.stripe_routes.stripe.Webhook.construct_event')
+    def test_webhook_preserves_volume_tier_receipt_and_exact_charge(
+        self,
+        construct_event,
+        list_line_items,
+        _notify_order,
+        _dispatch_notification,
+        _dispatch_confirmation,
+        _dispatch_post_purchase,
+    ):
+        construct_event.return_value = {
+            'type': 'checkout.session.completed',
+            'data': {'object': {
+                'id': 'cs_test_volume_tier',
+                'mode': 'payment',
+                'amount_total': 17493,
+                'payment_intent': 'pi_test_volume_tier',
+                'customer_email': 'cliente@example.com',
+                'customer_details': {'email': 'cliente@example.com', 'phone': '+34600000000'},
+                'shipping_details': {'name': 'Cliente de prueba', 'address': {
+                    'line1': 'Calle de prueba 1', 'city': 'Lleida', 'postal_code': '25001', 'country': 'ES',
+                }},
+                'metadata': {
+                    'order_number': 'MKL-TEST-VOLUME-TIER',
+                    'customer_name': 'Cliente de prueba',
+                    'subtotal': '205.80',
+                    'discount_amount': '30.87',
+                    'discount_code': '',
+                    'needs_invoice': 'False',
+                    'stock_checkout_token': 'tax-test-volume-tier',
+                },
+            }},
+        }
+        list_line_items.return_value = SimpleNamespace(data=[SimpleNamespace(
+            amount_total=17493,
+            quantity=12,
+            description='Aceite temprano sin filtrar',
+            price=SimpleNamespace(product=SimpleNamespace(metadata={
+                'sku': 'MIKTEST01',
+                'slug': 'aceite-temprano-sin-filtrar',
+                'checkout_line_key': '0',
+            })),
+        )])
+
+        with self.app.app_context():
+            db.session.add(CheckoutTaxSnapshot(
+                checkout_token='tax-test-volume-tier',
+                rules={
+                    'MIKTEST01': {'kind': 'single', 'rate': '0.04'},
+                    '__checkout_pricing__': {
+                        '0': {'receipt_line_total': '205.80'},
+                    },
+                },
+                expires_at=datetime.utcnow() + timedelta(minutes=30),
+            ))
+            db.session.commit()
+
+        response = self.client.post('/api/stripe/webhook', data=b'{}', headers={'Stripe-Signature': 'test-signature'})
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            order = Order.query.filter_by(order_number='MKL-TEST-VOLUME-TIER').one()
+            self.assertEqual(Decimal(str(order.subtotal)), Decimal('205.80'))
+            self.assertEqual(Decimal(str(order.total)), Decimal('174.93'))
+            self.assertEqual(Decimal(str(order.items[0]['gross_total'])), Decimal('174.93'))
+            self.assertEqual(Decimal(str(order.items[0]['receipt_line_total'])), Decimal('205.80'))
+            self.assertEqual(Decimal(str(order.discount_amount)), Decimal('30.87'))
+            self.assertEqual(order.receipt_snapshot['lines'][0]['amount_display'], '205,80 €')
+            self.assertEqual(order.receipt_snapshot['totals']['discount_display'], '30,87 €')
+            self.assertEqual(order.receipt_snapshot['totals']['total_display'], '174,93 €')
 
 
 if __name__ == '__main__':
