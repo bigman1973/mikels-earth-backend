@@ -233,7 +233,15 @@ def create_klaviyo_campaign():
 def list_klaviyo_templates():
     """Listar todos los templates de Klaviyo"""
     headers = _get_klaviyo_headers()
-    resp = requests.get(f"{KLAVIYO_API_URL}/templates", headers=headers)
+    # The Templates endpoint returns oldest-first unless an explicit sort is
+    # supplied.  The newest revision is the one an administrator needs when
+    # recovering an interrupted Flow setup.
+    resp = requests.get(
+        f"{KLAVIYO_API_URL}/templates",
+        headers=headers,
+        params={'sort': '-updated', 'page[size]': 50},
+        timeout=20,
+    )
     
     if resp.status_code == 200:
         data = resp.json()
@@ -384,14 +392,20 @@ def setup_cancellation_flow():
     flow_name = "Anulación de pedido · Mikel's Fruit"
     headers = _get_klaviyo_headers()
 
+    # Klaviyo does not expose Flow ``name`` as a server-side filterable
+    # attribute.  Retrieve the first page and compare the stable exact name
+    # locally to keep setup idempotent.
     existing_flow = requests.get(
         f'{KLAVIYO_API_URL}/flows',
         headers=headers,
-        params={'filter': f'equals(name,"{flow_name}")', 'page[size]': 50},
+        params={'page[size]': 50},
         timeout=20,
     )
     if existing_flow.status_code == 200:
-        matches = existing_flow.json().get('data', [])
+        matches = [
+            flow for flow in existing_flow.json().get('data', [])
+            if flow.get('attributes', {}).get('name') == flow_name
+        ]
         if matches:
             flow = matches[0]
             return jsonify({
@@ -406,14 +420,20 @@ def setup_cancellation_flow():
         return jsonify({'error': existing_flow.text, 'status': existing_flow.status_code}), existing_flow.status_code
 
     metric_id = None
+    # Keep this local too: filtering by name varies by API revision and a
+    # rejected filter must never prevent a cancellation notice from being set
+    # up before the first real refund.
     metrics = requests.get(
         f'{KLAVIYO_API_URL}/metrics',
         headers=headers,
-        params={'filter': f'equals(name,"{metric_name}")', 'page[size]': 50},
+        params={'page[size]': 50},
         timeout=20,
     )
     if metrics.status_code == 200:
-        matches = metrics.json().get('data', [])
+        matches = [
+            metric for metric in metrics.json().get('data', [])
+            if metric.get('attributes', {}).get('name') == metric_name
+        ]
         if matches:
             metric_id = matches[0].get('id')
     else:
@@ -440,11 +460,14 @@ def setup_cancellation_flow():
             metrics = requests.get(
                 f'{KLAVIYO_API_URL}/metrics',
                 headers=headers,
-                params={'filter': f'equals(name,"{metric_name}")', 'page[size]': 50},
+                params={'page[size]': 50},
                 timeout=20,
             )
             if metrics.status_code == 200:
-                matches = metrics.json().get('data', [])
+                matches = [
+                    metric for metric in metrics.json().get('data', [])
+                    if metric.get('attributes', {}).get('name') == metric_name
+                ]
                 if matches:
                     metric_id = matches[0].get('id')
                     break
