@@ -6,6 +6,7 @@ El backend en Railway no tiene ese problema.
 from flask import Blueprint, request, jsonify
 import os
 import requests
+import time
 from src.routes.auth_routes import admin_required, role_required
 
 admin_klaviyo_bp = Blueprint('admin_klaviyo', __name__)
@@ -360,6 +361,155 @@ def list_klaviyo_flows():
         return jsonify({'flows': flows}), 200
     else:
         return jsonify({'error': resp.text}), resp.status_code
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/setup-cancellation-flow', methods=['POST'])
+@admin_required
+@role_required('admin')
+def setup_cancellation_flow():
+    """Create one live transactional Flow for full-refund cancellation events.
+
+    Klaviyo creates API metrics when it first accepts an event. If this metric
+    has not yet existed, this route seeds it against the owner profile before
+    creating the Flow, so the first real customer refund cannot be lost during
+    metric discovery. The bootstrap event is emitted before the Flow exists,
+    therefore it cannot send email.
+    """
+    body = request.get_json() or {}
+    template_id = str(body.get('template_id') or '').strip()
+    if not template_id:
+        return jsonify({'error': 'template_id field required'}), 400
+
+    metric_name = 'Mikels Order Cancelled'
+    flow_name = "Anulación de pedido · Mikel's Fruit"
+    headers = _get_klaviyo_headers()
+
+    existing_flow = requests.get(
+        f'{KLAVIYO_API_URL}/flows',
+        headers=headers,
+        params={'filter': f'equals(name,"{flow_name}")', 'page[size]': 100},
+        timeout=20,
+    )
+    if existing_flow.status_code == 200:
+        matches = existing_flow.json().get('data', [])
+        if matches:
+            flow = matches[0]
+            return jsonify({
+                'success': True,
+                'created': False,
+                'flow_id': flow.get('id'),
+                'flow_name': flow.get('attributes', {}).get('name', flow_name),
+                'status': flow.get('attributes', {}).get('status'),
+                'message': 'El Flow de anulación ya existe; no se creó un duplicado.',
+            }), 200
+    else:
+        return jsonify({'error': existing_flow.text, 'status': existing_flow.status_code}), existing_flow.status_code
+
+    metric_id = None
+    metrics = requests.get(
+        f'{KLAVIYO_API_URL}/metrics',
+        headers=headers,
+        params={'filter': f'equals(name,"{metric_name}")', 'page[size]': 100},
+        timeout=20,
+    )
+    if metrics.status_code == 200:
+        matches = metrics.json().get('data', [])
+        if matches:
+            metric_id = matches[0].get('id')
+    else:
+        return jsonify({'error': metrics.text, 'status': metrics.status_code}), metrics.status_code
+
+    metric_bootstrapped = False
+    if not metric_id:
+        # No customer address is used. This only registers the API metric in
+        # Klaviyo's metric catalog before a live transactional Flow exists.
+        from src.services.klaviyo_service import send_klaviyo_event
+        owner_email = os.getenv('OWNER_EMAIL', 'info@mikels.es').strip() or 'info@mikels.es'
+        accepted, error = send_klaviyo_event(
+            metric_name=metric_name,
+            profile_email=owner_email,
+            properties={'setup_only': True, 'Source': 'mikels-earth-backend'},
+            unique_id='mikels-order-cancelled-metric-bootstrap-v1',
+            return_result=True,
+        )
+        if not accepted:
+            return jsonify({'error': error or 'Klaviyo no aceptó el evento de registro de métrica'}), 502
+        metric_bootstrapped = True
+        for _ in range(10):
+            time.sleep(1)
+            metrics = requests.get(
+                f'{KLAVIYO_API_URL}/metrics',
+                headers=headers,
+                params={'filter': f'equals(name,"{metric_name}")', 'page[size]': 100},
+                timeout=20,
+            )
+            if metrics.status_code == 200:
+                matches = metrics.json().get('data', [])
+                if matches:
+                    metric_id = matches[0].get('id')
+                    break
+        if not metric_id:
+            return jsonify({'error': 'La métrica de anulación no apareció en Klaviyo tras el registro'}), 502
+
+    definition = {
+        'triggers': [{'type': 'metric', 'id': metric_id, 'trigger_filter': None}],
+        'profile_filter': None,
+        'actions': [{
+            'temporary_id': 'cancellation-email',
+            'type': 'send-email',
+            'data': {
+                'status': 'live',
+                'message': {
+                    'name': 'Aviso de anulación',
+                    'from_email': 'info@mikels.es',
+                    'from_label': "Mikel's Fruit",
+                    'reply_to_email': 'info@mikels.es',
+                    'subject_line': "{{ event.Receipt.heading|default:'Pedido anulado' }} · {{ event.Receipt.order_number }}",
+                    'preview_text': "{{ event.Receipt.cancellation.refunded_amount_display }} devueltos.",
+                    'template_id': template_id,
+                    'smart_sending_enabled': False,
+                    'transactional': True,
+                    'add_tracking_params': False,
+                    'additional_filters': None,
+                },
+            },
+        }],
+        'entry_action_id': 'cancellation-email',
+        # Each refund is unique per order; re-entry permits a returning
+        # customer to receive a later, different order's cancellation.
+        'reentry_criteria': {'duration': 0, 'unit': 'alltime'},
+    }
+    payload = {
+        'data': {
+            'type': 'flow',
+            'attributes': {'name': flow_name, 'definition': definition},
+        },
+    }
+    response = requests.post(
+        f'{KLAVIYO_API_URL}/flows', headers=headers, json=payload, timeout=30,
+    )
+    if response.status_code not in [200, 201, 202]:
+        return jsonify({'error': response.text, 'status': response.status_code}), response.status_code
+
+    flow = response.json().get('data', {})
+    flow_attrs = flow.get('attributes', {})
+    actions = (flow_attrs.get('definition') or {}).get('actions') or []
+    action = actions[0] if actions else {}
+    message = (action.get('data') or {}).get('message') or {}
+    return jsonify({
+        'success': True,
+        'created': True,
+        'metric_name': metric_name,
+        'metric_id': metric_id,
+        'metric_bootstrapped': metric_bootstrapped,
+        'flow_id': flow.get('id'),
+        'flow_name': flow_attrs.get('name', flow_name),
+        'flow_status': flow_attrs.get('status'),
+        'action_id': action.get('id'),
+        'message_id': message.get('id'),
+        'transactional': message.get('transactional'),
+        'template_id': template_id,
+    }), 201
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/flow-actions/<flow_id>', methods=['GET'])
