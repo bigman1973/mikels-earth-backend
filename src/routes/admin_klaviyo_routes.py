@@ -401,6 +401,29 @@ def get_flow_action(action_id):
     }), 200
 
 
+@admin_klaviyo_bp.route('/admin/klaviyo/flow-message/<message_id>/template', methods=['GET'])
+@admin_required
+@role_required('admin')
+def get_flow_message_template(message_id):
+    """Resolve the template currently attached to a Flow message."""
+    headers = _get_klaviyo_headers()
+    resp = requests.get(
+        f"{KLAVIYO_API_URL}/flow-messages/{message_id}/template",
+        headers=headers,
+    )
+    if resp.status_code != 200:
+        return jsonify({'error': resp.text, 'status': resp.status_code}), resp.status_code
+
+    data = resp.json().get('data', {})
+    attrs = data.get('attributes', {})
+    return jsonify({
+        'id': data.get('id'),
+        'name': attrs.get('name', ''),
+        'html': attrs.get('html', ''),
+        'text': attrs.get('text', ''),
+    }), 200
+
+
 @admin_klaviyo_bp.route('/admin/klaviyo/update-flow-action/<action_id>', methods=['PUT'])
 @admin_required
 @role_required('admin')
