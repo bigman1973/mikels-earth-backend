@@ -382,6 +382,25 @@ def get_flow_actions(flow_id):
         return jsonify({'error': resp.text}), resp.status_code
 
 
+@admin_klaviyo_bp.route('/admin/klaviyo/flow-action/<action_id>', methods=['GET'])
+@admin_required
+@role_required('admin')
+def get_flow_action(action_id):
+    """Read the complete settings of one Flow action before a safe update."""
+    headers = _get_klaviyo_headers()
+    resp = requests.get(f"{KLAVIYO_API_URL}/flow-actions/{action_id}", headers=headers)
+    if resp.status_code != 200:
+        return jsonify({'error': resp.text, 'status': resp.status_code}), resp.status_code
+
+    data = resp.json().get('data', {})
+    attrs = data.get('attributes', {})
+    return jsonify({
+        'id': data.get('id'),
+        'action_type': attrs.get('action_type'),
+        'settings': attrs.get('settings') or {},
+    }), 200
+
+
 @admin_klaviyo_bp.route('/admin/klaviyo/update-flow-action/<action_id>', methods=['PUT'])
 @admin_required
 @role_required('admin')
