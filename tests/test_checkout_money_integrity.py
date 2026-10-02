@@ -101,6 +101,24 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         }
 
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
+    def test_checkout_rejects_missing_delivery_email_or_phone(self, create_session):
+        for field in ('email', 'phone'):
+            with self.subTest(field=field):
+                customer = dict(self.customer)
+                customer[field] = '   '
+                response = self.client.post('/api/stripe/create-checkout-session', json={
+                    'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90')],
+                    'customer_info': customer,
+                })
+
+                self.assertEqual(response.status_code, 400)
+                payload = response.get_json()
+                self.assertEqual(payload['error'], 'MISSING_REQUIRED_CUSTOMER_INFO')
+                self.assertEqual(payload['missing_fields'], [field])
+
+        create_session.assert_not_called()
+
+    @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
     def test_all_live_catalogue_prices_are_sent_to_stripe_as_exact_cents(self, create_session):
         create_session.return_value = SimpleNamespace(id='cs_test_catalogue', url='https://checkout.stripe.test/catalogue')
 
@@ -121,6 +139,10 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         self.assertEqual(cents_to_eur(cents[0]), Decimal('19.90'))
         self.assertEqual(cents_to_eur(cents[3]), Decimal('19.90'))
         self.assertEqual(cents_to_eur(cents[6]), Decimal('40.30'))
+        self.assertEqual(
+            create_session.call_args.kwargs['phone_number_collection'],
+            {'enabled': True},
+        )
 
     @patch('src.routes.stripe_routes.stripe.Coupon.create')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')

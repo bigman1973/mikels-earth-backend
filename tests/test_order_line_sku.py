@@ -118,7 +118,7 @@ class OrderLineSkuTests(unittest.TestCase):
             'customer_info': {
                 'email': 'cliente@example.com',
                 'name': 'Cliente de prueba',
-                'phone': '',
+                'phone': '+34600000000',
                 'address': 'Calle de prueba 1',
                 'city': 'Alcarràs',
                 'postal_code': '25180',
@@ -162,7 +162,7 @@ class OrderLineSkuTests(unittest.TestCase):
                     'customer_info': {
                         'email': 'cliente@example.com',
                         'name': 'Cliente de prueba',
-                        'phone': '',
+                        'phone': '+34600000000',
                         'address': 'Calle de prueba 1',
                         'city': 'Alcarràs',
                         'postal_code': '25180',

@@ -51,7 +51,7 @@ def get_config():
 def create_checkout_session():
     """Create Stripe Checkout session for one-time purchase"""
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         
         # Validate required fields
         if not data.get('items') or not data.get('customer_info'):
@@ -59,6 +59,35 @@ def create_checkout_session():
         
         items = data['items']
         customer_info = data['customer_info']
+        if not isinstance(customer_info, dict):
+            return jsonify({
+                'error': 'INVALID_CUSTOMER_INFO',
+                'message': 'Los datos de contacto no son válidos.',
+            }), 400
+
+        # Stripe collects a delivery address, but the sender's pre-Checkout
+        # form is still the authoritative SEUR gate. Do not open a payment
+        # session without an addressable email and a delivery telephone: a
+        # direct API caller must not be able to bypass the browser validation.
+        required_contact_fields = {
+            'email': 'email',
+            'phone': 'teléfono',
+        }
+        missing_contact_fields = [
+            label
+            for field, label in required_contact_fields.items()
+            if not str(customer_info.get(field, '')).strip()
+        ]
+        if missing_contact_fields:
+            return jsonify({
+                'error': 'MISSING_REQUIRED_CUSTOMER_INFO',
+                'message': f"El {' y el '.join(missing_contact_fields)} son obligatorios para el envío.",
+                'missing_fields': [
+                    field for field in required_contact_fields
+                    if not str(customer_info.get(field, '')).strip()
+                ],
+            }), 400
+
         discount_code = data.get('discount_code')
         coupon_discount_amount = as_eur(data.get('discount_amount', 0), field='descuento')
         volume_discount_amount = Decimal('0.00')
