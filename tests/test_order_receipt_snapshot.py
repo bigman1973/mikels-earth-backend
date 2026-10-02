@@ -51,6 +51,11 @@ class OrderReceiptSnapshotTests(unittest.TestCase):
         self.assertTrue(receipt['billing']['requested'])
         self.assertTrue(receipt['confirmation']['sent'])
         self.assertEqual(receipt['notes'], 'mañanas')
+        self.assertEqual(receipt['next_steps'], [
+            'Preparamos tu pedido en 1-2 días laborables.',
+            'El transporte tarda entre 24 y 72 horas en España peninsular y Portugal, y puede ser superior en Baleares.',
+            'Te llegará un correo con el número de seguimiento.',
+        ])
 
     def test_receipt_refuses_to_render_when_line_sum_and_total_do_not_match(self):
         order = SimpleNamespace(

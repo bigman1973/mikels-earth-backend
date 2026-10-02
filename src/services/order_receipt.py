@@ -151,7 +151,8 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
                 "Te escribimos cuando salga el tuyo.",
             ]
             if is_reservation else [
-                "Preparamos tu pedido.",
+                "Preparamos tu pedido en 1-2 días laborables.",
+                "El transporte tarda entre 24 y 72 horas en España peninsular y Portugal, y puede ser superior en Baleares.",
                 "Te llegará un correo con el número de seguimiento.",
             ]
         ),
