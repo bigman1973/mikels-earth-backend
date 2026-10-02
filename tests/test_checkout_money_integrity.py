@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -7,6 +8,7 @@ from flask import Flask
 
 from src.models.user import db
 from src.models.order import Order
+from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
 from src.models.web_product import WebProduct
 from src.routes.stripe_routes import stripe_bp
 from src.services.money import cents_to_eur, eur_to_cents
@@ -52,6 +54,16 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             db.session.commit()
 
         self.client = self.app.test_client()
+        self.holded_products = patch(
+            'src.services.holded_service.holded_get_products',
+            return_value=[{'sku': 'MIKTEST01'}],
+        )
+        self.tax_rules = patch(
+            'src.services.order_tax_snapshot.build_tax_rule_snapshot',
+            return_value={'MIKTEST01': {'kind': 'single', 'rate': '0.04'}},
+        )
+        self.holded_products.start()
+        self.tax_rules.start()
         self.customer = {
             'email': 'cliente@example.com',
             'name': 'Cliente de prueba',
@@ -63,6 +75,8 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         }
 
     def tearDown(self):
+        self.holded_products.stop()
+        self.tax_rules.stop()
         with self.app.app_context():
             db.session.remove()
             db.drop_all()
@@ -167,6 +181,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                     'discount_amount': '0.00',
                     'discount_code': '',
                     'needs_invoice': 'False',
+                    'stock_checkout_token': 'tax-test-exact-charge',
                 },
             }},
         }
@@ -178,6 +193,14 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                 'sku': 'MIKTEST01', 'slug': 'aceite-temprano-sin-filtrar',
             })),
         )])
+
+        with self.app.app_context():
+            db.session.add(CheckoutTaxSnapshot(
+                checkout_token='tax-test-exact-charge',
+                rules={'MIKTEST01': {'kind': 'single', 'rate': '0.04'}},
+                expires_at=datetime.utcnow() + timedelta(minutes=30),
+            ))
+            db.session.commit()
 
         response = self.client.post('/api/stripe/webhook', data=b'{}', headers={'Stripe-Signature': 'test-signature'})
         self.assertEqual(response.status_code, 200)

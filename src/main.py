@@ -49,6 +49,7 @@ from src.models.web_product import WebProduct  # Catálogo de productos web
 from src.models.newsletter_consent import NewsletterConsent  # Registro auditable de consentimientos
 from src.models.newsletter_subscriber import NewsletterSubscriber  # Una bienvenida por identidad de email
 from src.models.stock import StockReservation, StockMovement  # Reservas y trazabilidad de stock web
+from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot  # IVA capturado antes del pago
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 app.config['SECRET_KEY'] = os.environ['SECRET_KEY'].strip()
@@ -135,6 +136,19 @@ def create_tables():
             except Exception as mig_err2:
                 db.session.rollback()
                 print(f"Migration invoice fields (non-critical): {mig_err2}")
+            # Receipt snapshot: totals, IVA and presentation data are captured
+            # once when Stripe confirms payment. This keeps the customer page,
+            # client email and internal notice on the same saved order data.
+            try:
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax_base FLOAT'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax_total FLOAT'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax_snapshot JSON'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_snapshot JSON'))
+                db.session.commit()
+                print("Migration: canonical receipt fields added to orders")
+            except Exception as receipt_migration_error:
+                db.session.rollback()
+                print(f"Migration receipt fields (non-critical): {receipt_migration_error}")
             # Migración: añadir campos de costes logísticos a web_products
             try:
                 db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS shipping_cost FLOAT DEFAULT 0.0'))

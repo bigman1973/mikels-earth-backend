@@ -308,8 +308,12 @@ def klaviyo_notify_new_order(order_data):
     owner_email = os.getenv('OWNER_EMAIL', 'info@mikels.es')
     
     items = order_data.get('items', [])
-    subtotal = order_data.get('subtotal', order_data.get('total', 0))
-    total = order_data.get('total', 0)
+    receipt = order_data.get('receipt') or {}
+    receipt_totals = receipt.get('totals') or {}
+    subtotal = receipt_totals.get('subtotal_display') or _format_eur(order_data.get('subtotal', order_data.get('total', 0)))
+    shipping = receipt_totals.get('shipping_display') or 'GRATIS'
+    tax = receipt_totals.get('tax_display') or _format_eur(0)
+    total = receipt_totals.get('total_display') or _format_eur(order_data.get('total', 0))
     discount_code = order_data.get('discount_code', '')
     discount_amount = order_data.get('discount_amount', 0)
     
@@ -323,15 +327,18 @@ def klaviyo_notify_new_order(order_data):
         "CustomerPhone": order_data.get('customer_phone', 'N/A'),
         "Items": items,
         "ItemsHtml": items_html,
-        "Subtotal": _format_eur(subtotal),
-        "Total": _format_eur(total),
+        "Receipt": receipt,
+        "Subtotal": subtotal,
+        "ShippingText": shipping,
+        "Tax": tax,
+        "Total": total,
         "ShippingAddress": order_data.get('shipping_address', 'N/A'),
         "DiscountCode": discount_code,
         "DiscountAmount": _format_eur(discount_amount) if discount_amount else '',
         "DiscountText": f"Descuento ({discount_code})" if discount_code else '',
         "NeedsInvoice": order_data.get('needs_invoice', False),
         "InvoiceData": order_data.get('invoice_data', {}),
-        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
+        "Date": receipt.get('paid_at_display') or datetime.now().strftime('%d/%m/%Y %H:%M'),
         "Source": "mikels-earth-backend",
         # Aliases en snake_case para compatibilidad con plantillas existentes
         "customer_name": order_data.get('customer_name', 'N/A'),
@@ -339,8 +346,10 @@ def klaviyo_notify_new_order(order_data):
         "customer_phone": order_data.get('customer_phone', 'N/A'),
         "phone": order_data.get('customer_phone', 'N/A'),
         "items_html": items_html,
-        "total": _format_eur(total),
-        "subtotal": _format_eur(subtotal),
+        "total": total,
+        "subtotal": subtotal,
+        "shipping": shipping,
+        "tax": tax,
         "shipping_address": order_data.get('shipping_address', 'N/A'),
         "date": datetime.now().strftime('%d/%m/%Y %H:%M'),
         "discount_code": discount_code,
@@ -368,23 +377,29 @@ def klaviyo_send_order_confirmation(order_data):
         return False
     
     items = order_data.get('items', [])
-    subtotal = order_data.get('subtotal', order_data.get('total', 0))
-    total = order_data.get('total', 0)
+    receipt = order_data.get('receipt') or {}
+    receipt_totals = receipt.get('totals') or {}
+    subtotal = receipt_totals.get('subtotal_display') or _format_eur(order_data.get('subtotal', order_data.get('total', 0)))
+    shipping_text = receipt_totals.get('shipping_display') or 'GRATIS'
+    tax = receipt_totals.get('tax_display') or _format_eur(0)
+    total = receipt_totals.get('total_display') or _format_eur(order_data.get('total', 0))
     discount_code = order_data.get('discount_code', '')
     discount_amount = order_data.get('discount_amount', 0)
     invoice_data = order_data.get('invoice_data', {})
     
     order_number = order_data.get('order_number', 'N/A')
     items_html = _build_items_html(items)
-    shipping_text = "GRATIS" if total >= 40 else _format_eur('4.95')
     properties = {
         "OrderNumber": order_number,
         "order_id": order_number,  # Alias para compatibilidad con subjects
         "CustomerName": order_data.get('customer_name', 'N/A'),
         "Items": items,
         "ItemsHtml": items_html,
-        "Subtotal": _format_eur(subtotal),
-        "Total": _format_eur(total),
+        "Receipt": receipt,
+        "Subtotal": subtotal,
+        "ShippingText": shipping_text,
+        "Tax": tax,
+        "Total": total,
         "ShippingAddress": order_data.get('shipping_address', 'N/A'),
         "ShippingText": shipping_text,
         "DiscountCode": discount_code,
@@ -394,7 +409,7 @@ def klaviyo_send_order_confirmation(order_data):
         "BillingName": invoice_data.get('name', '') if invoice_data else '',
         "BillingAddress": invoice_data.get('address', '') if invoice_data else '',
         "BillingNif": invoice_data.get('nif', '') if invoice_data else '',
-        "Date": datetime.now().strftime('%d/%m/%Y %H:%M'),
+        "Date": receipt.get('paid_at_display') or datetime.now().strftime('%d/%m/%Y %H:%M'),
         "Source": "mikels-earth-backend",
         # Aliases en snake_case para compatibilidad con plantillas existentes
         "customer_name": order_data.get('customer_name', 'N/A'),
@@ -402,9 +417,10 @@ def klaviyo_send_order_confirmation(order_data):
         "customer_phone": order_data.get('customer_phone', 'N/A'),
         "phone": order_data.get('customer_phone', 'N/A'),
         "items_html": items_html,
-        "total": _format_eur(total),
-        "subtotal": _format_eur(subtotal),
+        "total": total,
+        "subtotal": subtotal,
         "shipping": shipping_text,
+        "tax": tax,
         "shipping_address": order_data.get('shipping_address', 'N/A'),
         "date": datetime.now().strftime('%d/%m/%Y %H:%M'),
         "discount_code": discount_code,

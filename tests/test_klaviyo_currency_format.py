@@ -27,16 +27,27 @@ class KlaviyoCurrencyFormatTests(unittest.TestCase):
             'subtotal': 17.15,
             'total': 17.15,
             'discount_amount': 1.90,
+            'receipt': {
+                'paid_at_display': '02/10/2026 08:15',
+                'totals': {
+                    'subtotal_display': '15,59 €',
+                    'shipping_display': 'GRATIS',
+                    'tax_display': '1,56 €',
+                    'total_display': '17,15 €',
+                },
+            },
         })
         properties = send_event.call_args.kwargs['properties']
-        self.assertEqual(properties['Subtotal'], '17,15 €')
+        self.assertEqual(properties['Subtotal'], '15,59 €')
         self.assertEqual(properties['Total'], '17,15 €')
-        self.assertEqual(properties['subtotal'], '17,15 €')
+        self.assertEqual(properties['subtotal'], '15,59 €')
         self.assertEqual(properties['total'], '17,15 €')
         self.assertEqual(properties['DiscountAmount'], '1,90 €')
         self.assertEqual(properties['discount_amount'], '1,90 €')
         self.assertIn('17,15 €', properties['ItemsHtml'])
-        self.assertEqual(properties['ShippingText'], '4,95 €')
+        self.assertEqual(properties['ShippingText'], 'GRATIS')
+        self.assertEqual(properties['Tax'], '1,56 €')
+        self.assertEqual(properties['Date'], '02/10/2026 08:15')
 
     @patch('src.services.klaviyo_service.send_klaviyo_event')
     def test_cart_event_contains_display_ready_price_properties(self, send_event):

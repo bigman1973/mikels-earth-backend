@@ -6,7 +6,7 @@ import os
 import requests
 from datetime import datetime
 
-HOLDED_API_KEY = os.environ.get('HOLDED_API_KEY', '5bd8629be1127486298dfd61cb296943')
+HOLDED_API_KEY = os.environ.get('HOLDED_API_KEY')
 HOLDED_BASE_URL = 'https://api.holded.com/api/invoicing/v1'
 
 HEADERS = {
@@ -21,6 +21,9 @@ HEADERS = {
 
 def holded_get_products():
     """Obtiene todos los productos de Holded"""
+    if not HOLDED_API_KEY:
+        print("[Holded] HOLDED_API_KEY no configurada")
+        return []
     try:
         response = requests.get(f'{HOLDED_BASE_URL}/products', headers=HEADERS, timeout=15)
         if response.status_code == 200:

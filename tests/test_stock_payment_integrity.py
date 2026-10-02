@@ -6,6 +6,7 @@ from unittest.mock import patch
 from flask import Flask
 
 from src.models.order import Order
+from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
 from src.models.stock import StockMovement, StockReservation
 from src.models.user import db
 from src.models.web_product import WebProduct
@@ -16,6 +17,7 @@ from src.services.stock_service import (
     reserve_checkout_stock,
     restock_fully_refunded_order,
 )
+from src.services.order_receipt import build_receipt_snapshot
 
 
 class StockPaymentIntegrityTests(unittest.TestCase):
@@ -110,7 +112,7 @@ class StockPaymentIntegrityTests(unittest.TestCase):
             metadata={},
         )
         with self.app.app_context():
-            db.session.add(Order(
+            order = Order(
                 order_number='MKL-CONFIRMATION-TEST',
                 customer_email='cliente@example.com',
                 customer_name='Cliente',
@@ -126,17 +128,22 @@ class StockPaymentIntegrityTests(unittest.TestCase):
                 stripe_checkout_session_id='cs_test_confirmation',
                 payment_status='paid',
                 email_sent=True,
-            ))
+                tax_base=16.49,
+                tax_total=0.66,
+            )
+            db.session.add(order)
+            db.session.flush()
+            order.receipt_snapshot = build_receipt_snapshot(order)
             db.session.commit()
 
         response = self.client.get('/api/stripe/session-status/cs_test_confirmation')
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertEqual(data['order']['order_number'], 'MKL-CONFIRMATION-TEST')
-        self.assertEqual(data['order']['items'][0]['price'], 17.15)
-        self.assertEqual(data['order']['shipping_address'], 'Calle 1')
+        self.assertEqual(data['order']['receipt']['lines'][0]['amount_display'], '17,15 €')
+        self.assertEqual(data['order']['receipt']['shipping']['lines'][0], 'Calle 1')
         self.assertEqual(data['customer_email'], 'cliente@example.com')
-        self.assertTrue(data['order']['confirmation_sent'])
+        self.assertTrue(data['order']['receipt']['confirmation']['sent'])
 
     @patch('src.services.email_dispatcher.dispatch_post_purchase_event')
     @patch('src.routes.stripe_routes.dispatch_order_confirmation')
@@ -159,6 +166,11 @@ class StockPaymentIntegrityTests(unittest.TestCase):
                 'checkout-token-webhook',
                 datetime.utcnow() + timedelta(minutes=30),
             )
+            db.session.add(CheckoutTaxSnapshot(
+                checkout_token='checkout-token-webhook',
+                rules={'MIKLIMITADO': {'kind': 'single', 'rate': '0.04'}},
+                expires_at=datetime.utcnow() + timedelta(minutes=30),
+            ))
             db.session.commit()
 
         construct_event.return_value = {

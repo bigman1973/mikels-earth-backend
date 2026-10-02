@@ -38,8 +38,20 @@ class StartedCheckoutContractTests(unittest.TestCase):
             ))
             db.session.commit()
         self.client = self.app.test_client()
+        self.holded_products = patch(
+            'src.services.holded_service.holded_get_products',
+            return_value=[{'sku': 'TEST-CHECKOUT-01'}],
+        )
+        self.tax_rules = patch(
+            'src.services.order_tax_snapshot.build_tax_rule_snapshot',
+            return_value={'TEST-CHECKOUT-01': {'kind': 'single', 'rate': '0.10'}},
+        )
+        self.holded_products.start()
+        self.tax_rules.start()
 
     def tearDown(self):
+        self.holded_products.stop()
+        self.tax_rules.stop()
         with self.app.app_context():
             db.session.remove()
             db.drop_all()

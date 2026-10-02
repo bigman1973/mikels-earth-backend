@@ -25,6 +25,12 @@ class Order(db.Model):
     shipping_cost = db.Column(db.Float, default=0.0)
     total = db.Column(db.Float, nullable=False)
     currency = db.Column(db.String(3), default='EUR')
+    # Persisted receipt amounts: a paid order never asks the browser or an
+    # email template to recompute its tax base or IVA.
+    tax_base = db.Column(db.Float)
+    tax_total = db.Column(db.Float)
+    tax_snapshot = db.Column(db.JSON)
+    receipt_snapshot = db.Column(db.JSON)
     
     # Payment info
     stripe_payment_intent_id = db.Column(db.String(100))
@@ -84,6 +90,9 @@ class Order(db.Model):
             'shipping_cost': self.shipping_cost,
             'total': self.total,
             'currency': self.currency,
+            'tax_base': self.tax_base,
+            'tax_total': self.tax_total,
+            'receipt': self.receipt_snapshot,
             'payment_status': self.payment_status,
             'order_status': self.order_status,
             'status': self.status,

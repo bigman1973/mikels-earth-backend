@@ -93,6 +93,32 @@ def create_checkout_session():
                 'price_updates': price_errors
             }), 409
         # ===== FIN VALIDACIÓN DE PRECIOS =====
+
+        # Capture the exact Holded-master VAT rule now, before a Checkout
+        # Session is opened. The later webhook applies this snapshot to
+        # Stripe's actual charged line totals and persists it in the order.
+        # A missing SKU, tax or pack recipe is deliberately fail-closed.
+        from src.services.holded_service import holded_get_products
+        from src.services.holded_tax_service import FiscalValidationError
+        from src.services.order_tax_snapshot import build_tax_rule_snapshot
+        holded_products = holded_get_products()
+        if not holded_products:
+            return jsonify({
+                'error': 'TAX_CATALOGUE_UNAVAILABLE',
+                'message': 'No se ha podido validar la configuración fiscal del pedido. Inténtalo de nuevo en unos minutos.',
+            }), 503
+        web_reference_prices = {
+            product.sku: product.price
+            for product in WebProduct.query.filter(WebProduct.sku.isnot(None)).all()
+            if product.sku
+        }
+        try:
+            tax_snapshot = build_tax_rule_snapshot(items, holded_products, web_reference_prices)
+        except FiscalValidationError as tax_error:
+            return jsonify({
+                'error': 'TAX_CONFIGURATION_INVALID',
+                'message': str(tax_error),
+            }), 422
         
         # Generate order number
         order_number = generate_order_number()
@@ -207,9 +233,18 @@ def create_checkout_session():
         
         try:
             session = stripe.checkout.Session.create(**session_params)
+            from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
+            db.session.add(CheckoutTaxSnapshot(
+                checkout_token=stock_checkout_token,
+                rules=tax_snapshot,
+                expires_at=reservation_expires_at,
+            ))
             bind_reservation_to_session(stock_checkout_token, session.id)
         except Exception:
             release_checkout_reservation(stock_checkout_token)
+            from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
+            CheckoutTaxSnapshot.query.filter_by(checkout_token=stock_checkout_token).delete()
+            db.session.commit()
             raise
         
         # Track "Started Checkout" en Klaviyo para el Flow de carrito abandonado
@@ -466,6 +501,25 @@ def stripe_webhook():
                     discount_amount = Decimal('0.00')
                 
                 total = cents_to_eur(session['amount_total'], field='total Stripe') if session.get('amount_total') else Decimal('0.00')
+
+                # Apply the Holded-master rule saved before checkout to the
+                # exact charged Stripe lines. Do not query master data or
+                # recompute this later in an email or browser.
+                from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
+                from src.services.holded_tax_service import FiscalValidationError
+                from src.services.order_tax_snapshot import calculate_tax_totals_from_snapshot
+                stock_checkout_token = session['metadata'].get('stock_checkout_token', '')
+                checkout_tax_snapshot = CheckoutTaxSnapshot.query.filter_by(
+                    checkout_token=stock_checkout_token,
+                ).first()
+                if not checkout_tax_snapshot:
+                    raise FiscalValidationError(
+                        f"No existe la instantánea de IVA para el checkout {session['id']}."
+                    )
+                tax_base, tax_total = calculate_tax_totals_from_snapshot(
+                    items,
+                    checkout_tax_snapshot.rules or {},
+                )
                 
                 order_data = {
                     'order_number': order_number,
@@ -482,6 +536,9 @@ def stripe_webhook():
                     'shipping_country': shipping_country,
                     'discount_code': discount_code,
                     'discount_amount': discount_amount,
+                    'tax_base': tax_base,
+                    'tax_total': tax_total,
+                    'tax_snapshot': checkout_tax_snapshot.rules,
                     'customer_notes': session['metadata'].get('customer_notes', ''),
                     'stripe_checkout_session_id': session['id'],
                     'stripe_payment_intent_id': session.get('payment_intent', ''),
@@ -520,8 +577,13 @@ def stripe_webhook():
                         shipping_country=shipping_country,
                         items=items,
                         subtotal=float(order_data['subtotal']),
-                        shipping_cost=0.0 if total >= Decimal('40.00') else 4.95,
+                        # The existing checkout has no Stripe shipping-rate
+                        # line. Store the amount actually charged: zero.
+                        shipping_cost=0.0,
                         total=float(total),
+                        tax_base=float(order_data['tax_base']),
+                        tax_total=float(order_data['tax_total']),
+                        tax_snapshot=order_data['tax_snapshot'],
                         stripe_payment_intent_id=order_data.get('stripe_payment_intent_id', ''),
                         stripe_checkout_session_id=session['id'],
                         payment_status='paid',
@@ -537,6 +599,10 @@ def stripe_webhook():
                     new_order.paid_at = datetime.utcnow()
                     db.session.add(new_order)
                     db.session.flush()
+
+                    from src.services.order_receipt import build_receipt_snapshot
+                    new_order.receipt_snapshot = build_receipt_snapshot(new_order)
+                    order_data['receipt'] = new_order.receipt_snapshot
 
                     # Payment is the only point at which published web stock is
                     # decremented. The token is created before Checkout and is
@@ -557,19 +623,24 @@ def stripe_webhook():
                     # confirmation for an order whose stock was not recorded.
                     return jsonify({'error': 'No se pudo registrar el pedido'}), 500
                 
-                # Enviar notificaciones por WhatsApp
-                notify_new_order(order_data)
-                
-                # Enviar notificaciones por Email (Klaviyo + Brevo fallback)
-                dispatch_order_notification(order_data)
+                # Enviar notificación al cliente primero. La ficha guardada
+                # registra la aceptación antes de que se use para el aviso
+                # interno y para la pantalla de confirmación.
                 confirmation_accepted = dispatch_order_confirmation(order_data)
                 if confirmation_accepted:
                     try:
                         new_order.email_sent = True
+                        new_order.receipt_snapshot = build_receipt_snapshot(new_order)
+                        order_data['receipt'] = new_order.receipt_snapshot
                         db.session.commit()
                     except Exception as email_status_error:
                         db.session.rollback()
                         print(f"⚠️ Error registrando la aceptación de confirmación: {email_status_error}")
+
+                # El aviso interno consume exactamente la misma ficha guardada
+                # que el cliente ve y recibe, sin recalcular importes.
+                notify_new_order(order_data)
+                dispatch_order_notification(order_data)
                 
                 # Generar cupón de 10% para próxima compra y enviar evento a Klaviyo
                 try:
@@ -629,7 +700,11 @@ def stripe_webhook():
                 except Exception as cart_err:
                     print(f"⚠️ Error marking abandoned carts as converted: {cart_err}")
             except Exception as e:
-                print(f"Error sending order notification: {str(e)}")
+                # A paid order without its saved tax/receipt snapshot is not
+                # complete. Return 500 so Stripe retries instead of silently
+                # acknowledging an untraceable checkout.
+                print(f"Error recording or notifying order: {str(e)}")
+                return jsonify({'error': 'No se pudo registrar el pedido'}), 500
         
         elif session['mode'] == 'subscription':
             # Subscription created
@@ -749,16 +824,7 @@ def get_session_status(session_id):
                 response['customer_email'] = order.customer_email
                 response['order'] = {
                     'order_number': order.order_number,
-                    'items': order.items or [],
-                    'subtotal': order.subtotal,
-                    'shipping_cost': order.shipping_cost or 0.0,
-                    'total': order.total,
-                    'currency': order.currency or 'EUR',
-                    'shipping_address': order.shipping_address,
-                    'shipping_city': order.shipping_city,
-                    'shipping_postal_code': order.shipping_postal_code,
-                    'shipping_country': order.shipping_country,
-                    'confirmation_sent': bool(order.email_sent),
+                    'receipt': order.receipt_snapshot,
                 }
         return jsonify(response)
         
