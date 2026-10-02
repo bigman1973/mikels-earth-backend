@@ -50,6 +50,46 @@ class KlaviyoCurrencyFormatTests(unittest.TestCase):
         self.assertEqual(properties['Date'], '02/10/2026 08:15')
 
     @patch('src.services.klaviyo_service.send_klaviyo_event')
+    def test_customer_and_internal_order_events_keep_the_saved_receipt(self, send_event):
+        receipt = {
+            'brand': {'name': "Mikel's Fruit", 'logo_url': 'https://cdn.example/logo.png'},
+            'order_number': 'MKL-TEST-204',
+            'paid_at_display': '02/10/2026 09:30',
+            'lines': [{'name': 'Producto de prueba', 'quantity': 1, 'amount_display': '17,15 €'}],
+            'totals': {
+                'subtotal_display': '16,49 €',
+                'shipping_display': 'GRATIS',
+                'tax_display': '0,66 €',
+                'total_display': '17,15 €',
+            },
+            'shipping': {'lines': ['Calle de prueba 1', '25003 Lleida'], 'phone': '+34 621 144 701'},
+            'billing': {'requested': True, 'lines': ['Nombre fiscal', 'NIF/CIF: B00000000']},
+            'confirmation': {'email': 'cliente@example.com', 'sent': True},
+            'next_steps': ['Preparamos tu pedido.'],
+        }
+        order = {
+            'order_number': 'MKL-TEST-204',
+            'customer_email': 'cliente@example.com',
+            'customer_name': 'Cliente Prueba',
+            'customer_phone': '+34 621 144 701',
+            'shipping_address': 'Calle de prueba 1',
+            'items': [{'name': 'Producto de prueba', 'quantity': 1, 'price': 17.15}],
+            'subtotal': 16.49,
+            'total': 17.15,
+            'receipt': receipt,
+        }
+
+        klaviyo_service.klaviyo_send_order_confirmation(order)
+        customer_properties = send_event.call_args.kwargs['properties']
+        self.assertEqual(customer_properties['Receipt'], receipt)
+        self.assertEqual(customer_properties['Total'], receipt['totals']['total_display'])
+
+        klaviyo_service.klaviyo_notify_new_order(order)
+        internal_properties = send_event.call_args.kwargs['properties']
+        self.assertEqual(internal_properties['Receipt'], receipt)
+        self.assertEqual(internal_properties['ShippingText'], receipt['totals']['shipping_display'])
+
+    @patch('src.services.klaviyo_service.send_klaviyo_event')
     def test_cart_event_contains_display_ready_price_properties(self, send_event):
         send_event.return_value = True
         klaviyo_service.klaviyo_track_started_checkout(
