@@ -399,6 +399,7 @@ def get_flow_action(action_id):
     return jsonify({
         'id': data.get('id'),
         'action_type': attrs.get('action_type'),
+        'definition': attrs.get('definition'),
         'settings': attrs.get('settings') or {},
     }), 200
 
@@ -430,8 +431,11 @@ def get_flow_message_template(message_id):
 @admin_required
 @role_required('admin')
 def update_flow_action(action_id):
-    """Actualizar los settings de un flow action (para cambiar template)"""
+    """Replace a full Flow action definition after an authenticated readback."""
     body = request.get_json()
+    definition = body.get('definition')
+    if not definition:
+        return jsonify({'error': 'definition field required'}), 400
     
     headers = _get_klaviyo_headers()
     
@@ -440,7 +444,7 @@ def update_flow_action(action_id):
             "type": "flow-action",
             "id": action_id,
             "attributes": {
-                "settings": body.get('settings', {})
+                "definition": definition
             }
         }
     }
