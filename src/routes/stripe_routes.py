@@ -9,6 +9,7 @@ from src.services.whatsapp_service import notify_new_subscription
 from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_order_delivery_alert, dispatch_subscription_notification
 from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents, MoneyValueError
 from src.services.checkout_pricing import calculate_checkout_line_price, sent_line_total
+from src.services.delivery_policy import DeliveryPolicyError, validate_delivery_destination
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
@@ -65,13 +66,17 @@ def create_checkout_session():
                 'message': 'Los datos de contacto no son válidos.',
             }), 400
 
-        # Stripe collects a delivery address, but the sender's pre-Checkout
-        # form is still the authoritative SEUR gate. Do not open a payment
-        # session without an addressable email and a delivery telephone: a
-        # direct API caller must not be able to bypass the browser validation.
+        # The storefront form is the authoritative delivery record. Do not open
+        # a payment session without a complete address, email and delivery
+        # telephone: a direct API caller must not bypass the browser gate.
         required_contact_fields = {
+            'name': 'nombre',
             'email': 'email',
             'phone': 'teléfono',
+            'address': 'dirección',
+            'city': 'ciudad',
+            'postal_code': 'código postal',
+            'country': 'país',
         }
         missing_contact_fields = [
             label
@@ -203,6 +208,21 @@ def create_checkout_session():
         if total < 0:
             return jsonify({'error': 'El descuento no puede superar el subtotal'}), 400
 
+        # Delivery is free in every served destination. The only value-based
+        # rule is the published minimum order for Baleares. Validate it after
+        # every discount and before reserving stock or opening Stripe Checkout.
+        try:
+            delivery_country_code = validate_delivery_destination(
+                country=customer_info.get('country'),
+                postal_code=customer_info.get('postal_code'),
+                order_total=total,
+            )
+        except DeliveryPolicyError as delivery_error:
+            return jsonify({
+                'error': delivery_error.code,
+                'message': str(delivery_error),
+            }), 422
+
         # Reserve availability before opening Stripe Checkout. This prevents two
         # concurrent browser sessions from buying the same last web unit. The
         # reservation does not decrement stock; that happens only after Stripe
@@ -261,12 +281,6 @@ def create_checkout_session():
             'success_url': f'{frontend_url}/order-success?session_id={{CHECKOUT_SESSION_ID}}',
             'cancel_url': f'{frontend_url}/checkout?cancelled=true',
             'customer_email': customer_info['email'],
-            'shipping_address_collection': {
-                'allowed_countries': ['ES', 'PT', 'FR', 'DE', 'IT', 'GB', 'AT', 'BE', 'NL', 'IE']
-            },
-            'phone_number_collection': {
-                'enabled': True
-            },
             'metadata': {
                 'order_number': order_number,
                 'customer_name': customer_info['name'],
@@ -275,6 +289,7 @@ def create_checkout_session():
                 'shipping_city': customer_info['city'],
                 'shipping_postal_code': customer_info['postal_code'],
                 'shipping_country': customer_info.get('country', 'España'),
+                'shipping_country_code': delivery_country_code,
                 'customer_notes': customer_info.get('notes', ''),
                 'discount_code': discount_code or '',
                 'discount_amount': eur_metadata(discount_amount, field='descuento'),

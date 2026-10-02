@@ -139,10 +139,54 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         self.assertEqual(cents_to_eur(cents[0]), Decimal('19.90'))
         self.assertEqual(cents_to_eur(cents[3]), Decimal('19.90'))
         self.assertEqual(cents_to_eur(cents[6]), Decimal('40.30'))
-        self.assertEqual(
-            create_session.call_args.kwargs['phone_number_collection'],
-            {'enabled': True},
+        self.assertNotIn('shipping_address_collection', create_session.call_args.kwargs)
+        self.assertNotIn('phone_number_collection', create_session.call_args.kwargs)
+        self.assertEqual(create_session.call_args.kwargs['metadata']['shipping_country_code'], 'ES')
+
+    @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
+    def test_checkout_rejects_unserved_or_excluded_destinations_before_stripe(self, create_session):
+        cases = (
+            ('Francia', '75001', 'DESTINATION_NOT_SERVED'),
+            ('España', '35001', 'DESTINATION_NOT_SERVED'),
+            ('España', '38001', 'DESTINATION_NOT_SERVED'),
+            ('España', '51001', 'DESTINATION_NOT_SERVED'),
+            ('España', '52001', 'DESTINATION_NOT_SERVED'),
+            ('España', '07001', 'BALEARES_MINIMUM_ORDER'),
         )
+        for country, postal_code, expected_error in cases:
+            with self.subTest(country=country, postal_code=postal_code):
+                customer = dict(self.customer, country=country, postal_code=postal_code)
+                response = self.client.post('/api/stripe/create-checkout-session', json={
+                    'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90')],
+                    'customer_info': customer,
+                })
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.get_json()['error'], expected_error)
+
+        create_session.assert_not_called()
+
+    @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
+    def test_checkout_accepts_portugal_and_baleares_from_the_minimum_order(self, create_session):
+        cases = (
+            ('Portugal', '4000-001', 1, 'cs_test_portugal', 'PT'),
+            ('España', '07001', 3, 'cs_test_baleares', 'ES'),
+        )
+        for country, postal_code, quantity, session_id, country_code in cases:
+            with self.subTest(country=country, postal_code=postal_code):
+                create_session.reset_mock()
+                create_session.return_value = SimpleNamespace(
+                    id=session_id,
+                    url=f'https://checkout.stripe.test/{session_id}',
+                )
+                customer = dict(self.customer, country=country, postal_code=postal_code)
+                response = self.client.post('/api/stripe/create-checkout-session', json={
+                    'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=quantity)],
+                    'customer_info': customer,
+                })
+                self.assertEqual(response.status_code, 200)
+                params = create_session.call_args.kwargs
+                self.assertEqual(params['metadata']['shipping_country_code'], country_code)
+                self.assertNotIn('shipping_address_collection', params)
 
     @patch('src.routes.stripe_routes.stripe.Coupon.create')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')

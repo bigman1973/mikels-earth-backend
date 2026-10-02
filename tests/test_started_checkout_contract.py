@@ -177,6 +177,7 @@ class StartedCheckoutContractTests(unittest.TestCase):
                     'address': 'Calle de prueba 1',
                     'city': 'Lleida',
                     'postal_code': '25003',
+                    'country': 'España',
                 },
             })
         finally:
