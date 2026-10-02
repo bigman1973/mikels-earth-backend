@@ -108,6 +108,44 @@ class OrderReceiptSnapshotTests(unittest.TestCase):
         self.assertEqual(receipt['totals']['discount_label'], 'Descuento (BIENVENIDA10)')
         self.assertEqual(receipt['totals']['total_display'], '33,34 €')
 
+    def test_receipt_reconciles_a_fractional_cent_volume_tier(self):
+        order = SimpleNamespace(
+            order_number='MKL-TEST-VOLUME-12',
+            paid_at=datetime(2026, 10, 2, 8, 15),
+            # Stripe allocates the 15% session discount to this line. The
+            # receipt keeps the pre-discount line total so its explicit
+            # discount row explains 205.80 € -> 174.93 €.
+            items=[{
+                'name': 'Aceite temprano sin filtrar',
+                'quantity': 12,
+                'gross_total': '174.93',
+                'receipt_line_total': '205.80',
+            }],
+            discount_code=None,
+            discount_amount='30.87',
+            shipping_cost=0,
+            total='174.93',
+            shipping_address='Calle de prueba 1',
+            shipping_postal_code='25003',
+            shipping_city='Lleida',
+            shipping_country='España',
+            customer_phone='',
+            needs_invoice=False,
+            fiscal_name=None,
+            fiscal_nif=None,
+            fiscal_address=None,
+            fiscal_postal_code=None,
+            fiscal_city=None,
+            customer_email='cliente@example.com',
+            email_sent=True,
+        )
+
+        receipt = build_receipt_snapshot(order)
+        self.assertEqual(receipt['lines'][0]['amount_display'], '205,80 €')
+        self.assertEqual(receipt['totals']['subtotal_display'], '205,80 €')
+        self.assertEqual(receipt['totals']['discount_display'], '30,87 €')
+        self.assertEqual(receipt['totals']['total_display'], '174,93 €')
+
     def test_tax_snapshot_applies_single_holded_rate_to_charged_gross_total(self):
         base, tax = calculate_tax_totals_from_snapshot(
             [{'sku': 'MIKPARA450R', 'gross_total': '17.15'}],

@@ -8,8 +8,14 @@ from sqlalchemy import or_
 from src.services.whatsapp_service import notify_new_order, notify_new_subscription
 from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification, dispatch_started_checkout_event
 from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents, MoneyValueError
+from src.services.checkout_pricing import calculate_checkout_line_price, sent_line_total
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
+
+# Stored beside the tax rules while a Checkout session is pending.  This keeps
+# the pre-discount line totals available for the immutable Receipt without
+# asking the browser or a changed product catalogue after payment.
+CHECKOUT_PRICING_SNAPSHOT_KEY = '__checkout_pricing__'
 
 # Configurar Stripe
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
@@ -46,7 +52,9 @@ def create_checkout_session():
         items = data['items']
         customer_info = data['customer_info']
         discount_code = data.get('discount_code')
-        discount_amount = as_eur(data.get('discount_amount', 0), field='descuento')
+        coupon_discount_amount = as_eur(data.get('discount_amount', 0), field='descuento')
+        volume_discount_amount = Decimal('0.00')
+        checkout_pricing_snapshot = {}
         
         # ===== VALIDACIÓN DE PRECIOS CONTRA LA BASE DE DATOS =====
         # Evita que se pueda comprar a un precio desactualizado
@@ -56,6 +64,7 @@ def create_checkout_session():
             product_id = item.get('id')
             item_slug = item.get('slug')
             item_price = item.get('price', 0)
+            quantity = item.get('quantity', 0)
             
             # Buscar el producto en la DB por ID o slug
             db_product = None
@@ -70,15 +79,31 @@ def create_checkout_session():
                 item['id'] = db_product.id
                 item['sku'] = db_product.sku or ''
                 item['slug'] = db_product.slug
-                # Comparar precio (tolerancia de 0.01€ por redondeos)
-                if abs(as_eur(item_price, field='precio') - as_eur(db_product.price, field='precio maestro')) > Decimal('0.01'):
+                # The cart can legitimately send a fractional-cent unit price
+                # when a persisted volume tier applies (17.15 × 85% =
+                # 14.5775).  Validate its *complete line total* against the
+                # same DB tier, never against the undiscounted unit price.
+                expected = calculate_checkout_line_price(db_product, quantity)
+                received_line_total = sent_line_total(item_price, quantity)
+                if abs(received_line_total - expected.expected_line_total) > Decimal('0.01'):
                     price_errors.append({
                         'product': item.get('name', db_product.name),
                         'sent_price': item_price,
-                        'current_price': db_product.price
+                        'current_price': float(expected.base_unit_price),
+                        'expected_line_total': float(expected.expected_line_total),
+                        'tiered_discount': db_product.tiered_discount,
+                        'volume_discount': db_product.volume_discount,
                     })
-                    # Corregir el precio al actual de la DB
-                    item['price'] = float(as_eur(db_product.price, field='precio maestro'))
+                # Stripe prices require whole cents, so each product line stays
+                # at its master unit price and the exact tier saving is applied
+                # once as a checkout discount below.  This preserves both the
+                # real quantity and the exact cart total.
+                item['price'] = float(expected.base_unit_price)
+                item['_checkout_line_key'] = str(len(checkout_pricing_snapshot))
+                checkout_pricing_snapshot[item['_checkout_line_key']] = {
+                    'receipt_line_total': eur_metadata(expected.base_line_total, field='subtotal de línea'),
+                }
+                volume_discount_amount += expected.volume_discount_amount
             else:
                 return jsonify({
                     'error': 'PRODUCT_NOT_FOUND',
@@ -123,12 +148,19 @@ def create_checkout_session():
         # Generate order number
         order_number = generate_order_number()
 
-        # Calculate subtotal and total
+        # Calculate the pre-discount subtotal from server prices.  Quantity-tier
+        # savings and an optional coupon are both represented as one exact
+        # checkout discount so Stripe can charge an amount that matches the
+        # cart even where the discounted unit price has fractional cents.
         subtotal = sum(
             (as_eur(item['price'], field='precio') * Decimal(str(item['quantity'])))
             for item in items
         )
         subtotal = as_eur(subtotal, field='subtotal')
+        discount_amount = as_eur(
+            volume_discount_amount + coupon_discount_amount,
+            field='descuento',
+        )
         total = as_eur(subtotal - discount_amount, field='total')
         if total < 0:
             return jsonify({'error': 'El descuento no puede superar el subtotal'}), 400
@@ -161,7 +193,8 @@ def create_checkout_session():
         for item in items:
             product_metadata = {
                 'slug': str(item.get('slug') or ''),
-                'sku': str(item.get('sku') or '')
+                'sku': str(item.get('sku') or ''),
+                'checkout_line_key': str(item.get('_checkout_line_key') or ''),
             }
             line_items.append({
                 'price_data': {
@@ -207,6 +240,8 @@ def create_checkout_session():
                 'customer_notes': customer_info.get('notes', ''),
                 'discount_code': discount_code or '',
                 'discount_amount': eur_metadata(discount_amount, field='descuento'),
+                'coupon_discount_amount': eur_metadata(coupon_discount_amount, field='descuento de cupón'),
+                'volume_discount_amount': eur_metadata(volume_discount_amount, field='descuento por cantidad'),
                 'subtotal': eur_metadata(subtotal, field='subtotal'),
                 'total': eur_metadata(total, field='total'),
                 'needs_invoice': str(data.get('needs_invoice', False)),
@@ -220,23 +255,26 @@ def create_checkout_session():
             }
         }
         
-        # Apply discount if exists
-        if discount_code and discount_amount > 0:
-            # Create a coupon in Stripe for this specific checkout
+        # Apply the calculated amount exactly once.  A volume tier does not
+        # need a customer-facing code, but it still needs a Stripe checkout
+        # discount to avoid rounding a fractional-cent unit price.
+        if discount_amount > 0:
             coupon = stripe.Coupon.create(
                 amount_off=eur_to_cents(discount_amount, field='descuento'),
                 currency='eur',
                 duration='once',
-                name=discount_code
+                name=discount_code or 'Descuento por cantidad',
             )
             session_params['discounts'] = [{'coupon': coupon.id}]
         
         try:
             session = stripe.checkout.Session.create(**session_params)
             from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
+            pending_checkout_rules = dict(tax_snapshot)
+            pending_checkout_rules[CHECKOUT_PRICING_SNAPSHOT_KEY] = checkout_pricing_snapshot
             db.session.add(CheckoutTaxSnapshot(
                 checkout_token=stock_checkout_token,
-                rules=tax_snapshot,
+                rules=pending_checkout_rules,
                 expires_at=reservation_expires_at,
             ))
             bind_reservation_to_session(stock_checkout_token, session.id)
@@ -406,6 +444,29 @@ def stripe_webhook():
             
             # Obtener detalles del pedido
             try:
+                # Load the tax and checkout-pricing snapshots created before
+                # Stripe Checkout.  The tax snapshot prices fiscal documents
+                # from the charged Stripe amounts; the pricing snapshot keeps
+                # the pre-discount line amounts required by the customer
+                # receipt's subtotal − discount = total invariant.
+                from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
+                from src.services.holded_tax_service import FiscalValidationError
+                from src.services.order_tax_snapshot import calculate_tax_totals_from_snapshot
+                stock_checkout_token = session['metadata'].get('stock_checkout_token', '')
+                checkout_tax_snapshot = CheckoutTaxSnapshot.query.filter_by(
+                    checkout_token=stock_checkout_token,
+                ).first()
+                if not checkout_tax_snapshot:
+                    raise FiscalValidationError(
+                        f"No existe la instantánea de IVA para el checkout {session['id']}."
+                    )
+                checkout_rules = checkout_tax_snapshot.rules or {}
+                receipt_pricing = checkout_rules.get(CHECKOUT_PRICING_SNAPSHOT_KEY, {})
+                tax_rules = {
+                    sku: rule for sku, rule in checkout_rules.items()
+                    if sku != CHECKOUT_PRICING_SNAPSHOT_KEY
+                }
+
                 line_items = stripe.checkout.Session.list_line_items(
                     session['id'],
                     limit=100,
@@ -421,6 +482,7 @@ def stripe_webhook():
                     product_metadata = getattr(stripe_product, 'metadata', None) or {}
                     sku = product_metadata.get('sku', '')
                     product_slug = product_metadata.get('slug', '')
+                    checkout_line_key = product_metadata.get('checkout_line_key', '')
 
                     # Compatibilidad para sesiones creadas antes de añadir metadata.
                     if not sku:
@@ -450,6 +512,12 @@ def stripe_webhook():
                         'gross_total': float(line_total),
                         'sku': sku
                     }
+                    receipt_line = receipt_pricing.get(str(checkout_line_key), {})
+                    if receipt_line.get('receipt_line_total') is not None:
+                        order_item['receipt_line_total'] = float(as_eur(
+                            receipt_line['receipt_line_total'],
+                            field='subtotal de línea guardado',
+                        ))
                     if product_slug:
                         order_item['slug'] = product_slug
                     items.append(order_item)
@@ -505,20 +573,9 @@ def stripe_webhook():
                 # Apply the Holded-master rule saved before checkout to the
                 # exact charged Stripe lines. Do not query master data or
                 # recompute this later in an email or browser.
-                from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
-                from src.services.holded_tax_service import FiscalValidationError
-                from src.services.order_tax_snapshot import calculate_tax_totals_from_snapshot
-                stock_checkout_token = session['metadata'].get('stock_checkout_token', '')
-                checkout_tax_snapshot = CheckoutTaxSnapshot.query.filter_by(
-                    checkout_token=stock_checkout_token,
-                ).first()
-                if not checkout_tax_snapshot:
-                    raise FiscalValidationError(
-                        f"No existe la instantánea de IVA para el checkout {session['id']}."
-                    )
                 tax_base, tax_total = calculate_tax_totals_from_snapshot(
                     items,
-                    checkout_tax_snapshot.rules or {},
+                    tax_rules,
                 )
                 
                 order_data = {
@@ -538,7 +595,7 @@ def stripe_webhook():
                     'discount_amount': discount_amount,
                     'tax_base': tax_base,
                     'tax_total': tax_total,
-                    'tax_snapshot': checkout_tax_snapshot.rules,
+                    'tax_snapshot': tax_rules,
                     'customer_notes': session['metadata'].get('customer_notes', ''),
                     'stripe_checkout_session_id': session['id'],
                     'stripe_payment_intent_id': session.get('payment_intent', ''),

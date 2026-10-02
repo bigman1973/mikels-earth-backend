@@ -39,6 +39,11 @@ def format_receipt_datetime(value: datetime | None) -> str:
 
 
 def _item_total(item: dict[str, Any]) -> Decimal:
+    # Volume tiers may be applied by a Checkout discount because Stripe unit
+    # amounts are whole cents. In that case the receipt still needs the saved
+    # pre-discount line total so its explicit discount row reconciles exactly.
+    if item.get("receipt_line_total") is not None:
+        return _amount(item["receipt_line_total"])
     if item.get("gross_total") is not None:
         return _amount(item["gross_total"])
     return _amount(item.get("price", 0)) * Decimal(str(item.get("quantity", 1) or 1))

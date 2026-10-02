@@ -54,6 +54,15 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                     stock=999,
                     active=True,
                     visible_in_store=True,
+                    tiered_discount=(
+                        [
+                            {'minQuantity': 2, 'discount': 0, 'label': 'Pack Dúo'},
+                            {'minQuantity': 12, 'discount': 15, 'label': '1 caja'},
+                            {'minQuantity': 24, 'discount': 20, 'label': '2 cajas'},
+                            {'minQuantity': 36, 'discount': 25, 'label': '4 cajas'},
+                        ]
+                        if index == 1 else None
+                    ),
                 ))
             db.session.commit()
 
@@ -144,6 +153,81 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         self.assertEqual(params['metadata']['subtotal'], '94.50')
         self.assertEqual(params['metadata']['discount_amount'], '7.74')
         self.assertEqual(params['metadata']['total'], '86.76')
+
+    @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
+    @patch('src.routes.stripe_routes.stripe.Coupon.create')
+    @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
+    def test_each_volume_tier_creates_a_checkout_at_the_cart_total(
+        self,
+        create_session,
+        create_coupon,
+        _dispatch,
+    ):
+        """The server accepts the same tier amount shown by the cart.
+
+        Stripe unit amounts are whole cents, so the checkout retains the
+        17.15 € catalogue line and applies the exact tier saving as a session
+        discount. This is essential at 12 units: 17.15 × 85% is 14.5775 € per
+        unit, but the payable total must still be exactly 174.93 €.
+        """
+        cases = (
+            (2, Decimal('0'), Decimal('34.30')),
+            (12, Decimal('15'), Decimal('174.93')),
+            (24, Decimal('20'), Decimal('329.28')),
+            (36, Decimal('25'), Decimal('463.05')),
+        )
+        for quantity, percent, expected_total in cases:
+            with self.subTest(quantity=quantity):
+                create_session.reset_mock()
+                create_coupon.reset_mock()
+                create_session.return_value = SimpleNamespace(
+                    id=f'cs_test_tier_{quantity}',
+                    url=f'https://checkout.stripe.test/tier-{quantity}',
+                )
+                cart_unit_price = Decimal('17.15') * (Decimal('100') - percent) / Decimal('100')
+                response = self.client.post('/api/stripe/create-checkout-session', json={
+                    'items': [self._checkout_item(
+                        1,
+                        'aceite-temprano-sin-filtrar',
+                        cart_unit_price,
+                        quantity=quantity,
+                    )],
+                    'customer_info': self.customer,
+                })
+
+                self.assertEqual(response.status_code, 200)
+                params = create_session.call_args.kwargs
+                self.assertEqual(
+                    params['line_items'][0]['price_data']['unit_amount'],
+                    1715,
+                )
+                self.assertEqual(params['line_items'][0]['quantity'], quantity)
+                expected_discount = (Decimal('17.15') * quantity - expected_total).quantize(Decimal('0.01'))
+                self.assertEqual(params['metadata']['subtotal'], format(Decimal('17.15') * quantity, '.2f'))
+                self.assertEqual(params['metadata']['volume_discount_amount'], format(expected_discount, '.2f'))
+                self.assertEqual(params['metadata']['discount_amount'], format(expected_discount, '.2f'))
+                self.assertEqual(params['metadata']['total'], format(expected_total, '.2f'))
+                charged_total = (
+                    Decimal(params['line_items'][0]['price_data']['unit_amount'])
+                    * quantity / Decimal('100') - expected_discount
+                )
+                self.assertEqual(charged_total, expected_total)
+                if expected_discount:
+                    self.assertEqual(create_coupon.call_args.kwargs['amount_off'], eur_to_cents(expected_discount))
+                else:
+                    create_coupon.assert_not_called()
+
+    @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
+    @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
+    def test_volume_tier_rejects_an_undiscounted_browser_price(self, create_session, _dispatch):
+        create_session.return_value = SimpleNamespace(id='cs_should_not_exist', url='https://checkout.stripe.test/nope')
+        response = self.client.post('/api/stripe/create-checkout-session', json={
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.15', quantity=12)],
+            'customer_info': self.customer,
+        })
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['error'], 'PRICE_MISMATCH')
+        create_session.assert_not_called()
 
     def test_exact_cent_helpers_never_truncate_binary_float_values(self):
         self.assertEqual(eur_to_cents(17.15), 1715)
