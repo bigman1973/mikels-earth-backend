@@ -62,14 +62,15 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
         })
 
     # Shop and Stripe prices are gross. The subtotal is therefore the exact sum
-    # of saved, charged line amounts — never a net tax base. IVA is not an
-    # additive receipt line; the total is tax-inclusive.
+    # of saved line amounts — never a net tax base. A checkout coupon is stored
+    # separately and reconciled once here; IVA is not an additive receipt line.
     subtotal = sum((_item_total(item) for item in order.items or []), Decimal("0")).quantize(CENT, rounding=ROUND_HALF_UP)
+    discount = _amount(getattr(order, "discount_amount", 0))
     shipping = _amount(order.shipping_cost)
     total = _amount(order.total)
-    if subtotal + shipping != total:
+    if subtotal - discount + shipping != total:
         raise ValueError(
-            "El resumen guardado no cuadra: líneas + envío debe coincidir con el total cobrado."
+            "El resumen guardado no cuadra: líneas - descuento + envío debe coincidir con el total cobrado."
         )
 
     shipping_lines = [
@@ -102,6 +103,12 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
         "totals": {
             "subtotal": float(subtotal),
             "subtotal_display": format_eur(subtotal),
+            "discount": float(discount),
+            "discount_display": format_eur(discount),
+            "discount_label": (
+                f"Descuento ({getattr(order, 'discount_code', '')})"
+                if getattr(order, "discount_code", "") else "Descuento"
+            ),
             "shipping": float(shipping),
             "shipping_display": "GRATIS" if shipping == 0 else format_eur(shipping),
             "total": float(total),
@@ -122,6 +129,6 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
         },
         "next_steps": [
             "Preparamos tu pedido.",
-            "Cuando salga, te enviaremos el seguimiento por correo.",
+            "Te llegará un correo con el número de seguimiento.",
         ],
     }

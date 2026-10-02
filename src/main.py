@@ -140,12 +140,14 @@ def create_tables():
             # once when Stripe confirms payment. This keeps the customer page,
             # client email and internal notice on the same saved order data.
             try:
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_code VARCHAR(100)'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount FLOAT DEFAULT 0.0'))
                 db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax_base FLOAT'))
                 db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax_total FLOAT'))
                 db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax_snapshot JSON'))
                 db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_snapshot JSON'))
                 db.session.commit()
-                print("Migration: canonical receipt fields added to orders")
+                print("Migration: canonical receipt and discount fields added to orders")
             except Exception as receipt_migration_error:
                 db.session.rollback()
                 print(f"Migration receipt fields (non-critical): {receipt_migration_error}")

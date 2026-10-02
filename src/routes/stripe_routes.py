@@ -581,6 +581,8 @@ def stripe_webhook():
                         # line. Store the amount actually charged: zero.
                         shipping_cost=0.0,
                         total=float(total),
+                        discount_code=discount_code or None,
+                        discount_amount=float(discount_amount),
                         tax_base=float(order_data['tax_base']),
                         tax_total=float(order_data['tax_total']),
                         tax_snapshot=order_data['tax_snapshot'],

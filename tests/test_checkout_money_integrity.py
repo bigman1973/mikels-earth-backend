@@ -218,6 +218,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             self.assertEqual(Decimal(str(order.to_dict()['total'])), Decimal('17.15'))
             self.assertEqual(Decimal(str(order.items[0]['price'])), Decimal('17.15'))
             self.assertEqual(Decimal(str(order.items[0]['gross_total'])), Decimal('17.15'))
+            self.assertEqual(Decimal(str(order.discount_amount)), Decimal('0.00'))
 
 
 if __name__ == '__main__':

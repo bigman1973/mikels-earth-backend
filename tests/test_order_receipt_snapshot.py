@@ -72,8 +72,41 @@ class OrderReceiptSnapshotTests(unittest.TestCase):
             email_sent=False,
         )
 
-        with self.assertRaisesRegex(ValueError, r'líneas \+ envío'):
+        with self.assertRaisesRegex(ValueError, r'líneas - descuento \+ envío'):
             build_receipt_snapshot(order)
+
+    def test_receipt_reconciles_persisted_coupon_before_shipping(self):
+        order = SimpleNamespace(
+            order_number='MKL-TEST-DISCOUNT',
+            paid_at=datetime(2026, 10, 2, 8, 15),
+            items=[
+                {'name': 'Paraguayo en almíbar', 'quantity': 1, 'gross_total': '17.15'},
+                {'name': 'Aceite ecológico', 'quantity': 1, 'gross_total': '19.90'},
+            ],
+            discount_code='BIENVENIDA10',
+            discount_amount='3.71',
+            shipping_cost=0,
+            total='33.34',
+            shipping_address='Calle de prueba 1',
+            shipping_postal_code='25003',
+            shipping_city='Lleida',
+            shipping_country='España',
+            customer_phone='',
+            needs_invoice=False,
+            fiscal_name=None,
+            fiscal_nif=None,
+            fiscal_address=None,
+            fiscal_postal_code=None,
+            fiscal_city=None,
+            customer_email='cliente@example.com',
+            email_sent=True,
+        )
+
+        receipt = build_receipt_snapshot(order)
+        self.assertEqual(receipt['totals']['subtotal_display'], '37,05 €')
+        self.assertEqual(receipt['totals']['discount_display'], '3,71 €')
+        self.assertEqual(receipt['totals']['discount_label'], 'Descuento (BIENVENIDA10)')
+        self.assertEqual(receipt['totals']['total_display'], '33,34 €')
 
     def test_tax_snapshot_applies_single_holded_rate_to_charged_gross_total(self):
         base, tax = calculate_tax_totals_from_snapshot(

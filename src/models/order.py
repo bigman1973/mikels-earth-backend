@@ -25,6 +25,10 @@ class Order(db.Model):
     shipping_cost = db.Column(db.Float, default=0.0)
     total = db.Column(db.Float, nullable=False)
     currency = db.Column(db.String(3), default='EUR')
+    # The coupon reduction applied to this paid order.  This is persisted so
+    # the receipt never has to infer it from Stripe or recalculate totals.
+    discount_code = db.Column(db.String(100))
+    discount_amount = db.Column(db.Float, default=0.0)
     # Persisted receipt amounts: a paid order never asks the browser or an
     # email template to recompute its tax base or IVA.
     tax_base = db.Column(db.Float)
@@ -90,6 +94,8 @@ class Order(db.Model):
             'shipping_cost': self.shipping_cost,
             'total': self.total,
             'currency': self.currency,
+            'discount_code': self.discount_code,
+            'discount_amount': self.discount_amount or 0.0,
             'tax_base': self.tax_base,
             'tax_total': self.tax_total,
             'receipt': self.receipt_snapshot,
