@@ -533,6 +533,69 @@ def setup_cancellation_flow():
     }), 201
 
 
+@admin_klaviyo_bp.route('/admin/klaviyo/activate-transactional-flow/<flow_id>', methods=['PUT'])
+@admin_required
+@role_required('admin')
+def activate_transactional_flow(flow_id):
+    """Make a Flow live only after its email action is genuinely transactional.
+
+    Klaviyo may silently leave an action non-transactional when the account has
+    not approved that classification.  This guard prevents a refund notice from
+    being enabled as marketing mail, where an opted-out purchaser could miss it.
+    """
+    body = request.get_json() or {}
+    action_id = str(body.get('action_id') or '').strip()
+    if not action_id:
+        return jsonify({'error': 'action_id field required'}), 400
+
+    headers = _get_klaviyo_headers()
+    action_response = requests.get(
+        f'{KLAVIYO_API_URL}/flow-actions/{action_id}',
+        headers=headers,
+        timeout=20,
+    )
+    if action_response.status_code != 200:
+        return jsonify({'error': action_response.text, 'status': action_response.status_code}), action_response.status_code
+
+    action = action_response.json().get('data', {})
+    message = ((action.get('attributes', {}).get('definition') or {})
+               .get('data', {}).get('message') or {})
+    if message.get('transactional') is not True:
+        return jsonify({
+            'error': 'Klaviyo no ha aprobado este mensaje como transaccional; el Flow permanece en borrador.',
+            'flow_id': flow_id,
+            'action_id': action_id,
+            'transactional': False,
+        }), 409
+
+    payload = {
+        'data': {
+            'type': 'flow',
+            'id': flow_id,
+            'attributes': {'status': 'live'},
+        },
+    }
+    response = requests.patch(
+        f'{KLAVIYO_API_URL}/flows/{flow_id}',
+        headers=headers,
+        json=payload,
+        timeout=20,
+    )
+    if response.status_code != 200:
+        return jsonify({'error': response.text, 'status': response.status_code}), response.status_code
+
+    flow = response.json().get('data', {})
+    status = flow.get('attributes', {}).get('status')
+    if status != 'live':
+        return jsonify({'error': 'Klaviyo no confirmó que el Flow quedara live.', 'status': status}), 502
+    return jsonify({
+        'success': True,
+        'flow_id': flow.get('id', flow_id),
+        'status': status,
+        'transactional': True,
+    }), 200
+
+
 @admin_klaviyo_bp.route('/admin/klaviyo/flow-actions/<flow_id>', methods=['GET'])
 @admin_required
 @role_required('admin')
