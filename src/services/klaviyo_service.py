@@ -320,8 +320,12 @@ def _build_items_html(items):
     for item in items:
         name = item.get('name', 'Producto')
         qty = item.get('quantity', 1)
-        price = item.get('price', 0)
-        html_parts.append(f'{name} x{qty} — {_format_eur(price)}')
+        line_display = item.get('line_display')
+        if line_display:
+            html_parts.append(f'{name}<br/>{line_display}')
+        else:
+            price = item.get('price', 0)
+            html_parts.append(f'{name} x{qty} — {_format_eur(price)}')
     
     return '<br/>'.join(html_parts)
 
@@ -462,12 +466,22 @@ def klaviyo_send_order_confirmation(order_data, return_result=False):
         profile_attrs["first_name"] = parts[0]
         if len(parts) > 1:
             profile_attrs["last_name"] = parts[1]
+
+    # Klaviyo exposes this request's ``value`` as the event's $value for Flow
+    # revenue attribution. Prefer the immutable Receipt total, saved after
+    # Stripe confirmation, over a missing caller default.
+    revenue_value = (
+        receipt_totals.get('total')
+        if receipt_totals.get('total') is not None
+        else order_data.get('total', 0)
+    )
+    properties['OrderValue'] = revenue_value
     
     return send_klaviyo_event(
         metric_name="Mikels Placed Order",
         profile_email=customer_email,
         properties=properties,
-        value=order_data.get('total', 0),
+        value=revenue_value,
         unique_id=f"order-{order_data.get('order_number', '')}",
         profile_attrs=profile_attrs,
         return_result=return_result,
@@ -498,6 +512,11 @@ def klaviyo_send_order_cancellation(order_data, return_result=False):
         if len(parts) > 1:
             profile_attrs['last_name'] = parts[1]
 
+    revenue_value = (
+        cancellation.get('refunded_amount')
+        if cancellation.get('refunded_amount') is not None
+        else order_data.get('refund_amount', 0)
+    )
     properties = {
         'OrderNumber': order_number,
         'order_id': order_number,
@@ -505,6 +524,7 @@ def klaviyo_send_order_cancellation(order_data, return_result=False):
         'CustomerEmail': customer_email,
         'Receipt': receipt,
         'RefundAmount': cancellation.get('refunded_amount_display') or _format_eur(order_data.get('refund_amount', 0)),
+        'RefundValue': revenue_value,
         'CancellationMessage': cancellation.get('message') or '',
         'CancellationSupportMessage': cancellation.get('support_message') or '',
         'Source': 'mikels-earth-backend',
@@ -513,7 +533,7 @@ def klaviyo_send_order_cancellation(order_data, return_result=False):
         metric_name='Mikels Order Cancelled',
         profile_email=customer_email,
         properties=properties,
-        value=order_data.get('refund_amount', 0),
+        value=revenue_value,
         unique_id=f"order-cancelled-{order_number}",
         profile_attrs=profile_attrs,
         return_result=return_result,
@@ -904,11 +924,10 @@ def klaviyo_track_started_checkout(
 ):
     """Send the one canonical ``Mikels Started Checkout`` event to Klaviyo.
 
-    Both public paths use this function: the Stripe checkout-session route and
-    the persistent abandoned-cart route.  ``checkout_data`` remains accepted
-    for the original Stripe-style dictionary call contract; keyword arguments
-    are the explicit contract used by the dispatcher.  They produce the same
-    metric name and properties, so both paths trigger the same Klaviyo Flow.
+    The persistent abandoned-cart route is the single public dispatch path.
+    ``checkout_data`` remains accepted for test and compatibility callers, but
+    creating a Stripe Checkout Session must not call this function: it would
+    re-enter the Flow seconds after the cart endpoint did.
     """
     if checkout_data is not None:
         if not isinstance(checkout_data, dict):
@@ -935,12 +954,23 @@ def klaviyo_track_started_checkout(
 
     items_for_event = []
     for item in items:
+        quantity = int(item.get('quantity', 1) or 1)
+        unit_price = item.get('price', 0)
+        line_total = item.get('line_total')
+        line_total = line_total if line_total is not None else unit_price * quantity
         items_for_event.append({
             'ProductName': item.get('name', 'Producto'),
             'ProductImage': item.get('image', ''),
-            'Price': item.get('price', 0),
-            'PriceFormatted': _format_eur(item.get('price', 0)),
-            'Quantity': item.get('quantity', 1),
+            'Price': unit_price,
+            'PriceFormatted': item.get('unit_price_display') or _format_eur(unit_price),
+            'UnitPriceDisplay': item.get('unit_price_display') or _format_eur(unit_price),
+            'LineTotal': line_total,
+            'LineTotalDisplay': item.get('line_total_display') or _format_eur(line_total),
+            'LineDisplay': item.get('line_display') or (
+                f"{quantity} × {_format_eur(unit_price)} = {_format_eur(line_total)}"
+            ),
+            'PricingNote': item.get('pricing_note') or '',
+            'Quantity': quantity,
             'ProductURL': f"https://www.mikels.es/producto/{item.get('slug', '')}",
         })
 

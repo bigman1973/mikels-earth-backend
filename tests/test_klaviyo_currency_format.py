@@ -48,6 +48,8 @@ class KlaviyoCurrencyFormatTests(unittest.TestCase):
         self.assertEqual(properties['ShippingText'], 'GRATIS')
         self.assertEqual(properties['Tax'], '1,56 €')
         self.assertEqual(properties['Date'], '02/10/2026 08:15')
+        self.assertEqual(properties['OrderValue'], 17.15)
+        self.assertEqual(send_event.call_args.kwargs['value'], 17.15)
 
     @patch('src.services.klaviyo_service.send_klaviyo_event')
     def test_customer_and_internal_order_events_keep_the_saved_receipt(self, send_event):
@@ -108,8 +110,36 @@ class KlaviyoCurrencyFormatTests(unittest.TestCase):
         )
         properties = send_event.call_args.kwargs['properties']
         self.assertEqual(properties['Items'][0]['PriceFormatted'], '17,15 €')
+        self.assertEqual(properties['Items'][0]['LineTotalDisplay'], '17,15 €')
+        self.assertEqual(properties['Items'][0]['LineDisplay'], '1 × 17,15 € = 17,15 €')
         self.assertEqual(properties['TotalFormatted'], '17,15 €')
         self.assertEqual(properties['total_formatted'], '17,15 €')
+
+    @patch('src.services.klaviyo_service.send_klaviyo_event')
+    def test_cart_event_keeps_reservation_box_price_transparent(self, send_event):
+        send_event.return_value = True
+        klaviyo_service.klaviyo_track_started_checkout(
+            email='cliente@example.com',
+            items=[{
+                'name': 'Aceite Temprano',
+                'price': 19.90,
+                'quantity': 12,
+                'line_total': 218.90,
+                'unit_price_display': '19,90 €',
+                'line_total_display': '218,90 €',
+                'pricing_note': 'Caja de 12: pagas 11 y recibes 12',
+                'line_display': '12 × 19,90 € · Caja de 12: pagas 11 y recibes 12 = 218,90 €',
+                'slug': 'aceite-temprano-sin-filtrar',
+            }],
+            total=218.90,
+            cart_token='reservation-box-test',
+        )
+        event_item = send_event.call_args.kwargs['properties']['Items'][0]
+        self.assertEqual(event_item['LineTotalDisplay'], '218,90 €')
+        self.assertEqual(
+            event_item['LineDisplay'],
+            '12 × 19,90 € · Caja de 12: pagas 11 y recibes 12 = 218,90 €',
+        )
 
 
 if __name__ == '__main__':

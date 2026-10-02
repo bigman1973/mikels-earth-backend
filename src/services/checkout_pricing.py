@@ -26,6 +26,9 @@ class CheckoutLinePrice:
     tier_discount_percent: Decimal
     expected_line_total: Decimal
     volume_discount_amount: Decimal
+    bundle_quantity: int | None = None
+    paid_quantity: int | None = None
+    tier_label: str | None = None
 
 
 def _decimal(value: Any, *, field: str) -> Decimal:
@@ -147,9 +150,17 @@ def calculate_checkout_line_price(product: Any, quantity: int) -> CheckoutLinePr
     base_line_total = (base_unit_price * normalized_quantity).quantize(CENT, rounding=ROUND_HALF_UP)
     tier = _applicable_tier(product, normalized_quantity)
     payable_units = _bundle_payable_units(tier, normalized_quantity) if tier else None
+    bundle_quantity = None
+    paid_quantity = None
+    tier_label = None
     if payable_units is not None:
-        # A reservation case is not a percentage approximation: every full
-        # box has one unit included.  This keeps 12 × 19.90 € = 218.90 € exact.
+        # A reservation box is an exact "pay 11, receive 12" offer, rather
+        # than a percentage approximation.  The display must therefore state
+        # the included bottle instead of pretending that 12 × unit price is
+        # the lower payable amount.
+        bundle_quantity = int(tier['bundleQuantity'])
+        paid_quantity = int(tier['paidQuantity'])
+        tier_label = str(tier.get('label') or f'Caja de {bundle_quantity}')
         discount_percent = _nonnegative_decimal(tier.get("discount", 0)) or Decimal("0")
         expected_line_total = (base_unit_price * payable_units).quantize(CENT, rounding=ROUND_HALF_UP)
     else:
@@ -166,6 +177,9 @@ def calculate_checkout_line_price(product: Any, quantity: int) -> CheckoutLinePr
         tier_discount_percent=discount_percent,
         expected_line_total=expected_line_total,
         volume_discount_amount=(base_line_total - expected_line_total).quantize(CENT),
+        bundle_quantity=bundle_quantity,
+        paid_quantity=paid_quantity,
+        tier_label=tier_label,
     )
 
 

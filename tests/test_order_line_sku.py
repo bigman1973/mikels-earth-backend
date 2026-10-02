@@ -95,12 +95,10 @@ class OrderLineSkuTests(unittest.TestCase):
             ).one()
             self.assertEqual(product.to_frontend_dict()['sku'], 'MIKVET500')
 
-    @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
     def test_checkout_uses_database_sku_not_browser_sku(
         self,
         create_session,
-        dispatch_checkout,
     ):
         create_session.return_value = SimpleNamespace(
             id='cs_test_sku',
@@ -133,14 +131,11 @@ class OrderLineSkuTests(unittest.TestCase):
         metadata = session_params['line_items'][0]['price_data']['product_data']['metadata']
         self.assertEqual(metadata['sku'], 'MIKVET500')
         self.assertEqual(metadata['slug'], 'aceite-temprano-sin-filtrar')
-        dispatch_checkout.assert_called_once()
 
-    @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
     def test_checkout_uses_specific_database_sku_for_each_hidden_box(
         self,
         create_session,
-        dispatch_checkout,
     ):
         create_session.return_value = SimpleNamespace(
             id='cs_test_box_sku',
@@ -180,9 +175,6 @@ class OrderLineSkuTests(unittest.TestCase):
                 metadata = session_params['line_items'][0]['price_data']['product_data']['metadata']
                 self.assertEqual(metadata['sku'], expected_sku)
                 self.assertEqual(metadata['slug'], slug)
-
-        self.assertEqual(dispatch_checkout.call_count, 3)
-
     @patch('src.services.email_dispatcher.dispatch_post_purchase_event')
     @patch('src.routes.stripe_routes.dispatch_order_confirmation')
     @patch('src.routes.stripe_routes.dispatch_order_notification')

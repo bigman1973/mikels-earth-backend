@@ -100,9 +100,8 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             'quantity': quantity,
         }
 
-    @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
-    def test_all_live_catalogue_prices_are_sent_to_stripe_as_exact_cents(self, create_session, _dispatch):
+    def test_all_live_catalogue_prices_are_sent_to_stripe_as_exact_cents(self, create_session):
         create_session.return_value = SimpleNamespace(id='cs_test_catalogue', url='https://checkout.stripe.test/catalogue')
 
         items = [
@@ -123,10 +122,9 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         self.assertEqual(cents_to_eur(cents[3]), Decimal('19.90'))
         self.assertEqual(cents_to_eur(cents[6]), Decimal('40.30'))
 
-    @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
     @patch('src.routes.stripe_routes.stripe.Coupon.create')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
-    def test_multi_line_discount_preserves_exact_charge_and_metadata(self, create_session, create_coupon, _dispatch):
+    def test_multi_line_discount_preserves_exact_charge_and_metadata(self, create_session, create_coupon):
         create_session.return_value = SimpleNamespace(id='cs_test_discount', url='https://checkout.stripe.test/discount')
         create_coupon.return_value = SimpleNamespace(id='coupon_test_10')
         response = self.client.post('/api/stripe/create-checkout-session', json={
@@ -151,14 +149,12 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         self.assertEqual(params['metadata']['discount_amount'], '7.74')
         self.assertEqual(params['metadata']['total'], '92.26')
 
-    @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
     @patch('src.routes.stripe_routes.stripe.Coupon.create')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
     def test_each_volume_tier_creates_a_checkout_at_the_cart_total(
         self,
         create_session,
         create_coupon,
-        _dispatch,
     ):
         """The server accepts the same tier amount shown by the cart.
 
@@ -214,9 +210,8 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                 else:
                     create_coupon.assert_not_called()
 
-    @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
-    def test_volume_tier_rejects_an_undiscounted_browser_price(self, create_session, _dispatch):
+    def test_volume_tier_rejects_an_undiscounted_browser_price(self, create_session):
         create_session.return_value = SimpleNamespace(id='cs_should_not_exist', url='https://checkout.stripe.test/nope')
         response = self.client.post('/api/stripe/create-checkout-session', json={
             'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=12)],

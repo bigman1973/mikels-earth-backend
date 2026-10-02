@@ -59,7 +59,9 @@ class AbandonedCart(db.Model):
         return f"https://www.mikels.es/recuperar-carrito/{self.cart_token}"
     
     def get_items_html(self):
-        """Generar HTML con los productos para el email de Klaviyo"""
+        """Generate an already-priced cart table for the Klaviyo event."""
+        from src.services.order_receipt import format_eur
+
         items = self.items
         if not items:
             return "<p>Tu carrito está vacío</p>"
@@ -68,8 +70,10 @@ class AbandonedCart(db.Model):
         for item in items:
             name = item.get('name', 'Producto')
             image = item.get('image', '')
-            price = item.get('price', 0)
             quantity = item.get('quantity', 1)
+            line_display = item.get('line_display') or (
+                f"{quantity} × {format_eur(item.get('price', 0))}"
+            )
             
             html += f'''
             <tr style="border-bottom: 1px solid #eee; padding: 12px 0;">
@@ -78,10 +82,7 @@ class AbandonedCart(db.Model):
                 </td>
                 <td style="padding: 12px 8px;">
                     <strong style="color: #2d5016; font-size: 14px;">{name}</strong><br/>
-                    <span style="color: #666; font-size: 13px;">Cantidad: {quantity}</span>
-                </td>
-                <td style="padding: 12px 0; text-align: right;">
-                    <strong style="color: #333; font-size: 14px;">{price:.2f}€</strong>
+                    <span style="color: #666; font-size: 13px;">{line_display}</span>
                 </td>
             </tr>'''
         
@@ -109,6 +110,11 @@ class AbandonedCart(db.Model):
         """
         Crear o actualizar un carrito abandonado para un email.
         Si ya existe uno reciente (< 4 horas) sin convertir, lo actualiza.
+
+        Returns:
+            tuple[AbandonedCart, bool]: carrito persistido y si acaba de
+            crearse. Solo una creación justifica emitir el evento de Klaviyo;
+            las actualizaciones del mismo carrito no deben reiniciar el Flow.
         """
         from datetime import timedelta
         
@@ -128,7 +134,7 @@ class AbandonedCart(db.Model):
             existing.discount_code = discount_code
             existing.updated_at = datetime.utcnow()
             db.session.commit()
-            return existing
+            return existing, False
         else:
             # Crear nuevo carrito
             cart = cls(
@@ -141,4 +147,4 @@ class AbandonedCart(db.Model):
             )
             db.session.add(cart)
             db.session.commit()
-            return cart
+            return cart, True

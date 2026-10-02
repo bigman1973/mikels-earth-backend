@@ -35,6 +35,12 @@ class StartedCheckoutContractTests(unittest.TestCase):
                 price=19.90,
                 category='Conservas',
                 stock=10,
+                tiered_discount=[{
+                    'minQuantity': 12,
+                    'label': 'Caja de 12',
+                    'bundleQuantity': 12,
+                    'paidQuantity': 11,
+                }],
             ))
             db.session.commit()
         self.client = self.app.test_client()
@@ -99,7 +105,7 @@ class StartedCheckoutContractTests(unittest.TestCase):
             self.assertEqual(call.kwargs['properties']['Items'][0]['ProductName'], 'Producto de prueba')
 
     @patch('src.routes.abandoned_cart_routes.dispatch_started_checkout_event')
-    def test_abandoned_cart_endpoint_dispatches_canonical_contract(self, dispatch_event):
+    def test_abandoned_cart_endpoint_dispatches_one_canonical_event_per_cart(self, dispatch_event):
         response = self.client.post('/api/abandoned-cart/', json={
             'email': 'cliente@example.com',
             'customer_name': 'Cliente Prueba',
@@ -121,9 +127,43 @@ class StartedCheckoutContractTests(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(AbandonedCart.query.count(), 1)
 
-    @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
+        # A refresh or an edited form reuses the stored token but must not
+        # re-enter the Flow with another Started Checkout event.
+        duplicate = self.client.post('/api/abandoned-cart/', json={
+            'email': 'cliente@example.com',
+            'customer_name': 'Cliente Prueba',
+            'items': [self.item()],
+            'total': 19.90,
+        })
+        self.assertEqual(duplicate.status_code, 200)
+        dispatch_event.assert_called_once()
+
+    @patch('src.routes.abandoned_cart_routes.dispatch_started_checkout_event')
+    def test_abandoned_cart_event_uses_exact_box_line_display(self, dispatch_event):
+        item = self.item()
+        item.update({'quantity': 12, 'price': 18.2417})
+        response = self.client.post('/api/abandoned-cart/', json={
+            'email': 'caja@example.com',
+            'customer_name': 'Cliente Caja',
+            'items': [item],
+            # Browser totals are not evidence: the route must recompute the
+            # reservation-box price from the catalogue.
+            'total': 0.01,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        kwargs = dispatch_event.call_args.kwargs
+        event_item = kwargs['items'][0]
+        self.assertEqual(event_item['price'], 19.90)
+        self.assertEqual(event_item['line_total'], 218.90)
+        self.assertEqual(kwargs['total'], 218.90)
+        self.assertEqual(
+            event_item['line_display'],
+            '12 × 19,90 € · Caja de 12: pagas 11 y recibes 12 = 218,90 €',
+        )
+
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
-    def test_stripe_checkout_path_dispatches_canonical_contract(self, create_session, dispatch_event):
+    def test_stripe_checkout_path_does_not_dispatch_started_checkout(self, create_session):
         create_session.return_value = SimpleNamespace(id='cs_test_started_checkout', url='https://checkout.stripe.test/session')
         previous_frontend_url = os.environ.get('FRONTEND_URL')
         os.environ['FRONTEND_URL'] = 'https://www.mikels.es'
@@ -147,14 +187,8 @@ class StartedCheckoutContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()['sessionId'], 'cs_test_started_checkout')
-        dispatch_event.assert_called_once()
-        kwargs = dispatch_event.call_args.kwargs
-        self.assertEqual(kwargs['email'], 'cliente@example.com')
-        self.assertEqual(kwargs['customer_name'], 'Cliente Prueba')
-        self.assertEqual(kwargs['items'][0]['sku'], 'TEST-CHECKOUT-01')
-        self.assertEqual(kwargs['total'], 19.90)
-        self.assertEqual(kwargs['checkout_url'], 'https://www.mikels.es/checkout')
-        self.assertTrue(kwargs['cart_token'].startswith('MKL-'))
+        import src.routes.stripe_routes as stripe_routes
+        self.assertFalse(hasattr(stripe_routes, 'dispatch_started_checkout_event'))
 
     def test_tracker_has_one_definition(self):
         source_path = os.path.join(

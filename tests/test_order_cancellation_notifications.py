@@ -94,6 +94,8 @@ class OrderCancellationNotificationTests(unittest.TestCase):
         attrs = outbound['data']['attributes']
         self.assertEqual(attrs['metric']['data']['attributes']['name'], 'Mikels Order Cancelled')
         self.assertEqual(attrs['unique_id'], 'order-cancelled-MKL-CANCEL-TEST')
+        self.assertEqual(attrs['value'], 19.90)
+        self.assertEqual(attrs['properties']['RefundValue'], 19.90)
         self.assertEqual(
             attrs['properties']['Receipt']['cancellation']['refunded_amount_display'],
             '19,90 €',

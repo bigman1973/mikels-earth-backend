@@ -6,7 +6,7 @@ from decimal import Decimal
 import secrets
 from sqlalchemy import or_
 from src.services.whatsapp_service import notify_new_subscription
-from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_order_delivery_alert, dispatch_subscription_notification, dispatch_started_checkout_event
+from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_order_delivery_alert, dispatch_subscription_notification
 from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents, MoneyValueError
 from src.services.checkout_pricing import calculate_checkout_line_price, sent_line_total
 
@@ -294,32 +294,9 @@ def create_checkout_session():
             db.session.commit()
             raise
         
-        # Track "Started Checkout" en Klaviyo para el Flow de carrito abandonado
-        try:
-            checkout_data = {
-                'customer_email': customer_info['email'],
-                'customer_name': customer_info.get('name', ''),
-                'customer_phone': customer_info.get('phone', ''),
-                'items': items,
-                'subtotal': float(subtotal),
-                'total': float(total),
-                'discount_code': discount_code or '',
-                'discount_amount': float(discount_amount),
-                'order_number': order_number,
-                'checkout_url': f"{frontend_url}/checkout"
-            }
-            dispatch_started_checkout_event(
-                email=checkout_data['customer_email'],
-                customer_name=checkout_data['customer_name'],
-                items=checkout_data['items'],
-                total=checkout_data['total'],
-                checkout_url=checkout_data['checkout_url'],
-                items_html='',
-                cart_token=checkout_data.get('order_number', '')
-            )
-        except Exception as checkout_err:
-            print(f"\u26a0\ufe0f Error tracking started checkout: {checkout_err}")
-            # No bloquear el checkout si falla el tracking
+        # Started Checkout is intentionally emitted only by POST
+        # /api/abandoned-cart. Emitting it again here created duplicate Flow
+        # entries seconds apart for a single customer cart.
         
         return jsonify({
             'sessionId': session.id,
