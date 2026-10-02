@@ -61,10 +61,16 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
             "amount_display": format_eur(line_total),
         })
 
-    subtotal = _amount(getattr(order, "tax_base", None) if getattr(order, "tax_base", None) is not None else order.subtotal)
+    # Shop and Stripe prices are gross. The subtotal is therefore the exact sum
+    # of saved, charged line amounts — never a net tax base. IVA is not an
+    # additive receipt line; the total is tax-inclusive.
+    subtotal = sum((_item_total(item) for item in order.items or []), Decimal("0")).quantize(CENT, rounding=ROUND_HALF_UP)
     shipping = _amount(order.shipping_cost)
-    tax = _amount(getattr(order, "tax_total", None) if getattr(order, "tax_total", None) is not None else 0)
     total = _amount(order.total)
+    if subtotal + shipping != total:
+        raise ValueError(
+            "El resumen guardado no cuadra: líneas + envío debe coincidir con el total cobrado."
+        )
 
     shipping_lines = [
         value for value in [
@@ -98,10 +104,9 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
             "subtotal_display": format_eur(subtotal),
             "shipping": float(shipping),
             "shipping_display": "GRATIS" if shipping == 0 else format_eur(shipping),
-            "tax": float(tax),
-            "tax_display": format_eur(tax),
             "total": float(total),
             "total_display": format_eur(total),
+            "tax_included_label": "IVA incluido",
         },
         "shipping": {
             "lines": shipping_lines,

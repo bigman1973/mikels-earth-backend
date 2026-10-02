@@ -10,6 +10,10 @@ from src.models.user import db
 from src.models.order import Order
 from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
 from src.models.web_product import WebProduct
+# Imported so SQLAlchemy creates the support tables touched by the checkout
+# route while this focused suite exercises a real session creation path.
+from src.models.stock import StockReservation, StockMovement  # noqa: F401
+from src.models.abandoned_cart import AbandonedCart  # noqa: F401
 from src.routes.stripe_routes import stripe_bp
 from src.services.money import cents_to_eur, eur_to_cents
 
