@@ -426,7 +426,6 @@ def setup_cancellation_flow():
     metrics = requests.get(
         f'{KLAVIYO_API_URL}/metrics',
         headers=headers,
-        params={'page[size]': 50},
         timeout=20,
     )
     if metrics.status_code == 200:
@@ -460,7 +459,6 @@ def setup_cancellation_flow():
             metrics = requests.get(
                 f'{KLAVIYO_API_URL}/metrics',
                 headers=headers,
-                params={'page[size]': 50},
                 timeout=20,
             )
             if metrics.status_code == 200:
