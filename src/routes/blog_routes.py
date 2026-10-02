@@ -5,7 +5,6 @@ Incluye endpoints públicos, webhook de Brevo y panel admin
 import os
 import hashlib
 import hmac
-import jwt
 import uuid
 try:
     import boto3
@@ -19,19 +18,15 @@ try:
     CLOUDINARY_AVAILABLE = True
 except ImportError:
     CLOUDINARY_AVAILABLE = False
-from datetime import datetime, timedelta
-from functools import wraps
+from datetime import datetime
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 from src.models.user import db
 from src.models.blog import BlogPost
+from src.routes.auth_routes import admin_required, role_required
 
 blog_bp = Blueprint('blog', __name__)
 
-# Configuración
-ADMIN_USERNAME = os.getenv('BLOG_ADMIN_USERNAME', 'admin')
-ADMIN_PASSWORD = os.getenv('BLOG_ADMIN_PASSWORD', 'mikels2026')
-JWT_SECRET = os.getenv('JWT_SECRET', 'mikels-blog-secret-key-2026')
 BREVO_WEBHOOK_KEY = os.getenv('BREVO_WEBHOOK_KEY', '')
 
 # Configuración S3 para subida de imágenes
@@ -41,9 +36,9 @@ AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID', '')
 AWS_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY', '')
 
 # Configuración Cloudinary para subida de imágenes
-CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME', 'danlztass')
-CLOUDINARY_API_KEY = os.getenv('CLOUDINARY_API_KEY', '741671141733431')
-CLOUDINARY_API_SECRET = os.getenv('CLOUDINARY_API_SECRET', 'N68-9Y8-9Y8-9Y8-9Y8-9Y8-9Y8-9Y8')
+CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME', '')
+CLOUDINARY_API_KEY = os.getenv('CLOUDINARY_API_KEY', '')
+CLOUDINARY_API_SECRET = os.getenv('CLOUDINARY_API_SECRET', '')
 
 # Configurar Cloudinary si hay credenciales
 if CLOUDINARY_AVAILABLE:
@@ -59,36 +54,6 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-# ============================================
-# MIDDLEWARE DE AUTENTICACIÓN
-# ============================================
-
-def token_required(f):
-    """Decorador para proteger rutas admin"""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        
-        if not token:
-            return jsonify({'error': 'Token requerido'}), 401
-        
-        try:
-            # Remover 'Bearer ' si existe
-            if token.startswith('Bearer '):
-                token = token[7:]
-            
-            data = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
-            current_user = data['username']
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token expirado'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'error': 'Token inválido'}), 401
-        
-        return f(current_user, *args, **kwargs)
-    
-    return decorated
 
 
 def verify_brevo_webhook(request_data, signature):
@@ -265,38 +230,16 @@ def brevo_webhook():
 # ENDPOINTS ADMIN
 # ============================================
 
-@blog_bp.route('/admin/login', methods=['POST'])
-def admin_login():
-    """Login para el panel admin"""
-    try:
-        data = request.json
-        username = data.get('username', '')
-        password = data.get('password', '')
-        
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-            token = jwt.encode({
-                'username': username,
-                'exp': datetime.utcnow() + timedelta(hours=24)
-            }, JWT_SECRET, algorithm='HS256')
-            
-            return jsonify({'success': True, 'token': token, 'username': username})
-        
-        return jsonify({'error': 'Credenciales inválidas'}), 401
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @blog_bp.route('/admin/verify', methods=['GET'])
-@token_required
-def verify_token(current_user):
-    """Verificar si el token es válido"""
-    return jsonify({'valid': True, 'username': current_user})
-
-
+@admin_required
+@role_required('admin')
+def verify_token():
+    """Verificar la sesión Microsoft activa del panel."""
+    return jsonify({'valid': True, 'username': request.admin_user.email})
 @blog_bp.route('/admin/posts', methods=['GET'])
-@token_required
-def admin_get_posts(current_user):
+@admin_required
+@role_required('admin')
+def admin_get_posts():
     """Obtener todos los posts (incluye borradores)"""
     try:
         page = request.args.get('page', 1, type=int)
@@ -334,8 +277,9 @@ def admin_get_posts(current_user):
 
 
 @blog_bp.route('/admin/posts/<int:post_id>', methods=['GET'])
-@token_required
-def admin_get_post(current_user, post_id):
+@admin_required
+@role_required('admin')
+def admin_get_post(post_id):
     """Obtener un post por ID (admin)"""
     try:
         post = BlogPost.query.get(post_id)
@@ -350,8 +294,9 @@ def admin_get_post(current_user, post_id):
 
 
 @blog_bp.route('/admin/posts/<int:post_id>', methods=['PUT'])
-@token_required
-def admin_update_post(current_user, post_id):
+@admin_required
+@role_required('admin')
+def admin_update_post(post_id):
     """Actualizar un post"""
     try:
         post = BlogPost.query.get(post_id)
@@ -402,8 +347,9 @@ def admin_update_post(current_user, post_id):
 
 
 @blog_bp.route('/admin/posts/<int:post_id>', methods=['DELETE'])
-@token_required
-def admin_delete_post(current_user, post_id):
+@admin_required
+@role_required('admin')
+def admin_delete_post(post_id):
     """Eliminar un post"""
     try:
         post = BlogPost.query.get(post_id)
@@ -422,8 +368,9 @@ def admin_delete_post(current_user, post_id):
 
 
 @blog_bp.route('/admin/posts/<int:post_id>/publish', methods=['POST'])
-@token_required
-def admin_publish_post(current_user, post_id):
+@admin_required
+@role_required('admin')
+def admin_publish_post(post_id):
     """Publicar un borrador"""
     try:
         post = BlogPost.query.get(post_id)
@@ -443,8 +390,9 @@ def admin_publish_post(current_user, post_id):
 
 
 @blog_bp.route('/admin/upload-image', methods=['POST'])
-@token_required
-def admin_upload_image(current_user):
+@admin_required
+@role_required('admin')
+def admin_upload_image():
     """Subir una imagen para el blog"""
     try:
         if 'image' not in request.files:
@@ -519,8 +467,9 @@ def admin_upload_image(current_user):
 
 
 @blog_bp.route('/admin/posts', methods=['POST'])
-@token_required
-def admin_create_post(current_user):
+@admin_required
+@role_required('admin')
+def admin_create_post():
     """Crear un nuevo post desde el panel admin"""
     try:
         data = request.json
