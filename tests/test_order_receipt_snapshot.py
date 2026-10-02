@@ -37,6 +37,7 @@ class OrderReceiptSnapshotTests(unittest.TestCase):
             fiscal_city='Lleida',
             customer_email='cliente@example.test',
             email_sent=True,
+            customer_notes='mañanas',
         )
         receipt = build_receipt_snapshot(order)
 
@@ -49,6 +50,7 @@ class OrderReceiptSnapshotTests(unittest.TestCase):
         self.assertIn('+34 600 000 000', receipt['shipping']['phone'])
         self.assertTrue(receipt['billing']['requested'])
         self.assertTrue(receipt['confirmation']['sent'])
+        self.assertEqual(receipt['notes'], 'mañanas')
 
     def test_receipt_refuses_to_render_when_line_sum_and_total_do_not_match(self):
         order = SimpleNamespace(

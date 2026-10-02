@@ -124,6 +124,9 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
             "lines": shipping_lines,
             "phone": order.customer_phone or "",
         },
+        # Checkout notes are part of the paid order snapshot. They appear after
+        # delivery address in the screen, customer email and internal notice.
+        "notes": (getattr(order, "customer_notes", None) or "").strip(),
         "billing": {
             "requested": bool(order.needs_invoice),
             "lines": billing_lines,
@@ -131,6 +134,9 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
         "confirmation": {
             "email": order.customer_email,
             "sent": bool(order.email_sent),
+            "status": getattr(order, "confirmation_delivery_status", None) or (
+                "accepted" if order.email_sent else "pending"
+            ),
         },
         "next_steps": [
             "Preparamos tu pedido.",

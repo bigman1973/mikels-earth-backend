@@ -43,7 +43,7 @@ class CanonicalOrderEmailDeliveryTests(unittest.TestCase):
         klaviyo_confirmation.return_value = False
 
         self.assertFalse(email_dispatcher.dispatch_order_confirmation(ORDER))
-        klaviyo_confirmation.assert_called_once_with(ORDER)
+        klaviyo_confirmation.assert_called_once_with(ORDER, return_result=False)
         brevo_confirmation.assert_not_called()
 
     @patch.dict(os.environ, {'KLAVIYO_API_KEY': 'unit-test-key', 'BREVO_API_KEY': 'legacy-test-key'}, clear=False)
@@ -53,7 +53,7 @@ class CanonicalOrderEmailDeliveryTests(unittest.TestCase):
         klaviyo_notification.return_value = False
 
         self.assertFalse(email_dispatcher.dispatch_order_notification(ORDER))
-        klaviyo_notification.assert_called_once_with(ORDER)
+        klaviyo_notification.assert_called_once_with(ORDER, return_result=False)
         brevo_notification.assert_not_called()
 
     @patch.dict(os.environ, {'KLAVIYO_API_KEY': 'unit-test-key'}, clear=False)
@@ -84,6 +84,34 @@ class CanonicalOrderEmailDeliveryTests(unittest.TestCase):
             payload['data']['attributes']['properties']['Receipt']['totals']['shipping_display'],
             'GRATIS',
         )
+
+    @patch.dict(os.environ, {'KLAVIYO_API_KEY': 'unit-test-key'}, clear=False)
+    @patch('src.services.klaviyo_service.requests.post')
+    def test_klaviyo_failure_reason_is_available_to_the_order_alarm(self, post):
+        post.return_value = Mock(status_code=400, text='invalid event payload')
+
+        accepted, error = klaviyo_service.klaviyo_send_order_confirmation(ORDER, return_result=True)
+
+        self.assertFalse(accepted)
+        self.assertIn('Klaviyo HTTP 400', error)
+        self.assertIn('invalid event payload', error)
+
+    @patch.dict(os.environ, {'BREVO_API_KEY': 'alert-test-key', 'OWNER_EMAIL': 'info@mikels.es'}, clear=False)
+    @patch('src.services.email_service.requests.post')
+    def test_order_alarm_is_plain_text_and_never_a_customer_template(self, post):
+        from src.services.email_service import send_order_delivery_alert
+
+        post.return_value = Mock(status_code=201, text='created')
+        self.assertTrue(send_order_delivery_alert(ORDER, {
+            'Confirmación al cliente': 'Klaviyo HTTP 500: unavailable',
+        }))
+
+        payload = post.call_args.kwargs['json']
+        self.assertEqual(payload['to'][0]['email'], 'info@mikels.es')
+        self.assertIn('MKL-TEST-DELIVERY', payload['subject'])
+        self.assertIn('Klaviyo HTTP 500', payload['textContent'])
+        self.assertNotIn('htmlContent', payload)
+        self.assertNotIn('cliente@example.com', str(payload['to']))
 
 
 if __name__ == '__main__':

@@ -58,6 +58,59 @@ def send_email(to_email, subject, html_content):
         return False
 
 
+def send_order_delivery_alert(order_data, failures):
+    """Send a plain-text owner alert when Klaviyo rejects an order event.
+
+    This is intentionally not a customer confirmation and does not use any
+    legacy Brevo template. It provides an independent operational signal when
+    Klaviyo itself is unavailable or rejects an event.
+    """
+    api_key = os.getenv('BREVO_API_KEY', '').strip()
+    if not api_key:
+        print('❌ [ALERTA PEDIDO] BREVO_API_KEY no configurada')
+        return False
+
+    owner_email = os.getenv('OWNER_EMAIL', 'info@mikels.es').strip() or 'info@mikels.es'
+    order_number = str(order_data.get('order_number') or 'sin número')
+    customer_email = str(order_data.get('customer_email') or 'sin email')
+    attempted_at = datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')
+    failure_lines = '\n'.join(
+        f'- {name}: {reason or "Klaviyo no aceptó el evento"}'
+        for name, reason in failures.items()
+    )
+    text_content = (
+        'ALERTA DE ENTREGA DE PEDIDO\n\n'
+        f'Pedido: {order_number}\n'
+        f'Cliente: {customer_email}\n'
+        f'Hora: {attempted_at}\n\n'
+        'Klaviyo no aceptó uno o más eventos de este pedido:\n'
+        f'{failure_lines}\n\n'
+        'La confirmación antigua de Brevo NO se ha enviado al cliente. '
+        'Revisa el pedido en el panel y contacta al cliente manualmente si procede.'
+    )
+    payload = {
+        'sender': {'name': "Mikel's Fruit · Alertas", 'email': 'info@mikels.es'},
+        'to': [{'email': owner_email, 'name': 'Administración'}],
+        'subject': f'[ALERTA] Confirmación no enviada · {order_number}',
+        'textContent': text_content,
+    }
+    try:
+        response = requests.post(
+            BREVO_API_URL,
+            json=payload,
+            headers={'accept': 'application/json', 'api-key': api_key, 'content-type': 'application/json'},
+            timeout=15,
+        )
+        if response.status_code == 201:
+            print(f'⚠️ [ALERTA PEDIDO] Enviada a {owner_email} para {order_number}')
+            return True
+        print(f'❌ [ALERTA PEDIDO] Brevo HTTP {response.status_code}: {response.text}')
+        return False
+    except Exception as error:
+        print(f'❌ [ALERTA PEDIDO] Excepción: {error}')
+        return False
+
+
 def format_order_email(order_data):
     """
     Formatea los datos del pedido en HTML para email
@@ -1238,4 +1291,3 @@ def send_newsletter_subscription_confirmation(email):
     except Exception as e:
         print(f"Error sending newsletter confirmation email: {str(e)}")
         return False
-

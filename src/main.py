@@ -151,6 +151,19 @@ def create_tables():
             except Exception as receipt_migration_error:
                 db.session.rollback()
                 print(f"Migration receipt fields (non-critical): {receipt_migration_error}")
+            # Delivery audit: the orders panel must expose failed canonical
+            # receipt events without relying on Railway logs.
+            try:
+                db.session.execute(db.text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmation_delivery_status VARCHAR(20) DEFAULT 'pending'"))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmation_delivery_error TEXT'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmation_attempted_at TIMESTAMP'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmation_sent_at TIMESTAMP'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmation_alert_sent BOOLEAN DEFAULT FALSE'))
+                db.session.commit()
+                print("Migration: order confirmation delivery audit fields added")
+            except Exception as confirmation_delivery_migration_error:
+                db.session.rollback()
+                print(f"Migration confirmation delivery fields (non-critical): {confirmation_delivery_migration_error}")
             # Migración: añadir campos de costes logísticos a web_products
             try:
                 db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS shipping_cost FLOAT DEFAULT 0.0'))

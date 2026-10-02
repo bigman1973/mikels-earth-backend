@@ -16,7 +16,7 @@ def _use_brevo():
     return bool(os.getenv('BREVO_API_KEY', '').strip())
 
 
-def dispatch_order_notification(order_data):
+def dispatch_order_notification(order_data, return_result=False):
     """
     Envía el aviso interno del pedido exclusivamente por Klaviyo.
 
@@ -26,17 +26,19 @@ def dispatch_order_notification(order_data):
     sending a second, inconsistent email.
     """
     if not _use_klaviyo():
-        print("❌ [DISPATCHER] Klaviyo no configurado: aviso interno de pedido no enviado")
-        return False
+        error = "Klaviyo no configurado: aviso interno de pedido no enviado"
+        print(f"❌ [DISPATCHER] {error}")
+        return (False, error) if return_result else False
     try:
         from src.services.klaviyo_service import klaviyo_notify_new_order
-        return klaviyo_notify_new_order(order_data)
+        return klaviyo_notify_new_order(order_data, return_result=return_result)
     except Exception as e:
-        print(f"❌ [DISPATCHER] Error Klaviyo order notification: {e}")
-        return False
+        error = f"Error Klaviyo aviso interno: {e}"
+        print(f"❌ [DISPATCHER] {error}")
+        return (False, error) if return_result else False
 
 
-def dispatch_order_confirmation(order_data):
+def dispatch_order_confirmation(order_data, return_result=False):
     """
     Envía la confirmación de pedido exclusivamente por Klaviyo.
 
@@ -45,13 +47,33 @@ def dispatch_order_confirmation(order_data):
     confirmations.
     """
     if not _use_klaviyo():
-        print("❌ [DISPATCHER] Klaviyo no configurado: confirmación de pedido no enviada")
-        return False
+        error = "Klaviyo no configurado: confirmación de pedido no enviada"
+        print(f"❌ [DISPATCHER] {error}")
+        return (False, error) if return_result else False
     try:
         from src.services.klaviyo_service import klaviyo_send_order_confirmation
-        return klaviyo_send_order_confirmation(order_data)
+        return klaviyo_send_order_confirmation(order_data, return_result=return_result)
     except Exception as e:
-        print(f"❌ [DISPATCHER] Error Klaviyo order confirmation: {e}")
+        error = f"Error Klaviyo confirmación de pedido: {e}"
+        print(f"❌ [DISPATCHER] {error}")
+        return (False, error) if return_result else False
+
+
+def dispatch_order_delivery_alert(order_data, failures):
+    """Alert the owner in plain text when an order event is not accepted.
+
+    Brevo is used here only as an out-of-band operational transport. It never
+    sends an order template to the customer and cannot become a confirmation
+    fallback.
+    """
+    if not _use_brevo():
+        print("❌ [DISPATCHER] Brevo no configurado: alarma de entrega no enviada")
+        return False
+    try:
+        from src.services.email_service import send_order_delivery_alert
+        return send_order_delivery_alert(order_data, failures)
+    except Exception as e:
+        print(f"❌ [DISPATCHER] Error enviando alarma de entrega: {e}")
         return False
 
 

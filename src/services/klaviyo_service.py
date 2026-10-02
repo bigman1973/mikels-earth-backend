@@ -48,7 +48,7 @@ def _get_headers():
     }
 
 
-def send_klaviyo_event(metric_name, profile_email, properties, value=None, unique_id=None, profile_attrs=None):
+def send_klaviyo_event(metric_name, profile_email, properties, value=None, unique_id=None, profile_attrs=None, return_result=False):
     """
     Envía un evento a Klaviyo via la Events API.
     
@@ -111,6 +111,9 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
         }
     }
     
+    def result(success, error=None):
+        return (success, error) if return_result else success
+
     try:
         payload = _json_safe_payload(payload)
         response = requests.post(
@@ -121,14 +124,16 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
         
         if response.status_code == 202:
             print(f"✅ [KLAVIYO] Evento '{metric_name}' enviado para {profile_email}")
-            return True
+            return result(True)
         else:
-            print(f"❌ [KLAVIYO] Error enviando evento '{metric_name}': {response.status_code} - {response.text}")
-            return False
+            error = f"Klaviyo HTTP {response.status_code}: {response.text[:500]}"
+            print(f"❌ [KLAVIYO] Error enviando evento '{metric_name}': {error}")
+            return result(False, error)
             
     except Exception as e:
+        error = f"Klaviyo excepción: {str(e)}"
         print(f"❌ [KLAVIYO] Excepción enviando evento '{metric_name}': {str(e)}")
-        return False
+        return result(False, error)
 
 
 def _find_klaviyo_profile_id(email):
@@ -321,7 +326,7 @@ def _build_items_html(items):
     return '<br/>'.join(html_parts)
 
 
-def klaviyo_notify_new_order(order_data):
+def klaviyo_notify_new_order(order_data, return_result=False):
     """
     Envía evento 'New Order' a Klaviyo (notificación interna)
     Trigger para Flow que envía email a info@mikels.es
@@ -383,19 +388,21 @@ def klaviyo_notify_new_order(order_data):
         profile_email=owner_email,
         properties=properties,
         value=order_data.get('total', 0),
-        unique_id=f"order-internal-{order_data.get('order_number', '')}"
+        unique_id=f"order-internal-{order_data.get('order_number', '')}",
+        return_result=return_result,
     )
 
 
-def klaviyo_send_order_confirmation(order_data):
+def klaviyo_send_order_confirmation(order_data, return_result=False):
     """
     Envía evento 'Placed Order' a Klaviyo (confirmación al cliente)
     Trigger para Flow que envía email de confirmación al cliente
     """
     customer_email = order_data.get('customer_email')
     if not customer_email or customer_email == 'N/A':
-        print("⚠️ [KLAVIYO] No se puede enviar confirmación: email no disponible")
-        return False
+        error = "No se puede enviar confirmación: email del cliente no disponible"
+        print(f"⚠️ [KLAVIYO] {error}")
+        return (False, error) if return_result else False
     
     items = order_data.get('items', [])
     receipt = order_data.get('receipt') or {}
@@ -462,7 +469,8 @@ def klaviyo_send_order_confirmation(order_data):
         properties=properties,
         value=order_data.get('total', 0),
         unique_id=f"order-{order_data.get('order_number', '')}",
-        profile_attrs=profile_attrs
+        profile_attrs=profile_attrs,
+        return_result=return_result,
     )
 
 

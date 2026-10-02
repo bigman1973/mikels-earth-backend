@@ -57,6 +57,15 @@ class Order(db.Model):
     holded_invoice_id = db.Column(db.String(100))  # ID de la factura/ticket en Holded
     holded_doc_number = db.Column(db.String(50))  # Número de documento (F260044 o T2600005)
     email_sent = db.Column(db.Boolean, default=False)  # Si se ha enviado la factura/ticket por email
+
+    # Canonical order-confirmation delivery audit. These fields are separate
+    # from document/invoice email flags so the panel can show whether Klaviyo
+    # accepted the paid-order receipt event without inspecting application logs.
+    confirmation_delivery_status = db.Column(db.String(20), default='pending')
+    confirmation_delivery_error = db.Column(db.Text)
+    confirmation_attempted_at = db.Column(db.DateTime)
+    confirmation_sent_at = db.Column(db.DateTime)
+    confirmation_alert_sent = db.Column(db.Boolean, default=False)
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -113,6 +122,13 @@ class Order(db.Model):
             'holded_invoice_id': self.holded_invoice_id,
             'holded_doc_number': self.holded_doc_number,
             'email_sent': self.email_sent or False,
+            'confirmation_delivery': {
+                'status': self.confirmation_delivery_status or 'pending',
+                'error': self.confirmation_delivery_error,
+                'attempted_at': self.confirmation_attempted_at.isoformat() if self.confirmation_attempted_at else None,
+                'sent_at': self.confirmation_sent_at.isoformat() if self.confirmation_sent_at else None,
+                'alert_sent': bool(self.confirmation_alert_sent),
+            },
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'paid_at': self.paid_at.isoformat() if self.paid_at else None

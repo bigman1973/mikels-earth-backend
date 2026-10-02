@@ -6,7 +6,7 @@ from decimal import Decimal
 import secrets
 from sqlalchemy import or_
 from src.services.whatsapp_service import notify_new_subscription
-from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification, dispatch_started_checkout_event
+from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_order_delivery_alert, dispatch_subscription_notification, dispatch_started_checkout_event
 from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents, MoneyValueError
 from src.services.checkout_pricing import calculate_checkout_line_price, sent_line_total
 
@@ -31,6 +31,14 @@ def generate_subscription_number():
     timestamp = datetime.now().strftime('%Y%m%d')
     random_part = secrets.token_hex(4).upper()
     return f'SUB-{timestamp}-{random_part}'
+
+
+def _coerce_delivery_result(result):
+    """Accept the detailed dispatcher result while tolerating legacy booleans."""
+    if isinstance(result, tuple) and len(result) == 2:
+        return bool(result[0]), result[1]
+    return bool(result), None
+
 
 @stripe_bp.route('/config', methods=['GET'])
 def get_config():
@@ -682,24 +690,54 @@ def stripe_webhook():
                     # confirmation for an order whose stock was not recorded.
                     return jsonify({'error': 'No se pudo registrar el pedido'}), 500
                 
-                # Enviar notificación al cliente primero. La ficha guardada
-                # registra la aceptación antes de que se use para el aviso
-                # interno y para la pantalla de confirmación.
-                confirmation_accepted = dispatch_order_confirmation(order_data)
-                if confirmation_accepted:
-                    try:
-                        new_order.email_sent = True
-                        new_order.receipt_snapshot = build_receipt_snapshot(new_order)
-                        order_data['receipt'] = new_order.receipt_snapshot
-                        db.session.commit()
-                    except Exception as email_status_error:
-                        db.session.rollback()
-                        print(f"⚠️ Error registrando la aceptación de confirmación: {email_status_error}")
+                # Klaviyo acceptance is persisted on the order. This status is
+                # visible in the panel; it is deliberately not inferred from a
+                # log line or from an invoice-document email.
+                confirmation_accepted, confirmation_error = _coerce_delivery_result(
+                    dispatch_order_confirmation(
+                        order_data,
+                        return_result=True,
+                    )
+                )
+                confirmation_attempted_at = datetime.utcnow()
+                try:
+                    new_order.confirmation_attempted_at = confirmation_attempted_at
+                    new_order.confirmation_delivery_status = 'accepted' if confirmation_accepted else 'failed'
+                    new_order.confirmation_delivery_error = None if confirmation_accepted else (confirmation_error or 'Klaviyo no aceptó el evento')
+                    new_order.confirmation_sent_at = confirmation_attempted_at if confirmation_accepted else None
+                    new_order.email_sent = bool(confirmation_accepted)
+                    new_order.receipt_snapshot = build_receipt_snapshot(new_order)
+                    order_data['receipt'] = new_order.receipt_snapshot
+                    db.session.commit()
+                except Exception as email_status_error:
+                    db.session.rollback()
+                    confirmation_accepted = False
+                    confirmation_error = f"No se pudo guardar el estado de confirmación: {email_status_error}"
+                    print(f"⚠️ Error registrando la aceptación de confirmación: {email_status_error}")
 
-                # El aviso interno consumes exactly the saved Receipt through
-                # its Klaviyo Flow. The old WhatsApp helper only logged to an
-                # invalid legacy number and did not deliver a notification.
-                dispatch_order_notification(order_data)
+                # The internal notice is the same Receipt-driven Klaviyo flow.
+                # WhatsApp has no role here: the historic helper merely wrote
+                # a message for an invalid legacy number into application logs.
+                internal_accepted, internal_error = _coerce_delivery_result(
+                    dispatch_order_notification(
+                        order_data,
+                        return_result=True,
+                    )
+                )
+
+                failures = {}
+                if not confirmation_accepted:
+                    failures['Confirmación al cliente'] = confirmation_error
+                if not internal_accepted:
+                    failures['Aviso interno'] = internal_error
+                if failures:
+                    alert_sent = dispatch_order_delivery_alert(order_data, failures)
+                    try:
+                        new_order.confirmation_alert_sent = bool(alert_sent)
+                        db.session.commit()
+                    except Exception as alert_status_error:
+                        db.session.rollback()
+                        print(f"⚠️ Error registrando alarma de confirmación: {alert_status_error}")
                 
                 # Generar cupón de 10% para próxima compra y enviar evento a Klaviyo
                 try:
