@@ -363,7 +363,14 @@ def admin_update_post(current_user, post_id):
         
         if 'title' in data:
             post.title = data['title']
-            post.slug = BlogPost.generate_slug(data['title'])
+            # A metadata-only title correction must never change a published
+            # URL.  Existing links and the static SEO canonical continue to
+            # resolve to the established slug when this explicit flag is used.
+            if not data.get('preserve_slug', False):
+                post.slug = BlogPost.generate_slug(data['title'])
+
+        if 'excerpt' in data:
+            post.excerpt = data['excerpt']
         
         if 'content' in data:
             post.content = data['content']
