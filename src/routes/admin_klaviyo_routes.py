@@ -11,7 +11,9 @@ from src.routes.auth_routes import admin_required, role_required
 admin_klaviyo_bp = Blueprint('admin_klaviyo', __name__)
 
 KLAVIYO_API_URL = "https://a.klaviyo.com/api"
-KLAVIYO_REVISION = "2025-04-15"
+# Templates attached to Flow messages must be updated using the current
+# Templates API contract.  The order-event sender has its own revision.
+KLAVIYO_REVISION = "2026-07-15"
 
 
 def _get_klaviyo_headers():
