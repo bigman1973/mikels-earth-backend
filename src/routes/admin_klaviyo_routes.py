@@ -689,3 +689,146 @@ def update_flow_action(action_id):
         return jsonify({'success': True}), 200
     else:
         return jsonify({'error': resp.text, 'status': resp.status_code}), resp.status_code
+
+
+def _review_request_safety_filters(cancelled_metric_id, review_submitted_metric_id):
+    """Prevent review emails after a cancellation or a completed review.
+
+    The filters are evaluated at each email action.  ``flow-start`` means a
+    later refund or a review submitted during the Flow's seven-day delay stops
+    the pending message without blocking a different paid order in the future.
+    """
+    zero_since_flow_start = {
+        'type': 'numeric',
+        'operator': 'equals',
+        'value': 0,
+    }
+    return {
+        'condition_groups': [{
+            'conditions': [
+                {
+                    'type': 'profile-metric',
+                    'metric_id': cancelled_metric_id,
+                    'measurement': 'count',
+                    'measurement_filter': zero_since_flow_start,
+                    'timeframe_filter': {'type': 'date', 'operator': 'flow-start'},
+                    'metric_filters': None,
+                },
+                {
+                    'type': 'profile-metric',
+                    'metric_id': review_submitted_metric_id,
+                    'measurement': 'count',
+                    'measurement_filter': zero_since_flow_start.copy(),
+                    'timeframe_filter': {'type': 'date', 'operator': 'flow-start'},
+                    'metric_filters': None,
+                },
+            ],
+        }],
+    }
+
+
+def _klaviyo_metric_ids(headers, names):
+    """Resolve a small exact-name set from Klaviyo's paginated metric catalog."""
+    unresolved = set(names)
+    found = {}
+    url = f'{KLAVIYO_API_URL}/metrics'
+    params = {'page[size]': 100}
+
+    for _ in range(10):
+        response = requests.get(url, headers=headers, params=params, timeout=20)
+        if response.status_code != 200:
+            raise RuntimeError(f'Klaviyo metrics {response.status_code}: {response.text[:500]}')
+        body = response.json()
+        for metric in body.get('data', []):
+            name = (metric.get('attributes') or {}).get('name')
+            if name in unresolved:
+                found[name] = metric.get('id')
+                unresolved.discard(name)
+        if not unresolved:
+            return found
+        next_url = (body.get('links') or {}).get('next')
+        if not next_url:
+            break
+        url = next_url
+        params = None
+
+    missing = ', '.join(sorted(unresolved))
+    raise RuntimeError(f'No se encontraron las métricas de Klaviyo: {missing}')
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/configure-review-request-safety', methods=['PUT'])
+@admin_required
+@role_required('admin')
+def configure_review_request_safety():
+    """Apply cancellation/submission suppression to both review Flow emails.
+
+    The action IDs are deliberately fixed to the two known messages in
+    ``Solicitud de Reseña — 7 días post-compra``.  Every action is read first,
+    then its complete definition is patched back with only
+    ``additional_filters`` changed, preserving its template and metrics.
+    """
+    headers = _get_klaviyo_headers()
+    metric_names = ('Mikels Order Cancelled', 'Mikels Review Submitted')
+    try:
+        metric_ids = _klaviyo_metric_ids(headers, metric_names)
+    except RuntimeError as error:
+        return jsonify({'error': str(error)}), 502
+
+    filters = _review_request_safety_filters(
+        metric_ids['Mikels Order Cancelled'],
+        metric_ids['Mikels Review Submitted'],
+    )
+    action_ids = ('106877925', '106967289')
+    definitions = {}
+
+    # Preflight every action before changing either message.
+    for action_id in action_ids:
+        response = requests.get(
+            f'{KLAVIYO_API_URL}/flow-actions/{action_id}', headers=headers, timeout=20,
+        )
+        if response.status_code != 200:
+            return jsonify({
+                'error': f'No se pudo leer la acción de reseña {action_id}',
+                'status': response.status_code,
+                'detail': response.text[:500],
+            }), 502
+        definition = (response.json().get('data') or {}).get('attributes', {}).get('definition')
+        message = ((definition or {}).get('data') or {}).get('message') or {}
+        if not definition or not message or message.get('transactional'):
+            return jsonify({
+                'error': f'La acción {action_id} no es un correo de reseña comercial válido',
+            }), 409
+        definitions[action_id] = definition
+
+    updated = []
+    for action_id in action_ids:
+        definition = definitions[action_id]
+        definition['data']['message']['additional_filters'] = filters
+        payload = {
+            'data': {
+                'type': 'flow-action',
+                'id': action_id,
+                'attributes': {'definition': definition},
+            },
+        }
+        response = requests.patch(
+            f'{KLAVIYO_API_URL}/flow-actions/{action_id}',
+            headers=headers,
+            json=payload,
+            timeout=20,
+        )
+        if response.status_code not in [200, 204]:
+            return jsonify({
+                'error': f'Klaviyo rechazó el filtro de la acción {action_id}',
+                'status': response.status_code,
+                'detail': response.text[:500],
+                'updated_action_ids': updated,
+            }), 502
+        updated.append(action_id)
+
+    return jsonify({
+        'success': True,
+        'action_ids': updated,
+        'metric_ids': metric_ids,
+        'filters': filters,
+    }), 200
