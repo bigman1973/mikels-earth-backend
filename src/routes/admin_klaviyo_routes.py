@@ -387,7 +387,7 @@ def setup_cancellation_flow():
     existing_flow = requests.get(
         f'{KLAVIYO_API_URL}/flows',
         headers=headers,
-        params={'filter': f'equals(name,"{flow_name}")', 'page[size]': 100},
+        params={'filter': f'equals(name,"{flow_name}")', 'page[size]': 50},
         timeout=20,
     )
     if existing_flow.status_code == 200:
@@ -409,7 +409,7 @@ def setup_cancellation_flow():
     metrics = requests.get(
         f'{KLAVIYO_API_URL}/metrics',
         headers=headers,
-        params={'filter': f'equals(name,"{metric_name}")', 'page[size]': 100},
+        params={'filter': f'equals(name,"{metric_name}")', 'page[size]': 50},
         timeout=20,
     )
     if metrics.status_code == 200:
@@ -440,7 +440,7 @@ def setup_cancellation_flow():
             metrics = requests.get(
                 f'{KLAVIYO_API_URL}/metrics',
                 headers=headers,
-                params={'filter': f'equals(name,"{metric_name}")', 'page[size]': 100},
+                params={'filter': f'equals(name,"{metric_name}")', 'page[size]': 50},
                 timeout=20,
             )
             if metrics.status_code == 200:
