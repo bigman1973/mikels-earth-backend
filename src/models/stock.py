@@ -35,7 +35,9 @@ class StockMovement(db.Model):
     __tablename__ = 'stock_movements'
 
     id = db.Column(db.Integer, primary_key=True)
-    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False, index=True)
+    # Not every auditable movement is a customer order: an authorised harvest
+    # allocation can correct the web catalogue before any sale occurs.
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=True, index=True)
     product_id = db.Column(db.Integer, db.ForeignKey('web_products.id'), nullable=False, index=True)
     quantity_delta = db.Column(db.Integer, nullable=False)
     reason = db.Column(db.String(40), nullable=False, index=True)

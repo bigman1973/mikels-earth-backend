@@ -44,6 +44,12 @@ class WebProduct(db.Model):
     weight = db.Column(db.String(100))
     sold_out = db.Column(db.Boolean, default=False)
     sold_out_message = db.Column(db.String(200))
+    # Reservation products are paid in full but fulfil later.  Keep the
+    # commercial mode and the original reservation allocation in the catalogue
+    # so the storefront and paid-order snapshot do not infer either value.
+    reservation_only = db.Column(db.Boolean, default=False, nullable=False)
+    reservation_message = db.Column(db.Text)
+    reservation_stock_total = db.Column(db.Integer)
     
     # Contenido
     ingredients = db.Column(db.Text)
@@ -121,6 +127,11 @@ class WebProduct(db.Model):
             'subscriptionDiscount': self.subscription_discount,
             'subscriptionFrequencies': self.subscription_frequencies or [],
         }
+
+        if self.reservation_only:
+            result['reservationOnly'] = True
+            result['reservationMessage'] = self.reservation_message or ''
+            result['reservationStockTotal'] = self.reservation_stock_total or self.stock or 0
         
         # Campos opcionales - solo incluir si tienen valor
         # El stock web es la disponibilidad comercial publicada. Un producto
@@ -170,6 +181,9 @@ class WebProduct(db.Model):
         d['displayOrder'] = self.display_order
         d['shippingCost'] = self.shipping_cost or 0
         d['preparationCost'] = self.preparation_cost or 0
+        d['reservationOnly'] = bool(self.reservation_only)
+        d['reservationMessage'] = self.reservation_message or ''
+        d['reservationStockTotal'] = self.reservation_stock_total
         d['createdAt'] = self.created_at.isoformat() if self.created_at else None
         d['updatedAt'] = self.updated_at.isoformat() if self.updated_at else None
         return d

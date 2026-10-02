@@ -55,8 +55,14 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
     The numeric fields are included for the storefront. The matching `display`
     fields are sent to Klaviyo so its templates never perform money arithmetic.
     """
+    order_items = order.items or []
+    is_reservation = bool(order_items) and all(
+        bool(item.get("reservation_only"))
+        for item in order_items
+        if isinstance(item, dict)
+    )
     lines = []
-    for item in order.items or []:
+    for item in order_items:
         quantity = int(item.get("quantity", 1) or 1)
         line_total = _item_total(item).quantize(CENT, rounding=ROUND_HALF_UP)
         lines.append({
@@ -69,7 +75,7 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
     # Shop and Stripe prices are gross. The subtotal is therefore the exact sum
     # of saved line amounts — never a net tax base. A checkout coupon is stored
     # separately and reconciled once here; IVA is not an additive receipt line.
-    subtotal = sum((_item_total(item) for item in order.items or []), Decimal("0")).quantize(CENT, rounding=ROUND_HALF_UP)
+    subtotal = sum((_item_total(item) for item in order_items), Decimal("0")).quantize(CENT, rounding=ROUND_HALF_UP)
     discount = _amount(getattr(order, "discount_amount", 0))
     shipping = _amount(order.shipping_cost)
     total = _amount(order.total)
@@ -100,7 +106,7 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
             "name": "Mikel's Fruit",
             "logo_url": RECEIPT_LOGO_URL,
         },
-        "heading": "Pedido confirmado",
+        "heading": "Reserva confirmada" if is_reservation else "Pedido confirmado",
         "order_number": order.order_number,
         "paid_at": order.paid_at.isoformat() if order.paid_at else None,
         "paid_at_display": format_receipt_datetime(order.paid_at),
@@ -138,8 +144,15 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
                 "accepted" if order.email_sent else "pending"
             ),
         },
-        "next_steps": [
-            "Preparamos tu pedido.",
-            "Te llegará un correo con el número de seguimiento.",
-        ],
+        "next_steps": (
+            [
+                "Guardamos tus botellas.",
+                "Los envíos salen la última semana de octubre.",
+                "Te escribimos cuando salga el tuyo.",
+            ]
+            if is_reservation else [
+                "Preparamos tu pedido.",
+                "Te llegará un correo con el número de seguimiento.",
+            ]
+        ),
     }

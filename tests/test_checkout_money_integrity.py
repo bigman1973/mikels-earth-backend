@@ -19,7 +19,7 @@ from src.services.money import cents_to_eur, eur_to_cents
 
 
 CATALOGUE_PRICES = (
-    ('aceite-temprano-sin-filtrar', '17.15'),
+    ('aceite-temprano-sin-filtrar', '19.90'),
     ('paraguayo-almibar', '17.15'),
     ('nectarina-almibar', '17.15'),
     ('aceite-oliva-ecologico', '19.90'),
@@ -56,10 +56,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                     visible_in_store=True,
                     tiered_discount=(
                         [
-                            {'minQuantity': 2, 'discount': 0, 'label': 'Pack Dúo'},
-                            {'minQuantity': 12, 'discount': 15, 'label': '1 caja'},
-                            {'minQuantity': 24, 'discount': 20, 'label': '2 cajas'},
-                            {'minQuantity': 36, 'discount': 25, 'label': '4 cajas'},
+                            {'minQuantity': 12, 'label': 'Caja de 12', 'bundleQuantity': 12, 'paidQuantity': 11},
                         ]
                         if index == 1 else None
                     ),
@@ -122,7 +119,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         cents = [entry['price_data']['unit_amount'] for entry in stripe_items]
         expected = [eur_to_cents(price) for _, price in CATALOGUE_PRICES]
         self.assertEqual(cents, expected)
-        self.assertEqual(cents_to_eur(cents[0]), Decimal('17.15'))
+        self.assertEqual(cents_to_eur(cents[0]), Decimal('19.90'))
         self.assertEqual(cents_to_eur(cents[3]), Decimal('19.90'))
         self.assertEqual(cents_to_eur(cents[6]), Decimal('40.30'))
 
@@ -134,7 +131,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         create_coupon.return_value = SimpleNamespace(id='coupon_test_10')
         response = self.client.post('/api/stripe/create-checkout-session', json={
             'items': [
-                self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.15', quantity=2),
+                self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=2),
                 self._checkout_item(4, 'aceite-oliva-ecologico', '19.90', quantity=1),
                 self._checkout_item(7, 'pack-fruta-premium', '40.30', quantity=1),
             ],
@@ -147,12 +144,12 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         params = create_session.call_args.kwargs
         self.assertEqual(
             [entry['price_data']['unit_amount'] for entry in params['line_items']],
-            [1715, 1990, 4030],
+            [1990, 1990, 4030],
         )
         self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 774)
-        self.assertEqual(params['metadata']['subtotal'], '94.50')
+        self.assertEqual(params['metadata']['subtotal'], '100.00')
         self.assertEqual(params['metadata']['discount_amount'], '7.74')
-        self.assertEqual(params['metadata']['total'], '86.76')
+        self.assertEqual(params['metadata']['total'], '92.26')
 
     @patch('src.routes.stripe_routes.dispatch_started_checkout_event')
     @patch('src.routes.stripe_routes.stripe.Coupon.create')
@@ -166,15 +163,14 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         """The server accepts the same tier amount shown by the cart.
 
         Stripe unit amounts are whole cents, so the checkout retains the
-        17.15 € catalogue line and applies the exact tier saving as a session
-        discount. This is essential at 12 units: 17.15 × 85% is 14.5775 € per
-        unit, but the payable total must still be exactly 174.93 €.
+        19.90 € catalogue line and applies one free bottle per full box as a
+        session discount. At 12 units the payable total is 11 × 19.90 €.
         """
         cases = (
-            (2, Decimal('0'), Decimal('34.30')),
-            (12, Decimal('15'), Decimal('174.93')),
-            (24, Decimal('20'), Decimal('329.28')),
-            (36, Decimal('25'), Decimal('463.05')),
+            (2, Decimal('0'), Decimal('39.80')),
+            (12, Decimal('0'), Decimal('218.90')),
+            (24, Decimal('0'), Decimal('437.80')),
+            (36, Decimal('0'), Decimal('656.70')),
         )
         for quantity, percent, expected_total in cases:
             with self.subTest(quantity=quantity):
@@ -184,7 +180,8 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                     id=f'cs_test_tier_{quantity}',
                     url=f'https://checkout.stripe.test/tier-{quantity}',
                 )
-                cart_unit_price = Decimal('17.15') * (Decimal('100') - percent) / Decimal('100')
+                payable_units = quantity - (quantity // 12)
+                cart_unit_price = (Decimal('19.90') * payable_units / Decimal(quantity)).quantize(Decimal('0.0001'))
                 response = self.client.post('/api/stripe/create-checkout-session', json={
                     'items': [self._checkout_item(
                         1,
@@ -199,11 +196,11 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                 params = create_session.call_args.kwargs
                 self.assertEqual(
                     params['line_items'][0]['price_data']['unit_amount'],
-                    1715,
+                    1990,
                 )
                 self.assertEqual(params['line_items'][0]['quantity'], quantity)
-                expected_discount = (Decimal('17.15') * quantity - expected_total).quantize(Decimal('0.01'))
-                self.assertEqual(params['metadata']['subtotal'], format(Decimal('17.15') * quantity, '.2f'))
+                expected_discount = (Decimal('19.90') * quantity - expected_total).quantize(Decimal('0.01'))
+                self.assertEqual(params['metadata']['subtotal'], format(Decimal('19.90') * quantity, '.2f'))
                 self.assertEqual(params['metadata']['volume_discount_amount'], format(expected_discount, '.2f'))
                 self.assertEqual(params['metadata']['discount_amount'], format(expected_discount, '.2f'))
                 self.assertEqual(params['metadata']['total'], format(expected_total, '.2f'))
@@ -222,7 +219,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
     def test_volume_tier_rejects_an_undiscounted_browser_price(self, create_session, _dispatch):
         create_session.return_value = SimpleNamespace(id='cs_should_not_exist', url='https://checkout.stripe.test/nope')
         response = self.client.post('/api/stripe/create-checkout-session', json={
-            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.15', quantity=12)],
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=12)],
             'customer_info': self.customer,
         })
         self.assertEqual(response.status_code, 409)
@@ -328,7 +325,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             'data': {'object': {
                 'id': 'cs_test_volume_tier',
                 'mode': 'payment',
-                'amount_total': 17493,
+                'amount_total': 21890,
                 'payment_intent': 'pi_test_volume_tier',
                 'customer_email': 'cliente@example.com',
                 'customer_details': {'email': 'cliente@example.com', 'phone': '+34600000000'},
@@ -338,8 +335,8 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                 'metadata': {
                     'order_number': 'MKL-TEST-VOLUME-TIER',
                     'customer_name': 'Cliente de prueba',
-                    'subtotal': '205.80',
-                    'discount_amount': '30.87',
+                    'subtotal': '238.80',
+                    'discount_amount': '19.90',
                     'discount_code': '',
                     'needs_invoice': 'False',
                     'stock_checkout_token': 'tax-test-volume-tier',
@@ -347,7 +344,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             }},
         }
         list_line_items.return_value = SimpleNamespace(data=[SimpleNamespace(
-            amount_total=17493,
+            amount_total=21890,
             quantity=12,
             description='Aceite temprano sin filtrar',
             price=SimpleNamespace(product=SimpleNamespace(metadata={
@@ -363,7 +360,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                 rules={
                     'MIKTEST01': {'kind': 'single', 'rate': '0.04'},
                     '__checkout_pricing__': {
-                        '0': {'receipt_line_total': '205.80'},
+                        '0': {'receipt_line_total': '238.80', 'reservation_only': True},
                     },
                 },
                 expires_at=datetime.utcnow() + timedelta(minutes=30),
@@ -375,14 +372,16 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
 
         with self.app.app_context():
             order = Order.query.filter_by(order_number='MKL-TEST-VOLUME-TIER').one()
-            self.assertEqual(Decimal(str(order.subtotal)), Decimal('205.80'))
-            self.assertEqual(Decimal(str(order.total)), Decimal('174.93'))
-            self.assertEqual(Decimal(str(order.items[0]['gross_total'])), Decimal('174.93'))
-            self.assertEqual(Decimal(str(order.items[0]['receipt_line_total'])), Decimal('205.80'))
-            self.assertEqual(Decimal(str(order.discount_amount)), Decimal('30.87'))
-            self.assertEqual(order.receipt_snapshot['lines'][0]['amount_display'], '205,80 €')
-            self.assertEqual(order.receipt_snapshot['totals']['discount_display'], '30,87 €')
-            self.assertEqual(order.receipt_snapshot['totals']['total_display'], '174,93 €')
+            self.assertEqual(Decimal(str(order.subtotal)), Decimal('238.80'))
+            self.assertEqual(Decimal(str(order.total)), Decimal('218.90'))
+            self.assertEqual(Decimal(str(order.items[0]['gross_total'])), Decimal('218.90'))
+            self.assertEqual(Decimal(str(order.items[0]['receipt_line_total'])), Decimal('238.80'))
+            self.assertTrue(order.items[0]['reservation_only'])
+            self.assertEqual(Decimal(str(order.discount_amount)), Decimal('19.90'))
+            self.assertEqual(order.receipt_snapshot['heading'], 'Reserva confirmada')
+            self.assertEqual(order.receipt_snapshot['lines'][0]['amount_display'], '238,80 €')
+            self.assertEqual(order.receipt_snapshot['totals']['discount_display'], '19,90 €')
+            self.assertEqual(order.receipt_snapshot['totals']['total_display'], '218,90 €')
 
 
 if __name__ == '__main__':

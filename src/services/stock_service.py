@@ -220,3 +220,29 @@ def restock_fully_refunded_order(order_id, reference):
         reversals.append(reversal)
     db.session.flush()
     return reversals
+
+
+def adjust_web_stock(product, quantity, reason, reference=None):
+    """Apply an authorized catalogue correction with an immutable audit row."""
+    before = int(product.stock or 0)
+    after = int(quantity)
+    if after < 0:
+        raise ValueError('El stock web no puede ser negativo.')
+    delta = after - before
+    if delta == 0:
+        return None
+    product.stock = after
+    product.sold_out = after == 0
+    movement = StockMovement(
+        # Catalogue corrections are not customer orders.
+        order_id=None,
+        product_id=product.id,
+        quantity_delta=delta,
+        reason=reason,
+        reference=reference,
+        stock_before=before,
+        stock_after=after,
+    )
+    db.session.add(movement)
+    db.session.flush()
+    return movement

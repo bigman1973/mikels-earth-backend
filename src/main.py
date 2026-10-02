@@ -173,6 +173,25 @@ def create_tables():
             except Exception as mig_err3:
                 db.session.rollback()
                 print(f"Migration costs fields (non-critical): {mig_err3}")
+            # Reservation catalogue fields.  They keep pre-order fulfilment
+            # messaging and the original allocation separate from ordinary
+            # in-stock products without changing Holded or its quantities.
+            try:
+                db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS reservation_only BOOLEAN DEFAULT FALSE'))
+                db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS reservation_message TEXT'))
+                db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS reservation_stock_total INTEGER'))
+                db.session.commit()
+                print("Migration: reservation catalogue fields added to web_products")
+            except Exception as reservation_product_migration_error:
+                db.session.rollback()
+                print(f"Migration reservation catalogue fields (non-critical): {reservation_product_migration_error}")
+            try:
+                db.session.execute(db.text('ALTER TABLE stock_movements ALTER COLUMN order_id DROP NOT NULL'))
+                db.session.commit()
+                print("Migration: stock adjustments may be recorded without an order")
+            except Exception as stock_adjustment_migration_error:
+                db.session.rollback()
+                print(f"Migration stock adjustment audit (non-critical): {stock_adjustment_migration_error}")
             # Migración: quitar NOT NULL de email en coupons (para cupones públicos sin email)
             try:
                 db.session.execute(db.text('ALTER TABLE coupons ALTER COLUMN email DROP NOT NULL'))

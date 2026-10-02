@@ -110,6 +110,7 @@ def create_checkout_session():
                 item['_checkout_line_key'] = str(len(checkout_pricing_snapshot))
                 checkout_pricing_snapshot[item['_checkout_line_key']] = {
                     'receipt_line_total': eur_metadata(expected.base_line_total, field='subtotal de línea'),
+                    'reservation_only': bool(db_product.reservation_only),
                 }
                 volume_discount_amount += expected.volume_discount_amount
             else:
@@ -526,6 +527,8 @@ def stripe_webhook():
                             receipt_line['receipt_line_total'],
                             field='subtotal de línea guardado',
                         ))
+                    if receipt_line.get('reservation_only'):
+                        order_item['reservation_only'] = True
                     if product_slug:
                         order_item['slug'] = product_slug
                     items.append(order_item)

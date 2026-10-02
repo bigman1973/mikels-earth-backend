@@ -688,6 +688,13 @@ def update_web_product(product_id):
             product.sold_out = data['soldOut']
         if 'soldOutMessage' in data:
             product.sold_out_message = data['soldOutMessage']
+        if 'reservationOnly' in data:
+            product.reservation_only = bool(data['reservationOnly'])
+        if 'reservationMessage' in data:
+            product.reservation_message = data['reservationMessage']
+        if 'reservationStockTotal' in data:
+            value = data['reservationStockTotal']
+            product.reservation_stock_total = int(value) if value not in (None, '') else None
         if 'ingredients' in data:
             product.ingredients = data['ingredients']
         if 'nutritionalInfo' in data:
@@ -744,6 +751,57 @@ def update_web_product(product_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+@admin_panel_bp.route('/web-products/<int:product_id>/reservation-policy', methods=['PUT'])
+@admin_required
+@role_required('admin')
+def set_reservation_policy(product_id):
+    """Apply the approved reservation policy with a stock audit movement.
+
+    This intentionally changes only the web catalogue.  It never calls Holded
+    and records the old harvest removal/new harvest allocation in stock history.
+    """
+    from src.models.web_product import WebProduct
+    from src.services.stock_service import adjust_web_stock
+    try:
+        product = WebProduct.query.get(product_id)
+        if not product:
+            return jsonify({'error': 'Producto no encontrado'}), 404
+        data = request.get_json() or {}
+        required = {'price', 'stock', 'reservationMessage', 'reservationStockTotal', 'tieredDiscount'}
+        missing = sorted(field for field in required if field not in data)
+        if missing:
+            return jsonify({'error': f'Faltan campos de reserva: {", ".join(missing)}'}), 400
+
+        product.price = float(data['price'])
+        product.reservation_only = True
+        product.reservation_message = str(data['reservationMessage']).strip()
+        product.reservation_stock_total = int(data['reservationStockTotal'])
+        product.tiered_discount = data['tieredDiscount']
+        product.volume_discount = None
+        product.sold_out = False
+        product.sold_out_message = None
+        product.active = True
+        product.visible_in_store = True
+        movement = adjust_web_stock(
+            product,
+            int(data['stock']),
+            reason='reservation_harvest_2026_27',
+            reference='Asignación web de reserva · cosecha 2026/27',
+        )
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'product': product.to_admin_dict(),
+            'movement': movement.to_dict() if movement else None,
+        })
+    except (TypeError, ValueError) as error:
+        db.session.rollback()
+        return jsonify({'error': f'Configuración de reserva no válida: {error}'}), 400
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({'error': str(error)}), 500
 
 
 @admin_panel_bp.route('/web-products/<int:product_id>', methods=['DELETE'])

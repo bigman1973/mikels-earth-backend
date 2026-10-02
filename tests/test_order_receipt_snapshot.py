@@ -148,6 +148,47 @@ class OrderReceiptSnapshotTests(unittest.TestCase):
         self.assertEqual(receipt['totals']['discount_display'], '30,87 €')
         self.assertEqual(receipt['totals']['total_display'], '174,93 €')
 
+    def test_reservation_receipt_uses_saved_reservation_steps(self):
+        order = SimpleNamespace(
+            order_number='MKL-TEST-RESERVA',
+            paid_at=datetime(2026, 10, 2, 8, 15),
+            items=[{
+                'name': 'Aceite temprano sin filtrar',
+                'quantity': 12,
+                'gross_total': '218.90',
+                'receipt_line_total': '238.80',
+                'reservation_only': True,
+            }],
+            discount_code=None,
+            discount_amount='19.90',
+            shipping_cost=0,
+            total='218.90',
+            shipping_address='Calle de prueba 1',
+            shipping_postal_code='25003',
+            shipping_city='Lleida',
+            shipping_country='España',
+            customer_phone='',
+            needs_invoice=False,
+            fiscal_name=None,
+            fiscal_nif=None,
+            fiscal_address=None,
+            fiscal_postal_code=None,
+            fiscal_city=None,
+            customer_email='cliente@example.com',
+            email_sent=True,
+        )
+
+        receipt = build_receipt_snapshot(order)
+        self.assertEqual(receipt['heading'], 'Reserva confirmada')
+        self.assertEqual(receipt['totals']['subtotal_display'], '238,80 €')
+        self.assertEqual(receipt['totals']['discount_display'], '19,90 €')
+        self.assertEqual(receipt['totals']['total_display'], '218,90 €')
+        self.assertEqual(receipt['next_steps'], [
+            'Guardamos tus botellas.',
+            'Los envíos salen la última semana de octubre.',
+            'Te escribimos cuando salga el tuyo.',
+        ])
+
     def test_tax_snapshot_applies_single_holded_rate_to_charged_gross_total(self):
         base, tax = calculate_tax_totals_from_snapshot(
             [{'sku': 'MIKPARA450R', 'gross_total': '17.15'}],
