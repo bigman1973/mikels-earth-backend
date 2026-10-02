@@ -6,12 +6,12 @@ El backend en Railway no tiene ese problema.
 from flask import Blueprint, request, jsonify
 import os
 import requests
+from src.routes.auth_routes import admin_required, role_required
 
 admin_klaviyo_bp = Blueprint('admin_klaviyo', __name__)
 
 KLAVIYO_API_URL = "https://a.klaviyo.com/api"
 KLAVIYO_REVISION = "2025-04-15"
-ADMIN_KEY = "mikels-admin-2026"
 
 
 def _get_klaviyo_headers():
@@ -25,17 +25,13 @@ def _get_klaviyo_headers():
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/update-profiles', methods=['POST'])
+@admin_required
+@role_required('admin')
 def update_klaviyo_profiles():
     """
     Actualizar el campo coupon_code en múltiples perfiles de Klaviyo.
     Body: { "profiles": [{"email": "...", "coupon_code": "..."}] }
-    Header: X-Admin-Key: mikels-admin-2026
     """
-    # Verificar admin key
-    admin_key = request.headers.get('X-Admin-Key', '')
-    if admin_key != ADMIN_KEY:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     data = request.get_json()
     profiles = data.get('profiles', [])
     
@@ -106,6 +102,8 @@ def update_klaviyo_profiles():
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/create-campaign', methods=['POST'])
+@admin_required
+@role_required('admin')
 def create_klaviyo_campaign():
     """
     Crear un template y una campaña en Klaviyo (en estado DRAFT).
@@ -120,10 +118,6 @@ def create_klaviyo_campaign():
         "from_name": "MIKEL'S EARTH"
     }
     """
-    admin_key = request.headers.get('X-Admin-Key', '')
-    if admin_key != ADMIN_KEY:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     data = request.get_json()
     headers = _get_klaviyo_headers()
     
@@ -231,11 +225,10 @@ def create_klaviyo_campaign():
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/list-templates', methods=['GET'])
+@admin_required
+@role_required('admin')
 def list_klaviyo_templates():
     """Listar todos los templates de Klaviyo"""
-    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     headers = _get_klaviyo_headers()
     resp = requests.get(f"{KLAVIYO_API_URL}/templates", headers=headers)
     
@@ -254,11 +247,10 @@ def list_klaviyo_templates():
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/get-template/<template_id>', methods=['GET'])
+@admin_required
+@role_required('admin')
 def get_klaviyo_template(template_id):
     """Obtener el HTML de un template específico"""
-    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     headers = _get_klaviyo_headers()
     resp = requests.get(f"{KLAVIYO_API_URL}/templates/{template_id}", headers=headers)
     
@@ -276,11 +268,10 @@ def get_klaviyo_template(template_id):
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/update-template/<template_id>', methods=['PUT'])
+@admin_required
+@role_required('admin')
 def update_klaviyo_template(template_id):
     """Actualizar el HTML de un template"""
-    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     body = request.get_json()
     new_html = body.get('html')
     new_name = body.get('name')
@@ -312,11 +303,10 @@ def update_klaviyo_template(template_id):
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/create-template', methods=['POST'])
+@admin_required
+@role_required('admin')
 def create_klaviyo_template():
     """Crear un nuevo template en Klaviyo"""
-    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     body = request.get_json()
     name = body.get('name')
     html = body.get('html')
@@ -348,11 +338,10 @@ def create_klaviyo_template():
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/list-flows', methods=['GET'])
+@admin_required
+@role_required('admin')
 def list_klaviyo_flows():
     """Listar todos los flows de Klaviyo"""
-    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     headers = _get_klaviyo_headers()
     resp = requests.get(f"{KLAVIYO_API_URL}/flows", headers=headers)
     
@@ -372,11 +361,10 @@ def list_klaviyo_flows():
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/flow-actions/<flow_id>', methods=['GET'])
+@admin_required
+@role_required('admin')
 def get_flow_actions(flow_id):
     """Obtener las acciones de un flow específico"""
-    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     headers = _get_klaviyo_headers()
     resp = requests.get(f"{KLAVIYO_API_URL}/flows/{flow_id}/flow-actions", headers=headers)
     
@@ -395,11 +383,10 @@ def get_flow_actions(flow_id):
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/update-flow-action/<action_id>', methods=['PUT'])
+@admin_required
+@role_required('admin')
 def update_flow_action(action_id):
     """Actualizar los settings de un flow action (para cambiar template)"""
-    if request.headers.get('X-Admin-Key') != ADMIN_KEY:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     body = request.get_json()
     
     headers = _get_klaviyo_headers()
