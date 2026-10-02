@@ -15,7 +15,10 @@ from src.services.money import as_eur
 
 CENT = Decimal("0.01")
 RECEIPT_VERSION = 1
-RECEIPT_LOGO_URL = "https://www.mikels.es/logo-mikels-fruit.png"
+# The approved 360 px brand asset is hosted in the Klaviyo library. This URL is
+# intentionally stable, unlike Vite's hashed build assets, and is used by the
+# customer and internal email templates.
+RECEIPT_LOGO_URL = "https://cdn.klaviyomail.com/company/R53vEW/images/8039af27-bab3-4421-b130-b7c73836d581.png"
 
 
 def _amount(value: Any) -> Decimal:
