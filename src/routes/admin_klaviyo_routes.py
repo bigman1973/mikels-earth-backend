@@ -732,7 +732,9 @@ def _klaviyo_metric_ids(headers, names):
     unresolved = set(names)
     found = {}
     url = f'{KLAVIYO_API_URL}/metrics'
-    params = {'page[size]': 100}
+    # The current Metrics endpoint rejects page-size query parameters; follow
+    # its opaque ``links.next`` cursor instead of sending a size hint.
+    params = None
 
     for _ in range(10):
         response = requests.get(url, headers=headers, params=params, timeout=20)
