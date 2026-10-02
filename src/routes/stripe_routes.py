@@ -839,8 +839,8 @@ def stripe_webhook():
         # Pago reembolsado (total o parcial)
         charge = event['data']['object']
         payment_intent_id = charge.get('payment_intent', '')
-        amount_refunded = charge.get('amount_refunded', 0) / 100  # cents to euros
-        amount_total = charge.get('amount', 0) / 100
+        amount_refunded = cents_to_eur(charge.get('amount_refunded', 0), field='reembolso Stripe')
+        amount_total = cents_to_eur(charge.get('amount', 0), field='total Stripe')
         is_full_refund = (amount_refunded >= amount_total)
         
         print(f"Refund detected: PI={payment_intent_id}, refunded={amount_refunded}€, total={amount_total}€, full={is_full_refund}")
@@ -863,6 +863,18 @@ def stripe_webhook():
                 
                 order.admin_notes = (order.admin_notes or '') + f'\nReembolso Stripe: {amount_refunded}€ de {amount_total}€ ({"total" if is_full_refund else "parcial"}) - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
                 db.session.commit()
+                if is_full_refund:
+                    # The refund is already durable before contacting Klaviyo.
+                    # The helper uses the paid receipt snapshot and persists an
+                    # idempotent delivery state for Stripe webhook retries.
+                    from src.services.order_cancellation import dispatch_full_refund_cancellation
+                    accepted, cancellation_error, attempted = dispatch_full_refund_cancellation(
+                        order,
+                        amount_refunded,
+                    )
+                    if attempted:
+                        outcome = 'aceptado por Klaviyo' if accepted else f'no aceptado: {cancellation_error}'
+                        print(f"{'✅' if accepted else '⚠️'} Aviso de anulación {order.order_number}: {outcome}")
                 print(f"✅ Order {order.order_number} marked as {'refunded' if is_full_refund else 'partially_refunded'}")
             else:
                 print(f"⚠️ No order found for payment_intent: {payment_intent_id}")

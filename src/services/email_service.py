@@ -78,6 +78,15 @@ def send_order_delivery_alert(order_data, failures):
         f'- {name}: {reason or "Klaviyo no aceptó el evento"}'
         for name, reason in failures.items()
     )
+    is_cancellation = any('anulación' in str(name).lower() for name in failures)
+    event_label = 'AVISO DE ANULACIÓN' if is_cancellation else 'CONFIRMACIÓN DE PEDIDO'
+    action_line = (
+        'El aviso de anulación por reembolso NO se ha enviado al cliente. '
+        'Revisa el pedido en el panel y contacta al cliente manualmente si procede.'
+        if is_cancellation else
+        'La confirmación antigua de Brevo NO se ha enviado al cliente. '
+        'Revisa el pedido en el panel y contacta al cliente manualmente si procede.'
+    )
     text_content = (
         'ALERTA DE ENTREGA DE PEDIDO\n\n'
         f'Pedido: {order_number}\n'
@@ -85,13 +94,12 @@ def send_order_delivery_alert(order_data, failures):
         f'Hora: {attempted_at}\n\n'
         'Klaviyo no aceptó uno o más eventos de este pedido:\n'
         f'{failure_lines}\n\n'
-        'La confirmación antigua de Brevo NO se ha enviado al cliente. '
-        'Revisa el pedido en el panel y contacta al cliente manualmente si procede.'
+        f'{action_line}'
     )
     payload = {
         'sender': {'name': "Mikel's Fruit · Alertas", 'email': 'info@mikels.es'},
         'to': [{'email': owner_email, 'name': 'Administración'}],
-        'subject': f'[ALERTA] Confirmación no enviada · {order_number}',
+        'subject': f'[ALERTA] {event_label} no enviado · {order_number}',
         'textContent': text_content,
     }
     try:

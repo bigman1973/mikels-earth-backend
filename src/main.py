@@ -164,6 +164,21 @@ def create_tables():
             except Exception as confirmation_delivery_migration_error:
                 db.session.rollback()
                 print(f"Migration confirmation delivery fields (non-critical): {confirmation_delivery_migration_error}")
+            # Cancellation audit: an order that was refunded needs a visible
+            # record of the customer notice without overwriting its original
+            # payment confirmation status.
+            try:
+                db.session.execute(db.text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_delivery_status VARCHAR(20) DEFAULT 'pending'"))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_delivery_error TEXT'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_attempted_at TIMESTAMP'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_sent_at TIMESTAMP'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_alert_sent BOOLEAN DEFAULT FALSE'))
+                db.session.execute(db.text('ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_refund_amount FLOAT'))
+                db.session.commit()
+                print("Migration: order cancellation delivery audit fields added")
+            except Exception as cancellation_delivery_migration_error:
+                db.session.rollback()
+                print(f"Migration cancellation delivery fields (non-critical): {cancellation_delivery_migration_error}")
             # Migración: añadir campos de costes logísticos a web_products
             try:
                 db.session.execute(db.text('ALTER TABLE web_products ADD COLUMN IF NOT EXISTS shipping_cost FLOAT DEFAULT 0.0'))

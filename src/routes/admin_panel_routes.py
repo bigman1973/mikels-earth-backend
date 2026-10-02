@@ -1458,6 +1458,7 @@ def sync_stripe_refunds():
         
         updated = []
         errors = []
+        full_refund_notices = []
         
         for order in orders:
             try:
@@ -1493,6 +1494,7 @@ def sync_stripe_refunds():
                             )
                             order.admin_notes = (order.admin_notes or '') + f'\nSincronizado: Reembolso total {refund_amount}€ detectado - {datetime.utcnow().strftime("%d/%m/%Y %H:%M")}'
                             updated.append({'order': order.order_number, 'new_status': 'refunded', 'amount': refund_amount})
+                            full_refund_notices.append((order.id, refund_amount))
                         elif charge.amount_refunded > 0:
                             order.payment_status = 'partially_refunded'
                             refund_amount = charge.amount_refunded / 100
@@ -1503,6 +1505,25 @@ def sync_stripe_refunds():
         
         if updated:
             db.session.commit()
+
+        # Orders found by a manual Stripe sync need the same customer notice as
+        # the Stripe webhook path. The notification helper is idempotent, so a
+        # later webhook cannot duplicate it.
+        for order_id, refund_amount in full_refund_notices:
+            order = Order.query.get(order_id)
+            try:
+                from src.services.order_cancellation import dispatch_full_refund_cancellation
+                accepted, notice_error, attempted = dispatch_full_refund_cancellation(order, refund_amount)
+                if attempted and not accepted:
+                    errors.append({
+                        'order': order.order_number,
+                        'error': f'Aviso de anulación no aceptado por Klaviyo: {notice_error}',
+                    })
+            except Exception as notice_error:
+                errors.append({
+                    'order': order.order_number,
+                    'error': f'No se pudo procesar el aviso de anulación: {notice_error}',
+                })
         
         return jsonify({
             'success': True,

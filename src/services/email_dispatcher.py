@@ -59,6 +59,26 @@ def dispatch_order_confirmation(order_data, return_result=False):
         return (False, error) if return_result else False
 
 
+def dispatch_order_cancellation(order_data, return_result=False):
+    """Send a full-refund cancellation notice exclusively through Klaviyo.
+
+    This is a transactional event and deliberately has no customer-facing
+    Brevo fallback: the Flow renders the same saved Receipt used elsewhere.
+    A Klaviyo failure is escalated through the independent owner-alert path.
+    """
+    if not _use_klaviyo():
+        error = "Klaviyo no configurado: aviso de anulación no enviado"
+        print(f"❌ [DISPATCHER] {error}")
+        return (False, error) if return_result else False
+    try:
+        from src.services.klaviyo_service import klaviyo_send_order_cancellation
+        return klaviyo_send_order_cancellation(order_data, return_result=return_result)
+    except Exception as e:
+        error = f"Error Klaviyo aviso de anulación: {e}"
+        print(f"❌ [DISPATCHER] {error}")
+        return (False, error) if return_result else False
+
+
 def dispatch_order_delivery_alert(order_data, failures):
     """Alert the owner in plain text when an order event is not accepted.
 

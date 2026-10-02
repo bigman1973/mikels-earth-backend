@@ -66,6 +66,15 @@ class Order(db.Model):
     confirmation_attempted_at = db.Column(db.DateTime)
     confirmation_sent_at = db.Column(db.DateTime)
     confirmation_alert_sent = db.Column(db.Boolean, default=False)
+
+    # Full-refund cancellation delivery has its own audit trail. It must not
+    # overwrite the state of the original paid-order confirmation.
+    cancellation_delivery_status = db.Column(db.String(20), default='pending')
+    cancellation_delivery_error = db.Column(db.Text)
+    cancellation_attempted_at = db.Column(db.DateTime)
+    cancellation_sent_at = db.Column(db.DateTime)
+    cancellation_alert_sent = db.Column(db.Boolean, default=False)
+    cancellation_refund_amount = db.Column(db.Float)
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -128,6 +137,14 @@ class Order(db.Model):
                 'attempted_at': self.confirmation_attempted_at.isoformat() if self.confirmation_attempted_at else None,
                 'sent_at': self.confirmation_sent_at.isoformat() if self.confirmation_sent_at else None,
                 'alert_sent': bool(self.confirmation_alert_sent),
+            },
+            'cancellation_delivery': {
+                'status': self.cancellation_delivery_status or 'pending',
+                'error': self.cancellation_delivery_error,
+                'attempted_at': self.cancellation_attempted_at.isoformat() if self.cancellation_attempted_at else None,
+                'sent_at': self.cancellation_sent_at.isoformat() if self.cancellation_sent_at else None,
+                'alert_sent': bool(self.cancellation_alert_sent),
+                'refund_amount': self.cancellation_refund_amount,
             },
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

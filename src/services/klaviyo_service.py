@@ -474,6 +474,52 @@ def klaviyo_send_order_confirmation(order_data, return_result=False):
     )
 
 
+def klaviyo_send_order_cancellation(order_data, return_result=False):
+    """Send the transactional full-refund cancellation event to Klaviyo.
+
+    ``Receipt`` is built from the persisted paid order.  The Flow template
+    only renders its display values and never performs monetary arithmetic.
+    ``unique_id`` makes a Stripe webhook retry safe.
+    """
+    customer_email = order_data.get('customer_email')
+    if not customer_email or customer_email == 'N/A':
+        error = "No se puede enviar aviso de anulación: email del cliente no disponible"
+        print(f"⚠️ [KLAVIYO] {error}")
+        return (False, error) if return_result else False
+
+    receipt = order_data.get('receipt') or {}
+    cancellation = receipt.get('cancellation') or {}
+    order_number = order_data.get('order_number', 'N/A')
+    customer_name = order_data.get('customer_name', '')
+    profile_attrs = {}
+    if customer_name:
+        parts = customer_name.split(' ', 1)
+        profile_attrs['first_name'] = parts[0]
+        if len(parts) > 1:
+            profile_attrs['last_name'] = parts[1]
+
+    properties = {
+        'OrderNumber': order_number,
+        'order_id': order_number,
+        'CustomerName': customer_name or 'Cliente',
+        'CustomerEmail': customer_email,
+        'Receipt': receipt,
+        'RefundAmount': cancellation.get('refunded_amount_display') or _format_eur(order_data.get('refund_amount', 0)),
+        'CancellationMessage': cancellation.get('message') or '',
+        'CancellationSupportMessage': cancellation.get('support_message') or '',
+        'Source': 'mikels-earth-backend',
+    }
+    return send_klaviyo_event(
+        metric_name='Mikels Order Cancelled',
+        profile_email=customer_email,
+        properties=properties,
+        value=order_data.get('refund_amount', 0),
+        unique_id=f"order-cancelled-{order_number}",
+        profile_attrs=profile_attrs,
+        return_result=return_result,
+    )
+
+
 def klaviyo_notify_new_subscription(subscription_data):
     """
     Envía evento de nueva suscripción a Klaviyo
