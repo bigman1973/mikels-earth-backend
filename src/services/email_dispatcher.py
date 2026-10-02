@@ -18,51 +18,41 @@ def _use_brevo():
 
 def dispatch_order_notification(order_data):
     """
-    Envía notificación de nuevo pedido (email interno a info@mikels.es)
+    Envía el aviso interno del pedido exclusivamente por Klaviyo.
+
+    The customer confirmation and internal notice share the canonical Receipt
+    templates in Klaviyo. A Brevo fallback could silently substitute the
+    retired template, so order delivery deliberately fails visibly instead of
+    sending a second, inconsistent email.
     """
-    klaviyo_ok = False
-    
-    if _use_klaviyo():
-        try:
-            from src.services.klaviyo_service import klaviyo_notify_new_order
-            klaviyo_ok = klaviyo_notify_new_order(order_data)
-        except Exception as e:
-            print(f"⚠️ [DISPATCHER] Error Klaviyo order notification: {e}")
-    
-    # Brevo como fallback si Klaviyo falla o no está configurado
-    if not klaviyo_ok and _use_brevo():
-        try:
-            from src.services.email_service import notify_new_order_email
-            return notify_new_order_email(order_data)
-        except Exception as e:
-            print(f"⚠️ [DISPATCHER] Error Brevo order notification: {e}")
-            return False
-    
-    return klaviyo_ok
+    if not _use_klaviyo():
+        print("❌ [DISPATCHER] Klaviyo no configurado: aviso interno de pedido no enviado")
+        return False
+    try:
+        from src.services.klaviyo_service import klaviyo_notify_new_order
+        return klaviyo_notify_new_order(order_data)
+    except Exception as e:
+        print(f"❌ [DISPATCHER] Error Klaviyo order notification: {e}")
+        return False
 
 
 def dispatch_order_confirmation(order_data):
     """
-    Envía confirmación de pedido al cliente
+    Envía la confirmación de pedido exclusivamente por Klaviyo.
+
+    Do not reintroduce Brevo as a fallback here: its legacy order template is
+    not the saved Receipt contract and would result in duplicate or divergent
+    confirmations.
     """
-    klaviyo_ok = False
-    
-    if _use_klaviyo():
-        try:
-            from src.services.klaviyo_service import klaviyo_send_order_confirmation
-            klaviyo_ok = klaviyo_send_order_confirmation(order_data)
-        except Exception as e:
-            print(f"⚠️ [DISPATCHER] Error Klaviyo order confirmation: {e}")
-    
-    if not klaviyo_ok and _use_brevo():
-        try:
-            from src.services.email_service import send_customer_order_confirmation
-            return send_customer_order_confirmation(order_data)
-        except Exception as e:
-            print(f"⚠️ [DISPATCHER] Error Brevo order confirmation: {e}")
-            return False
-    
-    return klaviyo_ok
+    if not _use_klaviyo():
+        print("❌ [DISPATCHER] Klaviyo no configurado: confirmación de pedido no enviada")
+        return False
+    try:
+        from src.services.klaviyo_service import klaviyo_send_order_confirmation
+        return klaviyo_send_order_confirmation(order_data)
+    except Exception as e:
+        print(f"❌ [DISPATCHER] Error Klaviyo order confirmation: {e}")
+        return False
 
 
 def dispatch_subscription_notification(subscription_data):

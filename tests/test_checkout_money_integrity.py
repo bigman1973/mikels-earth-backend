@@ -238,14 +238,12 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
     @patch('src.services.email_dispatcher.dispatch_post_purchase_event')
     @patch('src.routes.stripe_routes.dispatch_order_confirmation')
     @patch('src.routes.stripe_routes.dispatch_order_notification')
-    @patch('src.routes.stripe_routes.notify_new_order')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.list_line_items')
     @patch('src.routes.stripe_routes.stripe.Webhook.construct_event')
     def test_webhook_persists_the_exact_stripe_charge_for_panel_and_holded_source(
         self,
         construct_event,
         list_line_items,
-        _notify_order,
         _dispatch_notification,
         _dispatch_confirmation,
         _dispatch_post_purchase,
@@ -315,14 +313,12 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
     @patch('src.services.email_dispatcher.dispatch_post_purchase_event')
     @patch('src.routes.stripe_routes.dispatch_order_confirmation')
     @patch('src.routes.stripe_routes.dispatch_order_notification')
-    @patch('src.routes.stripe_routes.notify_new_order')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.list_line_items')
     @patch('src.routes.stripe_routes.stripe.Webhook.construct_event')
     def test_webhook_preserves_volume_tier_receipt_and_exact_charge(
         self,
         construct_event,
         list_line_items,
-        _notify_order,
         _dispatch_notification,
         _dispatch_confirmation,
         _dispatch_post_purchase,

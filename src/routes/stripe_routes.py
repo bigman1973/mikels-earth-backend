@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import secrets
 from sqlalchemy import or_
-from src.services.whatsapp_service import notify_new_order, notify_new_subscription
+from src.services.whatsapp_service import notify_new_subscription
 from src.services.email_dispatcher import dispatch_order_notification, dispatch_order_confirmation, dispatch_subscription_notification, dispatch_started_checkout_event
 from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents, MoneyValueError
 from src.services.checkout_pricing import calculate_checkout_line_price, sent_line_total
@@ -696,9 +696,9 @@ def stripe_webhook():
                         db.session.rollback()
                         print(f"⚠️ Error registrando la aceptación de confirmación: {email_status_error}")
 
-                # El aviso interno consume exactamente la misma ficha guardada
-                # que el cliente ve y recibe, sin recalcular importes.
-                notify_new_order(order_data)
+                # El aviso interno consumes exactly the saved Receipt through
+                # its Klaviyo Flow. The old WhatsApp helper only logged to an
+                # invalid legacy number and did not deliver a notification.
                 dispatch_order_notification(order_data)
                 
                 # Generar cupón de 10% para próxima compra y enviar evento a Klaviyo

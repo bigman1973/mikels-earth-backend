@@ -148,14 +148,12 @@ class StockPaymentIntegrityTests(unittest.TestCase):
     @patch('src.services.email_dispatcher.dispatch_post_purchase_event')
     @patch('src.routes.stripe_routes.dispatch_order_confirmation')
     @patch('src.routes.stripe_routes.dispatch_order_notification')
-    @patch('src.routes.stripe_routes.notify_new_order')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.list_line_items')
     @patch('src.routes.stripe_routes.stripe.Webhook.construct_event')
     def test_paid_webhook_consumes_reserved_stock_exactly_once(
         self,
         construct_event,
         list_line_items,
-        notify_order,
         dispatch_notification,
         dispatch_confirmation,
         dispatch_post_purchase,
@@ -233,7 +231,6 @@ class StockPaymentIntegrityTests(unittest.TestCase):
             self.assertEqual(StockMovement.query.filter_by(reason='payment_capture').count(), 1)
             reservation = StockReservation.query.filter_by(checkout_token='checkout-token-webhook').one()
             self.assertEqual(reservation.status, 'consumed')
-        notify_order.assert_called_once()
         dispatch_notification.assert_called_once()
         dispatch_confirmation.assert_called_once()
         dispatch_post_purchase.assert_called_once()

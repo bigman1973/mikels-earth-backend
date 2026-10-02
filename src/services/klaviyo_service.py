@@ -2,6 +2,7 @@
 Servicio de Klaviyo para Mikel's Earth
 Envía eventos transaccionales y gestiona contactos via Klaviyo API
 """
+import json
 import os
 import requests
 from datetime import datetime
@@ -9,6 +10,25 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 KLAVIYO_API_URL = "https://a.klaviyo.com/api"
 KLAVIYO_REVISION = "2024-10-15"
+
+
+def _json_safe_payload(payload):
+    """Convert non-JSON scalar values before handing a payload to requests.
+
+    Stripe checkout and the canonical order receipt use ``Decimal`` until the
+    final presentation boundary. Klaviyo's HTTP client serializes JSON itself,
+    so an unconverted Decimal caused the order event to fail locally before it
+    ever reached Klaviyo. Monetary display values remain in ``Receipt``; this
+    conversion only makes numeric event values valid JSON numbers.
+    """
+    def encode(value):
+        if isinstance(value, Decimal):
+            return float(value)
+        if isinstance(value, datetime):
+            return value.isoformat()
+        raise TypeError(f'Unsupported Klaviyo payload value: {type(value).__name__}')
+
+    return json.loads(json.dumps(payload, default=encode, ensure_ascii=False))
 
 
 def _get_api_key():
@@ -92,6 +112,7 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
     }
     
     try:
+        payload = _json_safe_payload(payload)
         response = requests.post(
             f"{KLAVIYO_API_URL}/events",
             headers=_get_headers(),

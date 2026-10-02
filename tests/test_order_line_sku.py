@@ -186,14 +186,12 @@ class OrderLineSkuTests(unittest.TestCase):
     @patch('src.services.email_dispatcher.dispatch_post_purchase_event')
     @patch('src.routes.stripe_routes.dispatch_order_confirmation')
     @patch('src.routes.stripe_routes.dispatch_order_notification')
-    @patch('src.routes.stripe_routes.notify_new_order')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.list_line_items')
     @patch('src.routes.stripe_routes.stripe.Webhook.construct_event')
     def test_webhook_persists_sku_from_stripe_product_metadata(
         self,
         construct_event,
         list_line_items,
-        notify_order,
         dispatch_notification,
         dispatch_confirmation,
         dispatch_post_purchase,
@@ -263,7 +261,6 @@ class OrderLineSkuTests(unittest.TestCase):
             self.assertEqual(order.items[0]['slug'], 'aceite-temprano-sin-filtrar')
             self.assertEqual(order.items[0]['gross_total'], 34.30)
 
-        notify_order.assert_called_once()
         dispatch_notification.assert_called_once()
         dispatch_confirmation.assert_called_once()
         dispatch_post_purchase.assert_called_once()
