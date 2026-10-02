@@ -239,7 +239,7 @@ def list_klaviyo_templates():
     resp = requests.get(
         f"{KLAVIYO_API_URL}/templates",
         headers=headers,
-        params={'sort': '-updated', 'page[size]': 50},
+        params={'sort': '-updated', 'page[size]': 10},
         timeout=20,
     )
     
