@@ -368,7 +368,10 @@ def refresh_klaviyo_campaign_recipient_estimation(campaign_id):
         }), 502
     job_id = job_response.json().get('data', {}).get('id')
     job_status = job_response.json().get('data', {}).get('attributes', {}).get('status')
-    for _ in range(10):
+    # Klaviyo can accept this job before its status resource exists; its 404
+    # specifically means the estimation is still out of date, not that the
+    # campaign was changed or sent. Wait briefly and read again.
+    for _ in range(15):
         if job_status == 'complete':
             break
         time.sleep(1)
@@ -378,6 +381,8 @@ def refresh_klaviyo_campaign_recipient_estimation(campaign_id):
             )
         except requests.RequestException as exc:
             return jsonify({'error': f'No se pudo leer la estimación: {exc}', 'job_id': job_id}), 502
+        if job_read_response.status_code == 404:
+            continue
         if job_read_response.status_code != 200:
             return jsonify({
                 'error': f'Klaviyo no devolvió el estado de estimación: {job_read_response.status_code}',

@@ -115,6 +115,26 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
             'type': 'campaign-recipient-estimation-job', 'id': 'campaign-1',
         })
 
+    @patch('src.routes.admin_klaviyo_routes.time.sleep')
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_recipient_estimation_retries_klaviyo_transient_out_of_date_status(self, requests, sleep):
+        requests.get.side_effect = [
+            self.response(200, {'data': {'attributes': {'status': 'Draft', 'audiences': {}}}}),
+            self.response(404, text='No results or results were out of date. Schedule a new estimation.'),
+            self.response(200, {'data': {'attributes': {'status': 'complete'}}}),
+            self.response(200, {'data': {'attributes': {'estimated_recipient_count': 68}}}),
+        ]
+        requests.post.return_value = self.response(202, {
+            'data': {'id': 'estimation-job-1', 'attributes': {'status': 'queued'}},
+        })
+
+        with self.app.test_request_context():
+            response, status = admin_klaviyo_routes.refresh_klaviyo_campaign_recipient_estimation.__wrapped__.__wrapped__('campaign-1')
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()['estimated_recipient_count'], 68)
+        self.assertEqual(sleep.call_count, 2)
+
     @patch('src.routes.admin_klaviyo_routes.requests')
     def test_imports_campaign_image_into_klaviyo_library(self, requests):
         requests.post.return_value = self.response(201, {
