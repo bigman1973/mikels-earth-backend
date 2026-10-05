@@ -1026,6 +1026,41 @@ def send_template_preview():
     }), 202
 
 
+@admin_klaviyo_bp.route('/admin/klaviyo/render-template', methods=['POST'])
+@admin_required
+@role_required('admin')
+def render_klaviyo_template():
+    """Render a template with supplied context without sending or modifying it."""
+    data = request.get_json(silent=True) or {}
+    template_id = str(data.get('template_id', '')).strip()
+    context = data.get('context')
+    if not template_id or not isinstance(context, dict):
+        return jsonify({'error': 'template_id y context son obligatorios'}), 400
+    payload = {
+        'data': {
+            'type': 'template',
+            'id': template_id,
+            'attributes': {'context': context},
+        },
+    }
+    try:
+        response = requests.post(f"{KLAVIYO_API_URL}/template-render", headers=_get_klaviyo_headers(), json=payload, timeout=20)
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo renderizar la plantilla: {exc}'}), 502
+    if response.status_code not in (200, 201):
+        return jsonify({
+            'error': f'Klaviyo rechazó el renderizado: {response.status_code}',
+            'detail': _klaviyo_detail(response),
+        }), 502
+    attributes = response.json().get('data', {}).get('attributes', {}) or {}
+    return jsonify({
+        'template_id': template_id,
+        'html': attributes.get('html', ''),
+        'text': attributes.get('text', ''),
+        'message': 'Plantilla renderizada sin crear un envío ni modificar el borrador.',
+    }), 200
+
+
 @admin_klaviyo_bp.route('/admin/klaviyo/list-templates', methods=['GET'])
 @admin_required
 @role_required('admin')

@@ -435,6 +435,24 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
         self.assertEqual(payload['relationships']['profile']['data'], {'type': 'profile', 'id': 'profile-jordi'})
         self.assertEqual(payload['attributes']['recipients'], ['info@mikels.es'])
 
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_renders_template_context_without_sending_or_modifying_campaign(self, requests):
+        requests.post.return_value = self.response(201, {
+            'data': {'attributes': {'html': '<p>Hola Jordi,</p>', 'text': 'Hola Jordi,'}},
+        })
+
+        response, status = self.call_route(admin_klaviyo_routes.render_klaviyo_template, {
+            'template_id': 'template-1',
+            'context': {'person': {'first_name': 'Jordi'}},
+        })
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()['html'], '<p>Hola Jordi,</p>')
+        payload = requests.post.call_args.kwargs['json']['data']
+        self.assertEqual(payload['id'], 'template-1')
+        self.assertEqual(payload['attributes']['context'], {'person': {'first_name': 'Jordi'}})
+        requests.patch.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
