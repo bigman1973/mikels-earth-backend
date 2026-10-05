@@ -406,16 +406,11 @@ def get_klaviyo_campaign(campaign_id):
     }), 200
 
 
-@admin_klaviyo_bp.route('/admin/klaviyo/campaign-message/<message_id>', methods=['PUT'])
+@admin_klaviyo_bp.route('/admin/klaviyo/campaign-message/<message_id>', methods=['GET', 'PUT'])
 @admin_required
 @role_required('admin')
 def update_klaviyo_campaign_message(message_id):
-    """Update email subject or preview only while the parent campaign remains a draft."""
-    body = request.get_json(silent=True) or {}
-    subject = str(body.get('subject', '')).strip()
-    if not subject:
-        return jsonify({'error': 'subject es obligatorio'}), 400
-
+    """Read or update email subject/preview while preserving the parent draft."""
     headers = _get_klaviyo_headers()
     try:
         message_response = requests.get(
@@ -432,7 +427,26 @@ def update_klaviyo_campaign_message(message_id):
     message = message_response.json().get('data', {})
     definition = (message.get('attributes', {}) or {}).get('definition', {}) or {}
     campaign = (message.get('relationships', {}) or {}).get('campaign', {}).get('data', {}) or {}
+    template = (message.get('relationships', {}) or {}).get('template', {}).get('data', {}) or {}
     campaign_id = campaign.get('id')
+    content = definition.get('content', {}) or {}
+    if request.method == 'GET':
+        return jsonify({
+            'id': message.get('id', message_id),
+            'campaign_id': campaign_id,
+            'template_id': template.get('id'),
+            'channel': definition.get('channel'),
+            'label': definition.get('label'),
+            'subject': content.get('subject'),
+            'preview_text': content.get('preview_text'),
+            'from_email': content.get('from_email'),
+            'from_label': content.get('from_label'),
+            'reply_to_email': content.get('reply_to_email'),
+        }), 200
+
+    subject = str((request.get_json(silent=True) or {}).get('subject', '')).strip()
+    if not subject:
+        return jsonify({'error': 'subject es obligatorio'}), 400
     if definition.get('channel') != 'email' or not campaign_id:
         return jsonify({'error': 'El mensaje no es un email de campaña actualizable'}), 400
 
@@ -455,8 +469,9 @@ def update_klaviyo_campaign_message(message_id):
         return jsonify({'error': f'La campaña debe estar en Draft para editarse; estado actual: {status or "desconocido"}'}), 409
 
     updated_definition = dict(definition)
-    updated_content = dict(definition.get('content', {}) or {})
+    updated_content = dict(content)
     updated_content['subject'] = subject
+    body = request.get_json(silent=True) or {}
     if 'preview_text' in body:
         updated_content['preview_text'] = str(body.get('preview_text') or '')
     updated_definition['content'] = updated_content

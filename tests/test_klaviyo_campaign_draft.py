@@ -175,7 +175,7 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
             }}}},
         })
 
-        with self.app.test_request_context(json={'subject': 'Ya puedes reservar el temprano de este año'}):
+        with self.app.test_request_context(method='PUT', json={'subject': 'Ya puedes reservar el temprano de este año'}):
             response, status = admin_klaviyo_routes.update_klaviyo_campaign_message.__wrapped__.__wrapped__('message-1')
 
         self.assertEqual(status, 200)
@@ -189,6 +189,37 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
         self.assertEqual(content['from_email'], 'jordi@mikels.es')
 
     @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_reads_campaign_message_subject_without_mutation(self, requests):
+        requests.get.return_value = self.response(200, {
+            'data': {
+                'id': 'message-1',
+                'attributes': {'definition': {
+                    'channel': 'email',
+                    'label': 'Reserva Temprano 2026/27',
+                    'content': {
+                        'subject': 'Ya puedes reservar el temprano de este año',
+                        'preview_text': 'Aceite temprano, sin filtrar. Sale a finales de octubre.',
+                        'from_email': 'jordi@mikels.es',
+                        'from_label': "Jordi · Mikel's Fruit",
+                        'reply_to_email': 'jordi@mikels.es',
+                    },
+                }},
+                'relationships': {
+                    'campaign': {'data': {'id': 'campaign-1', 'type': 'campaign'}},
+                    'template': {'data': {'id': 'served-template-1', 'type': 'template'}},
+                },
+            },
+        })
+
+        with self.app.test_request_context(method='GET'):
+            response, status = admin_klaviyo_routes.update_klaviyo_campaign_message.__wrapped__.__wrapped__('message-1')
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()['subject'], 'Ya puedes reservar el temprano de este año')
+        self.assertEqual(response.get_json()['template_id'], 'served-template-1')
+        requests.patch.assert_not_called()
+
+    @patch('src.routes.admin_klaviyo_routes.requests')
     def test_refuses_subject_change_after_a_campaign_leaves_draft(self, requests):
         requests.get.side_effect = [
             self.response(200, {
@@ -200,7 +231,7 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
             self.response(200, {'data': {'attributes': {'status': 'Scheduled'}}}),
         ]
 
-        with self.app.test_request_context(json={'subject': 'No debe cambiar'}):
+        with self.app.test_request_context(method='PUT', json={'subject': 'No debe cambiar'}):
             response, status = admin_klaviyo_routes.update_klaviyo_campaign_message.__wrapped__.__wrapped__('message-1')
 
         self.assertEqual(status, 409)
