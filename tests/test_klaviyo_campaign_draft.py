@@ -43,6 +43,79 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
         requests.post.assert_not_called()
 
     @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_reads_minimal_profile_fields_for_named_preview(self, requests):
+        requests.get.return_value = self.response(200, {'data': [{
+            'id': 'profile-jordi',
+            'attributes': {'email': 'jordi@mikels.es', 'first_name': 'Jordi', 'last_name': 'Giró'},
+        }]})
+
+        with self.app.test_request_context('/admin/klaviyo/profiles?emails=jordi@mikels.es'):
+            response, status = admin_klaviyo_routes.lookup_klaviyo_profiles.__wrapped__.__wrapped__()
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()['profiles'][0], {
+            'id': 'profile-jordi',
+            'email': 'jordi@mikels.es',
+            'first_name': 'Jordi',
+            'last_name': 'Giró',
+            'found': True,
+        })
+        requests.post.assert_not_called()
+
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_excludes_internal_profiles_only_from_draft_campaign_without_consent_changes(self, requests):
+        requests.get.side_effect = [
+            self.response(200, {'data': {'attributes': {'status': 'Draft', 'audiences': {'excluded': ['preview-list']}}}}),
+            self.response(200, {'data': [{'id': 'profile-info'}]}),
+            self.response(200, {'data': [{'id': 'profile-jordi'}]}),
+            self.response(200, {'data': [{'id': 'profile-lfgd'}]}),
+            self.response(200, {'data': []}),
+        ]
+        requests.post.side_effect = [
+            self.response(201, {'data': {'id': 'internal-exclusion-list'}}),
+            self.response(204),
+        ]
+        requests.patch.return_value = self.response(200, {'data': {'id': 'campaign-1'}})
+
+        with self.app.test_request_context(json={
+            'emails': ['info@mikels.es', 'jordi@mikels.es', 'jordi@lfgd.es'],
+            'list_name': 'Excluir campaña Temprano 2026/27',
+        }):
+            response, status = admin_klaviyo_routes.set_klaviyo_campaign_internal_exclusions.__wrapped__.__wrapped__('campaign-1')
+
+        self.assertEqual(status, 200)
+        body = response.get_json()
+        self.assertEqual(body['campaign_status'], 'Draft')
+        self.assertTrue(body['exclusion_list_created'])
+        self.assertEqual(body['excluded_emails'], ['info@mikels.es', 'jordi@mikels.es', 'jordi@lfgd.es'])
+        self.assertEqual(requests.post.call_args_list[1].kwargs['json']['data'], [
+            {'type': 'profile', 'id': 'profile-info'},
+            {'type': 'profile', 'id': 'profile-jordi'},
+            {'type': 'profile', 'id': 'profile-lfgd'},
+        ])
+        audience_update = requests.patch.call_args.kwargs['json']['data']['attributes']['audiences']
+        self.assertEqual(audience_update['excluded'], ['preview-list', 'internal-exclusion-list'])
+
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_refreshes_recipient_estimation_only_for_draft_campaign(self, requests):
+        requests.get.side_effect = [
+            self.response(200, {'data': {'attributes': {'status': 'Draft', 'audiences': {}}}}),
+            self.response(200, {'data': {'attributes': {'estimated_recipient_count': 71}}}),
+        ]
+        requests.post.return_value = self.response(202, {
+            'data': {'id': 'estimation-job-1', 'attributes': {'status': 'complete'}},
+        })
+
+        with self.app.test_request_context():
+            response, status = admin_klaviyo_routes.refresh_klaviyo_campaign_recipient_estimation.__wrapped__.__wrapped__('campaign-1')
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()['estimated_recipient_count'], 71)
+        self.assertEqual(requests.post.call_args.kwargs['json']['data'], {
+            'type': 'campaign-recipient-estimation-job', 'id': 'campaign-1',
+        })
+
+    @patch('src.routes.admin_klaviyo_routes.requests')
     def test_imports_campaign_image_into_klaviyo_library(self, requests):
         requests.post.return_value = self.response(201, {
             'data': {
@@ -309,6 +382,23 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
             requests.post.call_args.kwargs['json']['data']['relationships']['template']['data']['id'],
             'template-1',
         )
+
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_preview_send_can_render_with_named_profile_without_touching_campaign(self, requests):
+        requests.post.return_value = self.response(202, {
+            'data': {'id': 'preview-job-2', 'attributes': {'status': 'queued'}},
+        })
+
+        response, status = self.call_route(admin_klaviyo_routes.send_template_preview, {
+            'template_id': 'template-1',
+            'recipients': ['info@mikels.es'],
+            'profile_id': 'profile-jordi',
+        })
+
+        self.assertEqual(status, 202)
+        payload = requests.post.call_args.kwargs['json']['data']
+        self.assertEqual(payload['relationships']['profile']['data'], {'type': 'profile', 'id': 'profile-jordi'})
+        self.assertEqual(payload['attributes']['recipients'], ['info@mikels.es'])
 
 
 if __name__ == '__main__':

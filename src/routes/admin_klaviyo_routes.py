@@ -109,6 +109,78 @@ def _klaviyo_detail(response, limit=500):
     return getattr(response, 'text', '')[:limit]
 
 
+def _get_draft_campaign_or_error(campaign_id, headers):
+    """Return a Klaviyo Draft campaign or a Flask error response tuple."""
+    try:
+        response = requests.get(
+            f"{KLAVIYO_API_URL}/campaigns/{campaign_id}",
+            headers=headers,
+            params={'fields[campaign]': 'status,audiences'},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        return None, (jsonify({'error': f'No se pudo comprobar el estado de la campaña: {exc}'}), 502)
+    if response.status_code != 200:
+        return None, (jsonify({
+            'error': f'Klaviyo no devolvió la campaña: {response.status_code}',
+            'detail': _klaviyo_detail(response),
+        }), 502)
+    campaign = response.json().get('data', {})
+    status = str((campaign.get('attributes', {}) or {}).get('status', '')).lower()
+    if status != 'draft':
+        return None, (jsonify({
+            'error': f'La campaña debe estar en Draft para editarse; estado actual: {status or "desconocido"}',
+        }), 409)
+    return campaign, None
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/profiles', methods=['GET'])
+@admin_required
+@role_required('admin')
+def lookup_klaviyo_profiles():
+    """Read only the minimal profile fields needed for an admin preview or exclusion."""
+    raw_emails = request.args.get('emails', '')
+    emails = [item.strip().lower() for item in raw_emails.split(',') if item.strip()]
+    if not emails or len(emails) > 10 or any('@' not in email for email in emails):
+        return jsonify({'error': 'emails debe contener entre 1 y 10 direcciones válidas'}), 400
+
+    headers = _get_klaviyo_headers()
+    profiles = []
+    for email in emails:
+        try:
+            response = requests.get(
+                f"{KLAVIYO_API_URL}/profiles/",
+                headers=headers,
+                params={
+                    'filter': f"equals(email,'{email}')",
+                    'fields[profile]': 'email,first_name,last_name',
+                    'page[size]': 1,
+                },
+                timeout=20,
+            )
+        except requests.RequestException as exc:
+            return jsonify({'error': f'No se pudo leer el perfil: {exc}'}), 502
+        if response.status_code != 200:
+            return jsonify({
+                'error': f'Klaviyo no devolvió el perfil: {response.status_code}',
+                'detail': _klaviyo_detail(response),
+            }), 502
+        data = response.json().get('data', [])
+        if not data:
+            profiles.append({'email': email, 'found': False})
+            continue
+        profile = data[0]
+        attributes = profile.get('attributes', {}) or {}
+        profiles.append({
+            'id': profile.get('id'),
+            'email': attributes.get('email', email),
+            'first_name': attributes.get('first_name'),
+            'last_name': attributes.get('last_name'),
+            'found': True,
+        })
+    return jsonify({'profiles': profiles}), 200
+
+
 @admin_klaviyo_bp.route('/admin/klaviyo/campaign-audiences', methods=['GET'])
 @admin_required
 @role_required('admin')
@@ -143,6 +215,199 @@ def list_campaign_audiences():
     return jsonify({
         'lists': serialize(lists_response.json().get('data', []), 'list'),
         'segments': serialize(segments_response.json().get('data', []), 'segment'),
+    }), 200
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/campaign/<campaign_id>/internal-exclusions', methods=['POST'])
+@admin_required
+@role_required('admin')
+def set_klaviyo_campaign_internal_exclusions(campaign_id):
+    """Exclude specified internal profiles from one Draft campaign without changing consent."""
+    body = request.get_json(silent=True) or {}
+    emails = [str(item).strip().lower() for item in (body.get('emails') or []) if str(item).strip()]
+    list_name = str(body.get('list_name') or 'Excluir campaña Temprano 2026/27').strip()
+    if not emails or len(emails) > 25 or len(set(emails)) != len(emails) or any('@' not in email for email in emails):
+        return jsonify({'error': 'emails debe contener direcciones únicas y válidas'}), 400
+    if not list_name:
+        return jsonify({'error': 'list_name es obligatorio'}), 400
+
+    headers = _get_klaviyo_headers()
+    campaign, campaign_error = _get_draft_campaign_or_error(campaign_id, headers)
+    if campaign_error:
+        return campaign_error
+
+    profiles = []
+    missing_emails = []
+    for email in emails:
+        try:
+            profile_response = requests.get(
+                f"{KLAVIYO_API_URL}/profiles/",
+                headers=headers,
+                params={'filter': f"equals(email,'{email}')", 'fields[profile]': 'email', 'page[size]': 1},
+                timeout=20,
+            )
+        except requests.RequestException as exc:
+            return jsonify({'error': f'No se pudo leer un perfil de exclusión: {exc}'}), 502
+        if profile_response.status_code != 200:
+            return jsonify({
+                'error': f'Klaviyo no devolvió un perfil de exclusión: {profile_response.status_code}',
+                'detail': _klaviyo_detail(profile_response),
+            }), 502
+        found = profile_response.json().get('data', [])
+        if not found:
+            missing_emails.append(email)
+        else:
+            profiles.append(found[0])
+    if missing_emails:
+        return jsonify({
+            'error': 'No se ha cambiado la campaña porque faltan perfiles internos en Klaviyo',
+            'missing_emails': missing_emails,
+        }), 422
+
+    try:
+        lists_response = requests.get(
+            f"{KLAVIYO_API_URL}/lists", headers=headers, params={'page[size]': 10, 'sort': 'name'}, timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudieron leer las listas de exclusión: {exc}'}), 502
+    if lists_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo no devolvió las listas: {lists_response.status_code}',
+            'detail': _klaviyo_detail(lists_response),
+        }), 502
+    matching_list = next((item for item in lists_response.json().get('data', [])
+                          if (item.get('attributes', {}) or {}).get('name') == list_name), None)
+    if matching_list:
+        exclusion_list_id = matching_list.get('id')
+        list_created = False
+    else:
+        list_payload = {'data': {'type': 'list', 'attributes': {'name': list_name}}}
+        try:
+            create_list_response = requests.post(f"{KLAVIYO_API_URL}/lists", headers=headers, json=list_payload, timeout=20)
+        except requests.RequestException as exc:
+            return jsonify({'error': f'No se pudo crear la lista de exclusión: {exc}'}), 502
+        if create_list_response.status_code not in (200, 201):
+            return jsonify({
+                'error': f'Klaviyo rechazó la lista de exclusión: {create_list_response.status_code}',
+                'detail': _klaviyo_detail(create_list_response),
+            }), 502
+        exclusion_list_id = create_list_response.json().get('data', {}).get('id')
+        list_created = True
+
+    member_payload = {'data': [{'type': 'profile', 'id': profile.get('id')} for profile in profiles]}
+    try:
+        members_response = requests.post(
+            f"{KLAVIYO_API_URL}/lists/{exclusion_list_id}/relationships/profiles",
+            headers=headers,
+            json=member_payload,
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudieron añadir los perfiles a la exclusión: {exc}'}), 502
+    if members_response.status_code not in (200, 204):
+        return jsonify({
+            'error': f'Klaviyo rechazó los perfiles de exclusión: {members_response.status_code}',
+            'detail': _klaviyo_detail(members_response),
+            'exclusion_list_id': exclusion_list_id,
+        }), 502
+
+    attributes = campaign.get('attributes', {}) or {}
+    audiences = attributes.get('audiences') or {}
+    excluded = list(audiences.get('excluded') or [])
+    if exclusion_list_id not in excluded:
+        excluded.append(exclusion_list_id)
+    campaign_payload = {
+        'data': {
+            'type': 'campaign',
+            'id': campaign_id,
+            'attributes': {'audiences': {'excluded': excluded}},
+        },
+    }
+    try:
+        campaign_update_response = requests.patch(
+            f"{KLAVIYO_API_URL}/campaigns/{campaign_id}", headers=headers, json=campaign_payload, timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo actualizar la exclusión de la campaña: {exc}'}), 502
+    if campaign_update_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo rechazó la exclusión de la campaña: {campaign_update_response.status_code}',
+            'detail': _klaviyo_detail(campaign_update_response),
+            'exclusion_list_id': exclusion_list_id,
+        }), 502
+    return jsonify({
+        'success': True,
+        'campaign_id': campaign_id,
+        'campaign_status': 'Draft',
+        'exclusion_list_id': exclusion_list_id,
+        'exclusion_list_created': list_created,
+        'excluded_emails': emails,
+        'message': 'Perfiles internos excluidos sin modificar sus estados de suscripción.',
+    }), 200
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/campaign/<campaign_id>/recipient-estimation', methods=['POST'])
+@admin_required
+@role_required('admin')
+def refresh_klaviyo_campaign_recipient_estimation(campaign_id):
+    """Refresh and read the estimated audience for a Draft campaign without sending it."""
+    headers = _get_klaviyo_headers()
+    _, campaign_error = _get_draft_campaign_or_error(campaign_id, headers)
+    if campaign_error:
+        return campaign_error
+
+    payload = {'data': {'type': 'campaign-recipient-estimation-job', 'id': campaign_id}}
+    try:
+        job_response = requests.post(f"{KLAVIYO_API_URL}/campaign-recipient-estimation-jobs", headers=headers, json=payload, timeout=20)
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo solicitar la estimación: {exc}'}), 502
+    if job_response.status_code != 202:
+        return jsonify({
+            'error': f'Klaviyo rechazó la estimación: {job_response.status_code}',
+            'detail': _klaviyo_detail(job_response),
+        }), 502
+    job_id = job_response.json().get('data', {}).get('id')
+    job_status = job_response.json().get('data', {}).get('attributes', {}).get('status')
+    for _ in range(10):
+        if job_status == 'complete':
+            break
+        time.sleep(1)
+        try:
+            job_read_response = requests.get(
+                f"{KLAVIYO_API_URL}/campaign-recipient-estimation-jobs/{job_id}", headers=headers, timeout=20,
+            )
+        except requests.RequestException as exc:
+            return jsonify({'error': f'No se pudo leer la estimación: {exc}', 'job_id': job_id}), 502
+        if job_read_response.status_code != 200:
+            return jsonify({
+                'error': f'Klaviyo no devolvió el estado de estimación: {job_read_response.status_code}',
+                'detail': _klaviyo_detail(job_read_response),
+                'job_id': job_id,
+            }), 502
+        job_status = job_read_response.json().get('data', {}).get('attributes', {}).get('status')
+        if job_status in ('cancelled', 'failed'):
+            return jsonify({'error': f'La estimación no se completó: {job_status}', 'job_id': job_id}), 502
+    if job_status != 'complete':
+        return jsonify({'error': 'La estimación sigue en proceso; vuelve a consultar después', 'job_id': job_id}), 202
+    try:
+        estimation_response = requests.get(
+            f"{KLAVIYO_API_URL}/campaign-recipient-estimations/{campaign_id}", headers=headers, timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo leer el total estimado: {exc}', 'job_id': job_id}), 502
+    if estimation_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo no devolvió el total estimado: {estimation_response.status_code}',
+            'detail': _klaviyo_detail(estimation_response),
+            'job_id': job_id,
+        }), 502
+    count = (estimation_response.json().get('data', {}).get('attributes', {}) or {}).get('estimated_recipient_count')
+    return jsonify({
+        'campaign_id': campaign_id,
+        'campaign_status': 'Draft',
+        'job_id': job_id,
+        'estimated_recipient_count': count,
+        'message': 'Estimación actualizada; no se ha programado ni enviado la campaña.',
     }), 200
 
 
@@ -682,18 +947,28 @@ def send_template_preview():
     data = request.get_json(silent=True) or {}
     template_id = str(data.get('template_id', '')).strip()
     recipients = data.get('recipients') or []
+    profile_id = str(data.get('profile_id') or '').strip()
+    context = data.get('context')
     if not template_id or not isinstance(recipients, list) or not recipients or len(recipients) > 5:
         return jsonify({'error': 'template_id y entre 1 y 5 destinatarios son obligatorios'}), 400
     if not all(isinstance(address, str) and '@' in address for address in recipients):
         return jsonify({'error': 'Todos los destinatarios deben ser direcciones de email válidas'}), 400
+    if context is not None and not isinstance(context, dict):
+        return jsonify({'error': 'context debe ser un objeto JSON'}), 400
 
     headers = _get_klaviyo_headers()
     headers['revision'] = f'{KLAVIYO_REVISION}.pre'
+    attributes = {'recipients': recipients}
+    if context is not None:
+        attributes['context'] = context
+    relationships = {'template': {'data': {'type': 'template', 'id': template_id}}}
+    if profile_id:
+        relationships['profile'] = {'data': {'type': 'profile', 'id': profile_id}}
     preview_payload = {
         'data': {
             'type': 'template-preview-send-job',
-            'attributes': {'recipients': recipients},
-            'relationships': {'template': {'data': {'type': 'template', 'id': template_id}}},
+            'attributes': attributes,
+            'relationships': relationships,
         },
     }
     try:
