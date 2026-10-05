@@ -106,7 +106,7 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
             'data': {'id': 'estimation-job-1', 'attributes': {'status': 'complete'}},
         })
 
-        with self.app.test_request_context():
+        with self.app.test_request_context(method='POST'):
             response, status = admin_klaviyo_routes.refresh_klaviyo_campaign_recipient_estimation.__wrapped__.__wrapped__('campaign-1')
 
         self.assertEqual(status, 200)
@@ -128,12 +128,27 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
             'data': {'id': 'estimation-job-1', 'attributes': {'status': 'queued'}},
         })
 
-        with self.app.test_request_context():
+        with self.app.test_request_context(method='POST'):
             response, status = admin_klaviyo_routes.refresh_klaviyo_campaign_recipient_estimation.__wrapped__.__wrapped__('campaign-1')
 
         self.assertEqual(status, 200)
         self.assertEqual(response.get_json()['estimated_recipient_count'], 68)
         self.assertEqual(sleep.call_count, 2)
+
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_reads_completed_recipient_estimation_without_creating_a_new_job(self, requests):
+        requests.get.side_effect = [
+            self.response(200, {'data': {'attributes': {'status': 'Draft', 'audiences': {}}}}),
+            self.response(200, {'data': {'attributes': {'estimated_recipient_count': 68}}}),
+        ]
+
+        with self.app.test_request_context(method='GET'):
+            response, status = admin_klaviyo_routes.refresh_klaviyo_campaign_recipient_estimation.__wrapped__.__wrapped__('campaign-1')
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()['status'], 'complete')
+        self.assertEqual(response.get_json()['estimated_recipient_count'], 68)
+        requests.post.assert_not_called()
 
     @patch('src.routes.admin_klaviyo_routes.requests')
     def test_imports_campaign_image_into_klaviyo_library(self, requests):

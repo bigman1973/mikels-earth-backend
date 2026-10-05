@@ -346,15 +346,43 @@ def set_klaviyo_campaign_internal_exclusions(campaign_id):
     }), 200
 
 
-@admin_klaviyo_bp.route('/admin/klaviyo/campaign/<campaign_id>/recipient-estimation', methods=['POST'])
+@admin_klaviyo_bp.route('/admin/klaviyo/campaign/<campaign_id>/recipient-estimation', methods=['GET', 'POST'])
 @admin_required
 @role_required('admin')
 def refresh_klaviyo_campaign_recipient_estimation(campaign_id):
-    """Refresh and read the estimated audience for a Draft campaign without sending it."""
+    """Read or refresh the estimated audience for a Draft campaign without sending it."""
     headers = _get_klaviyo_headers()
     _, campaign_error = _get_draft_campaign_or_error(campaign_id, headers)
     if campaign_error:
         return campaign_error
+
+    if request.method == 'GET':
+        try:
+            estimation_response = requests.get(
+                f"{KLAVIYO_API_URL}/campaign-recipient-estimations/{campaign_id}", headers=headers, timeout=20,
+            )
+        except requests.RequestException as exc:
+            return jsonify({'error': f'No se pudo leer el total estimado: {exc}'}), 502
+        if estimation_response.status_code == 404:
+            return jsonify({
+                'campaign_id': campaign_id,
+                'campaign_status': 'Draft',
+                'status': 'processing',
+                'message': 'Klaviyo todavía está calculando la audiencia; no se ha creado ni programado ningún envío.',
+            }), 202
+        if estimation_response.status_code != 200:
+            return jsonify({
+                'error': f'Klaviyo no devolvió el total estimado: {estimation_response.status_code}',
+                'detail': _klaviyo_detail(estimation_response),
+            }), 502
+        count = (estimation_response.json().get('data', {}).get('attributes', {}) or {}).get('estimated_recipient_count')
+        return jsonify({
+            'campaign_id': campaign_id,
+            'campaign_status': 'Draft',
+            'status': 'complete',
+            'estimated_recipient_count': count,
+            'message': 'Estimación disponible; la campaña no se ha programado ni enviado.',
+        }), 200
 
     payload = {'data': {'type': 'campaign-recipient-estimation-job', 'id': campaign_id}}
     try:
