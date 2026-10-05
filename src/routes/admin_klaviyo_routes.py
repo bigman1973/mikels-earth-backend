@@ -406,6 +406,90 @@ def get_klaviyo_campaign(campaign_id):
     }), 200
 
 
+@admin_klaviyo_bp.route('/admin/klaviyo/campaign-message/<message_id>', methods=['PUT'])
+@admin_required
+@role_required('admin')
+def update_klaviyo_campaign_message(message_id):
+    """Update email subject or preview only while the parent campaign remains a draft."""
+    body = request.get_json(silent=True) or {}
+    subject = str(body.get('subject', '')).strip()
+    if not subject:
+        return jsonify({'error': 'subject es obligatorio'}), 400
+
+    headers = _get_klaviyo_headers()
+    try:
+        message_response = requests.get(
+            f"{KLAVIYO_API_URL}/campaign-messages/{message_id}", headers=headers, timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo leer el mensaje de campaña: {exc}'}), 502
+    if message_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo no devolvió el mensaje de campaña: {message_response.status_code}',
+            'detail': _klaviyo_detail(message_response),
+        }), 502
+
+    message = message_response.json().get('data', {})
+    definition = (message.get('attributes', {}) or {}).get('definition', {}) or {}
+    campaign = (message.get('relationships', {}) or {}).get('campaign', {}).get('data', {}) or {}
+    campaign_id = campaign.get('id')
+    if definition.get('channel') != 'email' or not campaign_id:
+        return jsonify({'error': 'El mensaje no es un email de campaña actualizable'}), 400
+
+    try:
+        campaign_response = requests.get(
+            f"{KLAVIYO_API_URL}/campaigns/{campaign_id}",
+            headers=headers,
+            params={'fields[campaign]': 'status'},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo comprobar el estado de la campaña: {exc}'}), 502
+    if campaign_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo no devolvió el estado de la campaña: {campaign_response.status_code}',
+            'detail': _klaviyo_detail(campaign_response),
+        }), 502
+    status = str((campaign_response.json().get('data', {}).get('attributes', {}) or {}).get('status', '')).lower()
+    if status != 'draft':
+        return jsonify({'error': f'La campaña debe estar en Draft para editarse; estado actual: {status or "desconocido"}'}), 409
+
+    updated_definition = dict(definition)
+    updated_content = dict(definition.get('content', {}) or {})
+    updated_content['subject'] = subject
+    if 'preview_text' in body:
+        updated_content['preview_text'] = str(body.get('preview_text') or '')
+    updated_definition['content'] = updated_content
+    payload = {
+        'data': {
+            'type': 'campaign-message',
+            'id': message_id,
+            'attributes': {'definition': updated_definition},
+        },
+    }
+    try:
+        update_response = requests.patch(
+            f"{KLAVIYO_API_URL}/campaign-messages/{message_id}", headers=headers, json=payload, timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo actualizar el mensaje de campaña: {exc}'}), 502
+    if update_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo rechazó el mensaje de campaña: {update_response.status_code}',
+            'detail': _klaviyo_detail(update_response),
+        }), 502
+
+    result_definition = (update_response.json().get('data', {}).get('attributes', {}) or {}).get('definition', {}) or {}
+    return jsonify({
+        'success': True,
+        'campaign_id': campaign_id,
+        'campaign_status': 'Draft',
+        'message_id': message_id,
+        'subject': (result_definition.get('content', {}) or {}).get('subject'),
+        'preview_text': (result_definition.get('content', {}) or {}).get('preview_text'),
+    }), 200
+
+
 @admin_klaviyo_bp.route('/admin/klaviyo/send-template-preview', methods=['POST'])
 @admin_required
 @role_required('admin')

@@ -145,6 +145,68 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
         self.assertNotIn('campaign-messages', requests.get.call_args.kwargs['params']['fields[campaign]'])
 
     @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_updates_subject_only_for_an_existing_draft_campaign_message(self, requests):
+        requests.get.side_effect = [
+            self.response(200, {
+                'data': {
+                    'id': 'message-1',
+                    'attributes': {
+                        'definition': {
+                            'channel': 'email',
+                            'label': 'Reserva Temprano',
+                            'content': {
+                                'subject': 'Anterior',
+                                'preview_text': 'Previsualización existente',
+                                'from_email': 'jordi@mikels.es',
+                                'from_label': "Jordi · Mikel's Fruit",
+                                'reply_to_email': 'jordi@mikels.es',
+                            },
+                        },
+                    },
+                    'relationships': {'campaign': {'data': {'id': 'campaign-1', 'type': 'campaign'}}},
+                },
+            }),
+            self.response(200, {'data': {'attributes': {'status': 'Draft'}}}),
+        ]
+        requests.patch.return_value = self.response(200, {
+            'data': {'attributes': {'definition': {'content': {
+                'subject': 'Ya puedes reservar el temprano de este año',
+                'preview_text': 'Previsualización existente',
+            }}}},
+        })
+
+        with self.app.test_request_context(json={'subject': 'Ya puedes reservar el temprano de este año'}):
+            response, status = admin_klaviyo_routes.update_klaviyo_campaign_message.__wrapped__.__wrapped__('message-1')
+
+        self.assertEqual(status, 200)
+        body = response.get_json()
+        self.assertEqual(body['campaign_status'], 'Draft')
+        self.assertEqual(body['subject'], 'Ya puedes reservar el temprano de este año')
+        payload = requests.patch.call_args.kwargs['json']
+        content = payload['data']['attributes']['definition']['content']
+        self.assertEqual(content['subject'], 'Ya puedes reservar el temprano de este año')
+        self.assertEqual(content['preview_text'], 'Previsualización existente')
+        self.assertEqual(content['from_email'], 'jordi@mikels.es')
+
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_refuses_subject_change_after_a_campaign_leaves_draft(self, requests):
+        requests.get.side_effect = [
+            self.response(200, {
+                'data': {
+                    'attributes': {'definition': {'channel': 'email', 'content': {'subject': 'Anterior'}}},
+                    'relationships': {'campaign': {'data': {'id': 'campaign-1', 'type': 'campaign'}}},
+                },
+            }),
+            self.response(200, {'data': {'attributes': {'status': 'Scheduled'}}}),
+        ]
+
+        with self.app.test_request_context(json={'subject': 'No debe cambiar'}):
+            response, status = admin_klaviyo_routes.update_klaviyo_campaign_message.__wrapped__.__wrapped__('message-1')
+
+        self.assertEqual(status, 409)
+        requests.patch.assert_not_called()
+
+    @patch('src.routes.admin_klaviyo_routes.requests')
     def test_preview_send_uses_beta_template_preview_job_without_scheduling_campaign(self, requests):
         requests.post.return_value = self.response(202, {
             'data': {'id': 'preview-job-1', 'attributes': {'status': 'queued'}},
