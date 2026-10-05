@@ -142,6 +142,7 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
         self.assertIsNone(body['scheduled_at'])
         self.assertTrue(body['send_options']['use_smart_sending'])
         self.assertEqual(body['campaign_messages'][0]['id'], 'message-1')
+        self.assertNotIn('campaign-messages', requests.get.call_args.kwargs['params']['fields[campaign]'])
 
     @patch('src.routes.admin_klaviyo_routes.requests')
     def test_preview_send_uses_beta_template_preview_job_without_scheduling_campaign(self, requests):

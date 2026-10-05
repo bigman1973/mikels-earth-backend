@@ -371,7 +371,7 @@ def get_klaviyo_campaign(campaign_id):
     """Read the actual draft status, timing, audience and tracking from Klaviyo."""
     fields = ','.join([
         'name', 'status', 'scheduled_at', 'send_time', 'audiences', 'send_options',
-        'send_strategy', 'tracking_options', 'campaign-messages',
+        'send_strategy', 'tracking_options',
     ])
     try:
         response = requests.get(
