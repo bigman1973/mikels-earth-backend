@@ -490,6 +490,175 @@ def update_klaviyo_campaign_message(message_id):
     }), 200
 
 
+@admin_klaviyo_bp.route('/admin/klaviyo/campaign-message/<message_id>/replace-template', methods=['POST'])
+@admin_required
+@role_required('admin')
+def replace_klaviyo_campaign_draft_template(message_id):
+    """Replace a Klaviyo campaign template only for its unscheduled draft message.
+
+    Klaviyo creates a protected served copy when a template is assigned to a
+    campaign, so updating that copy in place returns 404.  The safe supported
+    path is to create a fresh source template and reassign it while the parent
+    campaign is still a Draft. The former served copy is intentionally kept as
+    a reversible backup.
+    """
+    body = request.get_json(silent=True) or {}
+    template_name = str(body.get('template_name', '')).strip()
+    template_html = str(body.get('template_html', '')).strip()
+    subject = str(body.get('subject', '')).strip()
+    if not template_name or not template_html or not subject:
+        return jsonify({'error': 'template_name, template_html y subject son obligatorios'}), 400
+
+    headers = _get_klaviyo_headers()
+    try:
+        message_response = requests.get(
+            f"{KLAVIYO_API_URL}/campaign-messages/{message_id}", headers=headers, timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo leer el mensaje de campaña: {exc}'}), 502
+    if message_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo no devolvió el mensaje de campaña: {message_response.status_code}',
+            'detail': _klaviyo_detail(message_response),
+        }), 502
+
+    message = message_response.json().get('data', {})
+    original_definition = (message.get('attributes', {}) or {}).get('definition', {}) or {}
+    campaign = (message.get('relationships', {}) or {}).get('campaign', {}).get('data', {}) or {}
+    original_template = (message.get('relationships', {}) or {}).get('template', {}).get('data', {}) or {}
+    campaign_id = campaign.get('id')
+    if original_definition.get('channel') != 'email' or not campaign_id:
+        return jsonify({'error': 'El mensaje no es un email de campaña actualizable'}), 400
+
+    try:
+        campaign_response = requests.get(
+            f"{KLAVIYO_API_URL}/campaigns/{campaign_id}",
+            headers=headers,
+            params={'fields[campaign]': 'status'},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo comprobar el estado de la campaña: {exc}'}), 502
+    if campaign_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo no devolvió el estado de la campaña: {campaign_response.status_code}',
+            'detail': _klaviyo_detail(campaign_response),
+        }), 502
+    campaign_status = str((campaign_response.json().get('data', {}).get('attributes', {}) or {}).get('status', '')).lower()
+    if campaign_status != 'draft':
+        return jsonify({'error': f'La campaña debe estar en Draft para editarse; estado actual: {campaign_status or "desconocido"}'}), 409
+
+    create_template_payload = {
+        'data': {
+            'type': 'template',
+            'attributes': {
+                'name': template_name,
+                'html': template_html,
+                'editor_type': 'CODE',
+            },
+        },
+    }
+    try:
+        create_template_response = requests.post(
+            f"{KLAVIYO_API_URL}/templates", headers=headers, json=create_template_payload, timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo crear el nuevo template: {exc}'}), 502
+    if create_template_response.status_code not in (200, 201):
+        return jsonify({
+            'error': f'Klaviyo rechazó el nuevo template: {create_template_response.status_code}',
+            'detail': _klaviyo_detail(create_template_response),
+        }), 502
+    source_template_id = create_template_response.json().get('data', {}).get('id')
+
+    updated_definition = dict(original_definition)
+    updated_content = dict(original_definition.get('content', {}) or {})
+    updated_content['subject'] = subject
+    if 'preview_text' in body:
+        updated_content['preview_text'] = str(body.get('preview_text') or '')
+    updated_definition['content'] = updated_content
+    subject_payload = {
+        'data': {
+            'type': 'campaign-message',
+            'id': message_id,
+            'attributes': {'definition': updated_definition},
+        },
+    }
+    try:
+        subject_response = requests.patch(
+            f"{KLAVIYO_API_URL}/campaign-messages/{message_id}", headers=headers, json=subject_payload, timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({
+            'error': f'No se pudo cambiar el asunto del borrador: {exc}',
+            'source_template_id': source_template_id,
+        }), 502
+    if subject_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo rechazó el asunto del borrador: {subject_response.status_code}',
+            'detail': _klaviyo_detail(subject_response),
+            'source_template_id': source_template_id,
+        }), 502
+
+    assignment_payload = {
+        'data': {
+            'type': 'campaign-message',
+            'id': message_id,
+            'relationships': {'template': {'data': {'type': 'template', 'id': source_template_id}}},
+        },
+    }
+    try:
+        assignment_response = requests.post(
+            f"{KLAVIYO_API_URL}/campaign-message-assign-template",
+            headers=headers,
+            json=assignment_payload,
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        assignment_response = None
+        assignment_error = str(exc)
+    else:
+        assignment_error = None
+
+    if assignment_response is None or assignment_response.status_code not in (200, 201):
+        rollback_payload = {
+            'data': {
+                'type': 'campaign-message',
+                'id': message_id,
+                'attributes': {'definition': original_definition},
+            },
+        }
+        try:
+            rollback_response = requests.patch(
+                f"{KLAVIYO_API_URL}/campaign-messages/{message_id}", headers=headers, json=rollback_payload, timeout=20,
+            )
+            rollback_status = rollback_response.status_code
+        except requests.RequestException:
+            rollback_status = 'network_error'
+        return jsonify({
+            'error': 'No se pudo reasignar el template; el asunto se restauró al anterior',
+            'detail': assignment_error or _klaviyo_detail(assignment_response),
+            'source_template_id': source_template_id,
+            'previous_campaign_template_id': original_template.get('id'),
+            'rollback_status': rollback_status,
+        }), 502
+
+    assigned_template_id = (
+        assignment_response.json().get('data', {}).get('relationships', {}).get('template', {}).get('data', {}).get('id')
+    )
+    return jsonify({
+        'success': True,
+        'campaign_id': campaign_id,
+        'campaign_status': 'Draft',
+        'message_id': message_id,
+        'subject': subject,
+        'source_template_id': source_template_id,
+        'campaign_template_id': assigned_template_id,
+        'previous_campaign_template_id': original_template.get('id'),
+        'message': 'Borrador actualizado sin programar ni enviar la campaña.',
+    }), 200
+
+
 @admin_klaviyo_bp.route('/admin/klaviyo/send-template-preview', methods=['POST'])
 @admin_required
 @role_required('admin')
