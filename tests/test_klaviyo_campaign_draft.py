@@ -115,6 +115,35 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
         self.assertEqual(content['reply_to_email'], 'jordi@mikels.es')
 
     @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_campaign_readback_returns_actual_draft_scheduling_and_smart_sending(self, requests):
+        requests.get.return_value = self.response(200, {
+            'data': {
+                'id': 'campaign-1',
+                'attributes': {
+                    'name': 'Temprano 2026/27 · reserva',
+                    'status': 'Draft',
+                    'scheduled_at': None,
+                    'send_time': None,
+                    'audiences': {'included': ['segment-customers'], 'excluded': ['segment-test']},
+                    'send_options': {'use_smart_sending': True},
+                    'send_strategy': {'method': 'immediate'},
+                    'tracking_options': {'add_tracking_params': True},
+                },
+                'relationships': {'campaign-messages': {'data': [{'id': 'message-1', 'type': 'campaign-message'}]}},
+            },
+        })
+
+        with self.app.test_request_context():
+            response, status = admin_klaviyo_routes.get_klaviyo_campaign.__wrapped__.__wrapped__('campaign-1')
+
+        self.assertEqual(status, 200)
+        body = response.get_json()
+        self.assertEqual(body['status'], 'Draft')
+        self.assertIsNone(body['scheduled_at'])
+        self.assertTrue(body['send_options']['use_smart_sending'])
+        self.assertEqual(body['campaign_messages'][0]['id'], 'message-1')
+
+    @patch('src.routes.admin_klaviyo_routes.requests')
     def test_preview_send_uses_beta_template_preview_job_without_scheduling_campaign(self, requests):
         requests.post.return_value = self.response(202, {
             'data': {'id': 'preview-job-1', 'attributes': {'status': 'queued'}},

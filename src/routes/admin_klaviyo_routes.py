@@ -364,6 +364,48 @@ def create_klaviyo_campaign():
     }), 201
 
 
+@admin_klaviyo_bp.route('/admin/klaviyo/campaign/<campaign_id>', methods=['GET'])
+@admin_required
+@role_required('admin')
+def get_klaviyo_campaign(campaign_id):
+    """Read the actual draft status, timing, audience and tracking from Klaviyo."""
+    fields = ','.join([
+        'name', 'status', 'scheduled_at', 'send_time', 'audiences', 'send_options',
+        'send_strategy', 'tracking_options', 'campaign-messages',
+    ])
+    try:
+        response = requests.get(
+            f"{KLAVIYO_API_URL}/campaigns/{campaign_id}",
+            headers=_get_klaviyo_headers(),
+            params={'fields[campaign]': fields},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo leer la campaña: {exc}'}), 502
+
+    if response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo no devolvió la campaña: {response.status_code}',
+            'detail': _klaviyo_detail(response),
+        }), 502
+
+    campaign = response.json().get('data', {})
+    attributes = campaign.get('attributes', {})
+    messages = campaign.get('relationships', {}).get('campaign-messages', {}).get('data', [])
+    return jsonify({
+        'id': campaign.get('id'),
+        'name': attributes.get('name'),
+        'status': attributes.get('status'),
+        'scheduled_at': attributes.get('scheduled_at'),
+        'send_time': attributes.get('send_time'),
+        'audiences': attributes.get('audiences') or {},
+        'send_options': attributes.get('send_options') or {},
+        'send_strategy': attributes.get('send_strategy') or {},
+        'tracking_options': attributes.get('tracking_options') or {},
+        'campaign_messages': messages,
+    }), 200
+
+
 @admin_klaviyo_bp.route('/admin/klaviyo/send-template-preview', methods=['POST'])
 @admin_required
 @role_required('admin')
