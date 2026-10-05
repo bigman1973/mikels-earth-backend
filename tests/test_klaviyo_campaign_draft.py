@@ -39,6 +39,7 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(response.get_json()['lists'], [{'id': 'list-newsletter', 'name': 'Newsletter', 'type': 'list'}])
         self.assertEqual(response.get_json()['segments'], [{'id': 'segment-customers', 'name': 'Particulares', 'type': 'segment'}])
+        self.assertEqual(requests.get.call_args_list[0].kwargs['params']['page[size]'], 10)
         requests.post.assert_not_called()
 
     @patch('src.routes.admin_klaviyo_routes.requests')

@@ -115,7 +115,10 @@ def _klaviyo_detail(response, limit=500):
 def list_campaign_audiences():
     """Read available Klaviyo lists and segments before choosing campaign scope."""
     headers = _get_klaviyo_headers()
-    params = {'page[size]': 100, 'sort': 'name'}
+    # Klaviyo's lists and segments endpoints cap a single page at ten items.
+    # This account has a small set of campaign audiences; the explicit limit
+    # keeps the read valid and avoids guessing a recipient group.
+    params = {'page[size]': 10, 'sort': 'name'}
     try:
         lists_response = requests.get(f"{KLAVIYO_API_URL}/lists", headers=headers, params=params, timeout=20)
         segments_response = requests.get(f"{KLAVIYO_API_URL}/segments", headers=headers, params=params, timeout=20)
