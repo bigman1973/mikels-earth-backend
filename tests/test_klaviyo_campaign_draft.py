@@ -475,9 +475,10 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
             }),
             self.response(200, {'data': {'attributes': {'estimated_recipient_count': 72}}}),
         ]
-        requests.post.return_value = self.response(201, {
+        requests.patch.return_value = self.response(200, {'data': {'id': 'campaign-1'}})
+        requests.post.return_value = self.response(202, {
             'data': {'id': 'schedule-1', 'attributes': {
-                'strategy': 'static', 'send_time': '2099-10-07T10:00:00+02:00',
+                'status': 'queued',
             }},
         })
 
@@ -499,11 +500,19 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
         self.assertTrue(body['smart_sending'])
         self.assertEqual(body['scheduled_send_time'], '2099-10-07T10:00:00+02:00')
         schedule_call = requests.post.call_args
-        self.assertEqual(schedule_call.kwargs['headers']['revision'], '2026-07-15.pre')
+        self.assertEqual(schedule_call.kwargs['headers']['revision'], '2026-07-15')
         self.assertEqual(schedule_call.kwargs['json']['data'], {
-            'type': 'campaign-message-schedule',
-            'attributes': {'strategy': 'static', 'send_time': '2099-10-07T10:00:00+02:00'},
-            'relationships': {'campaign-message': {'data': {'type': 'campaign-message', 'id': 'message-1'}}},
+            'type': 'campaign-send-job', 'id': 'campaign-1',
+        })
+        strategy_call = requests.patch.call_args
+        self.assertEqual(strategy_call.kwargs['json']['data'], {
+            'type': 'campaign',
+            'id': 'campaign-1',
+            'attributes': {'send_strategy': {
+                'method': 'static',
+                'datetime': '2099-10-07T10:00:00+02:00',
+                'options': {'is_local': False},
+            }},
         })
 
     @patch('src.routes.admin_klaviyo_routes.requests')

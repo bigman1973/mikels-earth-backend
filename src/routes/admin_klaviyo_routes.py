@@ -768,7 +768,7 @@ def schedule_klaviyo_campaign_message(message_id):
         campaign_response = requests.get(
             f"{KLAVIYO_API_URL}/campaigns/{campaign_id}",
             headers=headers,
-            params={'fields[campaign]': 'status,audiences,send_options'},
+            params={'fields[campaign]': 'status,audiences,send_options,send_strategy'},
             timeout=20,
         )
     except requests.RequestException as exc:
@@ -824,42 +824,79 @@ def schedule_klaviyo_campaign_message(message_id):
             'estimated_recipient_count': recipient_count,
         }), 409
 
-    schedule_headers = dict(headers)
-    schedule_headers['revision'] = f'{KLAVIYO_REVISION}.pre'
-    schedule_payload = {
+    original_send_strategy = campaign_attributes.get('send_strategy')
+    strategy_payload = {
         'data': {
-            'type': 'campaign-message-schedule',
+            'type': 'campaign',
+            'id': campaign_id,
             'attributes': {
-                'strategy': 'static',
-                'send_time': send_at.isoformat(),
-            },
-            'relationships': {
-                'campaign-message': {'data': {'type': 'campaign-message', 'id': message_id}},
+                # A fixed Madrid time: 10:00 CEST on 7 October 2026 is
+                # 08:00 UTC.  ``is_local: false`` prevents per-recipient
+                # timezone delivery or an accidental immediate send.
+                'send_strategy': {
+                    'method': 'static',
+                    'datetime': send_at.isoformat(),
+                    'options': {'is_local': False},
+                },
             },
         },
     }
     try:
-        schedule_response = requests.post(
-            f"{KLAVIYO_API_URL}/campaign-message-schedule", headers=schedule_headers, json=schedule_payload, timeout=30,
+        strategy_response = requests.patch(
+            f"{KLAVIYO_API_URL}/campaigns/{campaign_id}", headers=headers, json=strategy_payload, timeout=20,
         )
     except requests.RequestException as exc:
-        return jsonify({'error': f'No se pudo programar la campaña: {exc}'}), 502
-    if schedule_response.status_code != 201:
+        return jsonify({'error': f'No se pudo fijar la fecha de programación: {exc}'}), 502
+    if strategy_response.status_code != 200:
         return jsonify({
-            'error': f'Klaviyo rechazó la programación: {schedule_response.status_code}',
-            'detail': _klaviyo_detail(schedule_response),
+            'error': f'Klaviyo rechazó la fecha de programación: {strategy_response.status_code}',
+            'detail': _klaviyo_detail(strategy_response),
             'estimated_recipient_count': recipient_count,
         }), 502
 
-    schedule = schedule_response.json().get('data', {})
-    schedule_attributes = schedule.get('attributes', {}) or {}
+    send_job_payload = {'data': {'type': 'campaign-send-job', 'id': campaign_id}}
+    try:
+        send_job_response = requests.post(
+            f"{KLAVIYO_API_URL}/campaign-send-jobs", headers=headers, json=send_job_payload, timeout=30,
+        )
+    except requests.RequestException as exc:
+        send_job_response = None
+        send_job_error = str(exc)
+    else:
+        send_job_error = None
+
+    if send_job_response is None or send_job_response.status_code != 202:
+        rollback_status = None
+        if original_send_strategy:
+            rollback_payload = {
+                'data': {
+                    'type': 'campaign',
+                    'id': campaign_id,
+                    'attributes': {'send_strategy': original_send_strategy},
+                },
+            }
+            try:
+                rollback_status = requests.patch(
+                    f"{KLAVIYO_API_URL}/campaigns/{campaign_id}", headers=headers, json=rollback_payload, timeout=20,
+                ).status_code
+            except requests.RequestException:
+                rollback_status = 'network_error'
+        return jsonify({
+            'error': 'Klaviyo no aceptó el job de programación; la fecha se restauró al valor anterior.',
+            'detail': send_job_error or _klaviyo_detail(send_job_response),
+            'estimated_recipient_count': recipient_count,
+            'rollback_status': rollback_status,
+        }), 502
+
+    send_job = send_job_response.json().get('data', {})
+    send_job_attributes = send_job.get('attributes', {}) or {}
     return jsonify({
         'success': True,
         'campaign_id': campaign_id,
         'message_id': message_id,
-        'schedule_id': schedule.get('id'),
-        'strategy': schedule_attributes.get('strategy'),
-        'scheduled_send_time': schedule_attributes.get('send_time'),
+        'send_job_id': send_job.get('id'),
+        'send_job_status': send_job_attributes.get('status'),
+        'scheduled_send_time': send_at.isoformat(),
         'estimated_recipient_count': recipient_count,
         'subject': content.get('subject'),
         'preview_text': content.get('preview_text'),
