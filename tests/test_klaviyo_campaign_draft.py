@@ -454,5 +454,95 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
         requests.patch.assert_not_called()
 
 
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_schedules_only_audited_draft_with_completed_estimate(self, requests):
+        requests.get.side_effect = [
+            self.response(200, {
+                'data': {
+                    'attributes': {'definition': {'channel': 'email', 'content': {
+                        'subject': 'Este año el temprano funciona distinto',
+                        'preview_text': 'Solo se envasa lo que esté reservado. Te lo cuento antes de empezar.',
+                    }}},
+                    'relationships': {'campaign': {'data': {'id': 'campaign-1', 'type': 'campaign'}}},
+                },
+            }),
+            self.response(200, {
+                'data': {'attributes': {
+                    'status': 'Draft',
+                    'audiences': {'included': ['segment-customers-newsletter'], 'excluded': ['internal-exclusions']},
+                    'send_options': {'use_smart_sending': True, 'ignore_unsubscribes': False},
+                }},
+            }),
+            self.response(200, {'data': {'attributes': {'estimated_recipient_count': 72}}}),
+        ]
+        requests.post.return_value = self.response(201, {
+            'data': {'id': 'schedule-1', 'attributes': {
+                'strategy': 'static', 'send_time': '2099-10-07T10:00:00+02:00',
+            }},
+        })
+
+        payload = {
+            'campaign_id': 'campaign-1',
+            'send_at': '2099-10-07T10:00:00+02:00',
+            'expected_subject': 'Este año el temprano funciona distinto',
+            'expected_preview_text': 'Solo se envasa lo que esté reservado. Te lo cuento antes de empezar.',
+            'expected_audience_id': 'segment-customers-newsletter',
+            'required_exclusion_ids': ['internal-exclusions'],
+        }
+        with self.app.test_request_context(method='POST', json=payload):
+            response, status = admin_klaviyo_routes.schedule_klaviyo_campaign_message.__wrapped__.__wrapped__('message-1')
+
+        self.assertEqual(status, 201)
+        body = response.get_json()
+        self.assertTrue(body['success'])
+        self.assertEqual(body['estimated_recipient_count'], 72)
+        self.assertTrue(body['smart_sending'])
+        self.assertEqual(body['scheduled_send_time'], '2099-10-07T10:00:00+02:00')
+        schedule_call = requests.post.call_args
+        self.assertEqual(schedule_call.kwargs['headers']['revision'], '2026-07-15.pre')
+        self.assertEqual(schedule_call.kwargs['json']['data'], {
+            'type': 'campaign-message-schedule',
+            'attributes': {'strategy': 'static', 'send_time': '2099-10-07T10:00:00+02:00'},
+            'relationships': {'campaign-message': {'data': {'type': 'campaign-message', 'id': 'message-1'}}},
+        })
+
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_refuses_scheduling_when_recipient_estimate_is_not_ready(self, requests):
+        requests.get.side_effect = [
+            self.response(200, {
+                'data': {
+                    'attributes': {'definition': {'channel': 'email', 'content': {
+                        'subject': 'Este año el temprano funciona distinto',
+                        'preview_text': 'Solo se envasa lo que esté reservado. Te lo cuento antes de empezar.',
+                    }}},
+                    'relationships': {'campaign': {'data': {'id': 'campaign-1', 'type': 'campaign'}}},
+                },
+            }),
+            self.response(200, {
+                'data': {'attributes': {
+                    'status': 'Draft',
+                    'audiences': {'included': ['segment-customers-newsletter'], 'excluded': ['internal-exclusions']},
+                    'send_options': {'use_smart_sending': True, 'ignore_unsubscribes': False},
+                }},
+            }),
+            self.response(404, text='No results or results were out of date.'),
+        ]
+
+        payload = {
+            'campaign_id': 'campaign-1',
+            'send_at': '2099-10-07T10:00:00+02:00',
+            'expected_subject': 'Este año el temprano funciona distinto',
+            'expected_preview_text': 'Solo se envasa lo que esté reservado. Te lo cuento antes de empezar.',
+            'expected_audience_id': 'segment-customers-newsletter',
+            'required_exclusion_ids': ['internal-exclusions'],
+        }
+        with self.app.test_request_context(method='POST', json=payload):
+            response, status = admin_klaviyo_routes.schedule_klaviyo_campaign_message.__wrapped__.__wrapped__('message-1')
+
+        self.assertEqual(status, 409)
+        self.assertIn('estimación oficial', response.get_json()['error'])
+        requests.post.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

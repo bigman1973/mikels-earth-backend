@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify
 import os
 import requests
 import time
+from datetime import datetime, timezone
 from src.routes.auth_routes import admin_required, role_required
 
 admin_klaviyo_bp = Blueprint('admin_klaviyo', __name__)
@@ -702,6 +703,171 @@ def get_klaviyo_campaign(campaign_id):
         'tracking_options': attributes.get('tracking_options') or {},
         'campaign_messages': messages,
     }), 200
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/campaign-message/<message_id>/schedule', methods=['POST'])
+@admin_required
+@role_required('admin')
+def schedule_klaviyo_campaign_message(message_id):
+    """Schedule one audited Draft campaign message without an immediate send.
+
+    Scheduling is deliberately blocked unless the live Klaviyo records still
+    match the reviewed subject, preview, segment, exclusions, consent behavior,
+    Smart Sending flag, and a completed positive recipient estimate.  This
+    prevents a late audience or content change from being sent accidentally.
+    """
+    body = request.get_json(silent=True) or {}
+    campaign_id = str(body.get('campaign_id') or '').strip()
+    send_at_raw = str(body.get('send_at') or '').strip()
+    expected_subject = str(body.get('expected_subject') or '').strip()
+    expected_preview_text = str(body.get('expected_preview_text') or '').strip()
+    expected_audience_id = str(body.get('expected_audience_id') or '').strip()
+    required_exclusion_ids = [str(item).strip() for item in (body.get('required_exclusion_ids') or []) if str(item).strip()]
+
+    if not all((campaign_id, send_at_raw, expected_subject, expected_preview_text, expected_audience_id)):
+        return jsonify({
+            'error': 'campaign_id, send_at, expected_subject, expected_preview_text y expected_audience_id son obligatorios',
+        }), 400
+
+    try:
+        send_at = datetime.fromisoformat(send_at_raw.replace('Z', '+00:00'))
+    except ValueError:
+        return jsonify({'error': 'send_at debe ser una fecha ISO 8601 válida con zona horaria'}), 400
+    if send_at.tzinfo is None:
+        return jsonify({'error': 'send_at debe incluir zona horaria; por ejemplo +02:00 para Madrid'}), 400
+    if send_at.astimezone(timezone.utc) <= datetime.now(timezone.utc):
+        return jsonify({'error': 'send_at debe estar en el futuro'}), 400
+
+    headers = _get_klaviyo_headers()
+    try:
+        message_response = requests.get(
+            f"{KLAVIYO_API_URL}/campaign-messages/{message_id}", headers=headers, timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo leer el mensaje de campaña: {exc}'}), 502
+    if message_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo no devolvió el mensaje de campaña: {message_response.status_code}',
+            'detail': _klaviyo_detail(message_response),
+        }), 502
+
+    message = message_response.json().get('data', {})
+    definition = (message.get('attributes', {}) or {}).get('definition', {}) or {}
+    content = definition.get('content', {}) or {}
+    actual_campaign_id = ((message.get('relationships', {}) or {}).get('campaign', {}) or {}).get('data', {}).get('id')
+    if definition.get('channel') != 'email' or actual_campaign_id != campaign_id:
+        return jsonify({'error': 'El mensaje no pertenece al email de campaña indicado'}), 409
+    if content.get('subject') != expected_subject or content.get('preview_text') != expected_preview_text:
+        return jsonify({
+            'error': 'El asunto o la vista previa ya no coinciden con la versión aprobada; la campaña no se ha programado.',
+            'actual_subject': content.get('subject'),
+            'actual_preview_text': content.get('preview_text'),
+        }), 409
+
+    try:
+        campaign_response = requests.get(
+            f"{KLAVIYO_API_URL}/campaigns/{campaign_id}",
+            headers=headers,
+            params={'fields[campaign]': 'status,audiences,send_options'},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo leer la campaña: {exc}'}), 502
+    if campaign_response.status_code != 200:
+        return jsonify({
+            'error': f'Klaviyo no devolvió la campaña: {campaign_response.status_code}',
+            'detail': _klaviyo_detail(campaign_response),
+        }), 502
+
+    campaign_attributes = (campaign_response.json().get('data', {}) or {}).get('attributes', {}) or {}
+    status = str(campaign_attributes.get('status') or '').lower()
+    audiences = campaign_attributes.get('audiences') or {}
+    included = list(audiences.get('included') or [])
+    excluded = list(audiences.get('excluded') or [])
+    send_options = campaign_attributes.get('send_options') or {}
+    if status != 'draft':
+        return jsonify({'error': f'La campaña no está en Draft (estado: {status or "desconocido"})'}), 409
+    if included != [expected_audience_id]:
+        return jsonify({
+            'error': 'La audiencia incluida no coincide exactamente con el segmento aprobado; la campaña no se ha programado.',
+            'included_audiences': included,
+        }), 409
+    missing_exclusions = [item for item in required_exclusion_ids if item not in excluded]
+    if missing_exclusions:
+        return jsonify({
+            'error': 'Faltan exclusiones obligatorias; la campaña no se ha programado.',
+            'missing_exclusion_ids': missing_exclusions,
+            'excluded_audiences': excluded,
+        }), 409
+    if send_options.get('use_smart_sending') is not True or send_options.get('ignore_unsubscribes') is True:
+        return jsonify({
+            'error': 'Smart Sending o el respeto de bajas no tienen la configuración aprobada; la campaña no se ha programado.',
+            'send_options': send_options,
+        }), 409
+
+    try:
+        estimation_response = requests.get(
+            f"{KLAVIYO_API_URL}/campaign-recipient-estimations/{campaign_id}", headers=headers, timeout=20,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo leer la estimación de destinatarios: {exc}'}), 502
+    if estimation_response.status_code != 200:
+        return jsonify({
+            'error': 'La estimación oficial de destinatarios aún no está lista; la campaña no se ha programado.',
+            'estimation_status': estimation_response.status_code,
+            'detail': _klaviyo_detail(estimation_response),
+        }), 409
+    recipient_count = ((estimation_response.json().get('data', {}) or {}).get('attributes', {}) or {}).get('estimated_recipient_count')
+    if not isinstance(recipient_count, int) or recipient_count <= 0:
+        return jsonify({
+            'error': 'La estimación de destinatarios no es positiva; la campaña no se ha programado.',
+            'estimated_recipient_count': recipient_count,
+        }), 409
+
+    schedule_headers = dict(headers)
+    schedule_headers['revision'] = f'{KLAVIYO_REVISION}.pre'
+    schedule_payload = {
+        'data': {
+            'type': 'campaign-message-schedule',
+            'attributes': {
+                'strategy': 'static',
+                'send_time': send_at.isoformat(),
+            },
+            'relationships': {
+                'campaign-message': {'data': {'type': 'campaign-message', 'id': message_id}},
+            },
+        },
+    }
+    try:
+        schedule_response = requests.post(
+            f"{KLAVIYO_API_URL}/campaign-message-schedule", headers=schedule_headers, json=schedule_payload, timeout=30,
+        )
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo programar la campaña: {exc}'}), 502
+    if schedule_response.status_code != 201:
+        return jsonify({
+            'error': f'Klaviyo rechazó la programación: {schedule_response.status_code}',
+            'detail': _klaviyo_detail(schedule_response),
+            'estimated_recipient_count': recipient_count,
+        }), 502
+
+    schedule = schedule_response.json().get('data', {})
+    schedule_attributes = schedule.get('attributes', {}) or {}
+    return jsonify({
+        'success': True,
+        'campaign_id': campaign_id,
+        'message_id': message_id,
+        'schedule_id': schedule.get('id'),
+        'strategy': schedule_attributes.get('strategy'),
+        'scheduled_send_time': schedule_attributes.get('send_time'),
+        'estimated_recipient_count': recipient_count,
+        'subject': content.get('subject'),
+        'preview_text': content.get('preview_text'),
+        'included_audiences': included,
+        'excluded_audiences': excluded,
+        'smart_sending': send_options.get('use_smart_sending'),
+        'message': 'Klaviyo ha aceptado la programación; no se ha enviado la campaña inmediatamente.',
+    }), 201
 
 
 @admin_klaviyo_bp.route('/admin/klaviyo/campaign-message/<message_id>', methods=['GET', 'PUT'])
