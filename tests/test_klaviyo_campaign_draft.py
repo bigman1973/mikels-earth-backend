@@ -96,6 +96,58 @@ class KlaviyoCampaignDraftTests(unittest.TestCase):
         audience_update = requests.patch.call_args.kwargs['json']['data']['attributes']['audiences']
         self.assertEqual(audience_update['excluded'], ['preview-list', 'internal-exclusion-list'])
 
+    @patch('src.routes.admin_klaviyo_routes._klaviyo_metric_ids')
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_creates_dynamic_reservation_exclusion_from_placed_orders_since_cutoff(self, requests, metric_ids):
+        metric_ids.return_value = {'Mikels Placed Order': 'metric-placed-order'}
+        requests.get.return_value = self.response(200, {'data': [], 'links': {'next': None}})
+        requests.post.return_value = self.response(201, {'data': {'id': 'segment-reserved'}})
+        response, status = self.call_route(admin_klaviyo_routes.ensure_temprano_reservation_exclusion, {
+            'since': '2026-10-07T00:00:00+02:00',
+            'segment_name': 'Excluir reservas Temprano desde 07-10-2026',
+        })
+        self.assertEqual(status, 201)
+        body = response.get_json()
+        self.assertTrue(body['created'])
+        self.assertEqual(body['segment_id'], 'segment-reserved')
+        payload = requests.post.call_args.kwargs['json']['data']
+        self.assertEqual(payload['type'], 'segment')
+        condition = payload['attributes']['definition']['condition_groups'][0]['conditions'][0]
+        self.assertEqual(condition, {
+            'type': 'profile-metric',
+            'metric_id': 'metric-placed-order',
+            'measurement': 'count',
+            'measurement_filter': {'type': 'numeric', 'operator': 'greater-than', 'value': 0},
+            'timeframe_filter': {'type': 'date', 'operator': 'after', 'date': '2026-10-07T00:00:00+02:00'},
+            'metric_filters': None,
+        })
+
+    @patch('src.routes.admin_klaviyo_routes._klaviyo_metric_ids')
+    @patch('src.routes.admin_klaviyo_routes.requests')
+    def test_reuses_equivalent_dynamic_reservation_exclusion_after_utc_normalization(self, requests, metric_ids):
+        metric_ids.return_value = {'Mikels Placed Order': 'metric-placed-order'}
+        requests.get.return_value = self.response(200, {'data': [{
+            'id': 'segment-reserved',
+            'attributes': {
+                'name': 'Excluir reservas Temprano desde 07-10-2026',
+                'definition': {'condition_groups': [{'conditions': [{
+                    'type': 'profile-metric',
+                    'metric_id': 'metric-placed-order',
+                    'measurement': 'count',
+                    'measurement_filter': {'type': 'numeric', 'operator': 'greater-than', 'value': 0},
+                    'timeframe_filter': {'type': 'date', 'operator': 'after', 'date': '2026-10-06T22:00:00Z'},
+                    'metric_filters': [],
+                }]}]},
+            },
+        }], 'links': {'next': None}})
+        response, status = self.call_route(admin_klaviyo_routes.ensure_temprano_reservation_exclusion, {
+            'since': '2026-10-07T00:00:00+02:00',
+            'segment_name': 'Excluir reservas Temprano desde 07-10-2026',
+        })
+        self.assertEqual(status, 200)
+        self.assertFalse(response.get_json()['created'])
+        requests.post.assert_not_called()
+
     @patch('src.routes.admin_klaviyo_routes.requests')
     def test_refreshes_recipient_estimation_only_for_draft_campaign(self, requests):
         requests.get.side_effect = [

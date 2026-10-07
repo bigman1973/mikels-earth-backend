@@ -347,6 +347,153 @@ def set_klaviyo_campaign_internal_exclusions(campaign_id):
     }), 200
 
 
+def _find_klaviyo_segment_by_name(headers, name):
+    """Find a segment exactly by name, following Klaviyo's opaque cursor."""
+    url = f"{KLAVIYO_API_URL}/segments"
+    params = {'page[size]': 10, 'sort': 'name'}
+    for _ in range(10):
+        response = requests.get(url, headers=headers, params=params, timeout=20)
+        if response.status_code != 200:
+            raise RuntimeError(f'Klaviyo segments {response.status_code}: {_klaviyo_detail(response)}')
+        body = response.json()
+        for segment in body.get('data', []):
+            attributes = segment.get('attributes', {}) or {}
+            if attributes.get('name') == name:
+                return segment
+        next_url = (body.get('links') or {}).get('next')
+        if not next_url:
+            return None
+        url = next_url
+        params = None
+    raise RuntimeError('Klaviyo devolvió demasiadas páginas de segmentos')
+
+
+def _temprano_reservation_exclusion_definition(metric_id, since):
+    """Return the dynamic exclusion: at least one paid order after ``since``."""
+    return {
+        'condition_groups': [{
+            'conditions': [{
+                'type': 'profile-metric',
+                'metric_id': metric_id,
+                'measurement': 'count',
+                'measurement_filter': {'type': 'numeric', 'operator': 'greater-than', 'value': 0},
+                'timeframe_filter': {'type': 'date', 'operator': 'after', 'date': since},
+                'metric_filters': None,
+            }],
+        }],
+    }
+
+
+def _matches_temprano_reservation_exclusion(definition, metric_id, since):
+    """Check the semantic filter, tolerant of Klaviyo's date normalization."""
+    groups = (definition or {}).get('condition_groups') or []
+    if len(groups) != 1:
+        return False
+    conditions = (groups[0] or {}).get('conditions') or []
+    if len(conditions) != 1:
+        return False
+    condition = conditions[0] or {}
+    measurement_filter = condition.get('measurement_filter') or {}
+    timeframe_filter = condition.get('timeframe_filter') or {}
+    try:
+        actual_since = datetime.fromisoformat(str(timeframe_filter.get('date') or '').replace('Z', '+00:00'))
+        expected_since = datetime.fromisoformat(str(since).replace('Z', '+00:00'))
+    except ValueError:
+        return False
+    return (
+        condition.get('type') == 'profile-metric'
+        and condition.get('metric_id') == metric_id
+        and condition.get('measurement') == 'count'
+        and measurement_filter == {'type': 'numeric', 'operator': 'greater-than', 'value': 0}
+        and timeframe_filter.get('type') == 'date'
+        and timeframe_filter.get('operator') == 'after'
+        and actual_since.astimezone(timezone.utc) == expected_since.astimezone(timezone.utc)
+        and condition.get('metric_filters') in (None, [])
+    )
+
+
+@admin_klaviyo_bp.route('/admin/klaviyo/temprano-reservation-exclusion', methods=['POST'])
+@admin_required
+@role_required('admin')
+def ensure_temprano_reservation_exclusion():
+    """Create or verify the dynamic segment excluding confirmed new reservations.
+
+    The segment is deliberately based on the accepted `Mikels Placed Order`
+    metric rather than a manually-maintained list. A late reservation remains
+    excluded at the campaign's recipient snapshot without changing consent or
+    touching the campaign sent on 7 October.
+    """
+    data = request.get_json(silent=True) or {}
+    since = str(data.get('since') or '').strip()
+    segment_name = str(data.get('segment_name') or 'Excluir reservas Temprano desde 07-10-2026').strip()
+    if not since:
+        return jsonify({'error': 'since es obligatorio y debe ser ISO 8601 con zona horaria'}), 400
+    try:
+        since_at = datetime.fromisoformat(since.replace('Z', '+00:00'))
+    except ValueError:
+        return jsonify({'error': 'since debe ser una fecha ISO 8601 válida'}), 400
+    if since_at.tzinfo is None:
+        return jsonify({'error': 'since debe incluir zona horaria'}), 400
+    # The cutoff is a documented business boundary, not a relative rolling
+    # window, so it remains stable when the scheduled campaign is audited.
+    since = since_at.isoformat()
+
+    headers = _get_klaviyo_headers()
+    try:
+        metric_ids = _klaviyo_metric_ids(headers, ('Mikels Placed Order',))
+        metric_id = metric_ids['Mikels Placed Order']
+        definition = _temprano_reservation_exclusion_definition(metric_id, since)
+        existing = _find_klaviyo_segment_by_name(headers, segment_name)
+    except RuntimeError as exc:
+        return jsonify({'error': str(exc)}), 502
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo verificar la exclusión dinámica: {exc}'}), 502
+
+    if existing:
+        attributes = existing.get('attributes', {}) or {}
+        if not _matches_temprano_reservation_exclusion(attributes.get('definition'), metric_id, since):
+            return jsonify({
+                'error': 'Ya existe una exclusión con ese nombre, pero sus condiciones no coinciden; no se ha reutilizado.',
+                'segment_id': existing.get('id'),
+                'actual_definition': attributes.get('definition'),
+            }), 409
+        return jsonify({
+            'success': True,
+            'created': False,
+            'segment_id': existing.get('id'),
+            'segment_name': segment_name,
+            'metric_name': 'Mikels Placed Order',
+            'since': since,
+            'message': 'Exclusión dinámica ya verificada; no se han modificado campañas ni consentimientos.',
+        }), 200
+
+    payload = {
+        'data': {
+            'type': 'segment',
+            'attributes': {'name': segment_name, 'definition': definition, 'is_starred': False},
+        },
+    }
+    try:
+        response = requests.post(f"{KLAVIYO_API_URL}/segments", headers=headers, json=payload, timeout=20)
+    except requests.RequestException as exc:
+        return jsonify({'error': f'No se pudo crear la exclusión dinámica: {exc}'}), 502
+    if response.status_code != 201:
+        return jsonify({
+            'error': f'Klaviyo rechazó la exclusión dinámica: {response.status_code}',
+            'detail': _klaviyo_detail(response),
+        }), 502
+    segment = response.json().get('data', {})
+    return jsonify({
+        'success': True,
+        'created': True,
+        'segment_id': segment.get('id'),
+        'segment_name': segment_name,
+        'metric_name': 'Mikels Placed Order',
+        'since': since,
+        'message': 'Exclusión dinámica creada; aún no se ha creado, programado ni enviado una campaña.',
+    }), 201
+
+
 @admin_klaviyo_bp.route('/admin/klaviyo/campaign/<campaign_id>/recipient-estimation', methods=['GET', 'POST'])
 @admin_required
 @role_required('admin')
