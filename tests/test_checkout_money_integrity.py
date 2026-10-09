@@ -142,6 +142,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         self.assertNotIn('shipping_address_collection', create_session.call_args.kwargs)
         self.assertNotIn('phone_number_collection', create_session.call_args.kwargs)
         self.assertEqual(create_session.call_args.kwargs['metadata']['shipping_country_code'], 'ES')
+        self.assertEqual(create_session.call_args.kwargs['metadata']['meta_marketing_consent'], 'false')
 
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
     def test_checkout_rejects_unserved_or_excluded_destinations_before_stripe(self, create_session):

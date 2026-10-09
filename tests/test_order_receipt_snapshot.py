@@ -41,6 +41,8 @@ class OrderReceiptSnapshotTests(unittest.TestCase):
         )
         receipt = build_receipt_snapshot(order)
 
+        self.assertEqual(receipt['lines'][0]['sku'], 'MIKPARA450R')
+        self.assertEqual(receipt['lines'][1]['sku'], 'MIKVET500R')
         self.assertEqual(receipt['lines'][0]['amount_display'], '17,15 €')
         self.assertEqual(receipt['lines'][1]['amount_display'], '39,09 €')
         self.assertEqual(receipt['totals']['subtotal_display'], '56,24 €')

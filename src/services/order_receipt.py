@@ -67,6 +67,7 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
         line_total = _item_total(item).quantize(CENT, rounding=ROUND_HALF_UP)
         lines.append({
             "name": str(item.get("name") or "Producto"),
+            "sku": str(item.get("sku") or ""),
             "quantity": quantity,
             "amount": float(line_total),
             "amount_display": format_eur(line_total),

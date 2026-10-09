@@ -304,6 +304,9 @@ def create_checkout_session():
                 'fiscal_city': (data.get('invoice_data') or {}).get('fiscalCity', ''),
                 'fiscal_postal_code': (data.get('invoice_data') or {}).get('fiscalPostalCode', ''),
                 'locale': data.get('locale', 'es'),
+                # The server CAPI Purchase is permitted only when the browser
+                # held affirmative Cookiebot marketing consent at checkout.
+                'meta_marketing_consent': str(bool(customer_info.get('metaMarketingConsent'))).lower(),
                 'stock_checkout_token': stock_checkout_token,
             }
         }
@@ -707,6 +710,23 @@ def stripe_webhook():
                     )
                     db.session.commit()
                     print(f"✅ Order {order_number} saved to database (invoice: {needs_invoice})")
+
+                    # Browser and server Purchase use the immutable order number
+                    # as their shared event ID. The service is consent-gated and
+                    # fail-soft, so Meta outages cannot disturb a paid order.
+                    try:
+                        from src.services.meta_conversions_api import dispatch_meta_purchase_event
+                        meta_result = dispatch_meta_purchase_event(
+                            new_order,
+                            marketing_consent=session['metadata'].get('meta_marketing_consent') == 'true',
+                            frontend_url=os.getenv('FRONTEND_URL', 'https://www.mikels.es'),
+                        )
+                        if meta_result.get('sent'):
+                            print(f"✅ Meta Purchase enviado para {order_number}")
+                        else:
+                            print(f"ℹ️ Meta Purchase no enviado para {order_number}: {meta_result.get('reason', 'sin recepción confirmada')}")
+                    except Exception as meta_error:
+                        print(f"⚠️ Meta Purchase no bloqueó el pedido {order_number}: {meta_error}")
                 except Exception as db_error:
                     print(f"⚠️ Error saving order to database: {str(db_error)}")
                     db.session.rollback()
