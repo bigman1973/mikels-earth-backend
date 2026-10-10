@@ -61,7 +61,7 @@ def dispatch_meta_purchase_event(order: Any, *, marketing_consent: bool, fronten
         return {"sent": False, "reason": "marketing_consent_not_granted"}
 
     pixel_id = str(os.getenv("META_PIXEL_ID") or "").strip()
-    access_token = str(os.getenv("META_CONVERSIONS_API_TOKEN") or "").strip()
+    access_token = str(os.getenv("META_CAPI_ACCESS_TOKEN") or "").strip()
     if not pixel_id or not access_token:
         return {"sent": False, "reason": "meta_not_configured"}
 

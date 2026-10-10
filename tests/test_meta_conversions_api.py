@@ -32,7 +32,7 @@ class MetaConversionsApiTests(unittest.TestCase):
 
     @patch.dict(os.environ, {
         "META_PIXEL_ID": "1234567890",
-        "META_CONVERSIONS_API_TOKEN": "test-token",
+        "META_CAPI_ACCESS_TOKEN": "test-token",
         "FRONTEND_URL": "https://www.mikels.es",
     }, clear=False)
     @patch("src.services.meta_conversions_api.requests.post")
@@ -65,7 +65,7 @@ class MetaConversionsApiTests(unittest.TestCase):
 
     @patch.dict(os.environ, {
         "META_PIXEL_ID": "1234567890",
-        "META_CONVERSIONS_API_TOKEN": "test-token",
+        "META_CAPI_ACCESS_TOKEN": "test-token",
     }, clear=False)
     @patch("src.services.meta_conversions_api.requests.post")
     def test_purchase_without_sku_is_skipped_before_network_call(self, post):
