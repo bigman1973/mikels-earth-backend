@@ -551,6 +551,135 @@ def get_web_products():
     return jsonify({'products': [p.to_admin_dict() for p in products]})
 
 
+@admin_panel_bp.route('/reviews/verified', methods=['GET'])
+@admin_required
+@role_required('admin')
+def get_verified_reviews_for_remap():
+    """Read verified reviews, including non-public ones, for an audited product remap.
+
+    This deliberately exposes only the fields needed to reconcile obsolete
+    product slugs. It never returns customer email or review text.
+    """
+    from src.models.review import Review
+
+    reviews = Review.query.filter_by(is_verified_purchase=True).order_by(Review.id.asc()).all()
+    return jsonify({
+        'reviews': [{
+            'id': review.id,
+            'product_slug': review.product_slug,
+            'product_name': review.product_name,
+            'rating': review.rating,
+            'status': review.status,
+            'is_verified_purchase': review.is_verified_purchase,
+            'created_at': review.created_at.isoformat() if review.created_at else None,
+            'updated_at': review.updated_at.isoformat() if review.updated_at else None,
+        } for review in reviews]
+    })
+
+
+@admin_panel_bp.route('/reviews/remap-products', methods=['PUT'])
+@admin_required
+@role_required('admin')
+def remap_verified_review_products():
+    """Correct obsolete product slugs on verified reviews without changing the review.
+
+    The caller must provide the slug currently stored for every review. This
+    prevents a stale tab from redirecting a review that another administrator
+    has already changed. Only the canonical product slug/name and timestamp
+    can change; author, text, score, status and verification are preserved.
+    """
+    from src.models.review import Review
+    from src.models.web_product import WebProduct
+
+    data = request.get_json(silent=True) or {}
+    mappings = data.get('mappings')
+    if not isinstance(mappings, list) or not mappings:
+        return jsonify({'error': 'mappings debe ser una lista no vacía'}), 400
+    if len(mappings) > 20:
+        return jsonify({'error': 'No se pueden remapear más de 20 reseñas a la vez'}), 400
+
+    normalized = []
+    seen_review_ids = set()
+    for item in mappings:
+        if not isinstance(item, dict):
+            return jsonify({'error': 'Cada mapeo debe ser un objeto'}), 400
+        review_id = item.get('review_id')
+        expected_slug = str(item.get('expected_slug') or '').strip()
+        target_slug = str(item.get('target_slug') or '').strip()
+        if not isinstance(review_id, int) or review_id <= 0 or not expected_slug or not target_slug:
+            return jsonify({'error': 'Cada mapeo requiere review_id, expected_slug y target_slug'}), 400
+        if review_id in seen_review_ids:
+            return jsonify({'error': 'No se puede repetir una reseña en el mismo remapeo'}), 400
+        seen_review_ids.add(review_id)
+        normalized.append((review_id, expected_slug, target_slug))
+
+    review_ids = [item[0] for item in normalized]
+    reviews = {
+        review.id: review
+        for review in Review.query.filter(Review.id.in_(review_ids)).all()
+    }
+    target_slugs = {item[2] for item in normalized}
+    products = {
+        product.slug: product
+        for product in WebProduct.query.filter(WebProduct.slug.in_(target_slugs)).all()
+    }
+
+    errors = []
+    for review_id, expected_slug, target_slug in normalized:
+        review = reviews.get(review_id)
+        product = products.get(target_slug)
+        if not review:
+            errors.append(f'Reseña {review_id} no encontrada')
+        elif not review.is_verified_purchase:
+            errors.append(f'Reseña {review_id} no es una compra verificada')
+        elif review.product_slug != expected_slug:
+            errors.append(
+                f'Reseña {review_id} no coincide con el slug esperado '
+                f'({review.product_slug!r} != {expected_slug!r})'
+            )
+        elif not product:
+            errors.append(f'Producto canónico {target_slug!r} no encontrado')
+    if errors:
+        return jsonify({'error': 'Remapeo rechazado', 'details': errors}), 409
+
+    changes = []
+    try:
+        for review_id, _expected_slug, target_slug in normalized:
+            review = reviews[review_id]
+            product = products[target_slug]
+            before = {
+                'id': review.id,
+                'product_slug': review.product_slug,
+                'product_name': review.product_name,
+                'status': review.status,
+                'is_verified_purchase': review.is_verified_purchase,
+            }
+            review.product_slug = product.slug
+            review.product_name = product.name
+            changes.append({
+                'before': before,
+                'after': {
+                    **before,
+                    'product_slug': product.slug,
+                    'product_name': product.name,
+                },
+            })
+        db.session.commit()
+    except Exception as error:
+        db.session.rollback()
+        return jsonify({'error': str(error)}), 500
+
+    for change in changes:
+        review = reviews[change['after']['id']]
+        change['after']['updated_at'] = review.updated_at.isoformat() if review.updated_at else None
+
+    return jsonify({
+        'success': True,
+        'changed': len(changes),
+        'changes': changes,
+    })
+
+
 @admin_panel_bp.route('/web-products/<int:product_id>', methods=['GET'])
 @admin_required
 def get_web_product(product_id):
