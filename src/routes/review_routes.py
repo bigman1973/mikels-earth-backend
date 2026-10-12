@@ -226,8 +226,12 @@ def get_reviews():
         offset = int(request.args.get('offset', 0))
         sort = request.args.get('sort', 'newest')
         
-        # Base query: solo reseñas aprobadas
-        query = Review.query.filter_by(status='approved')
+        # La superficie pública solo muestra compras verificadas aprobadas.
+        # Las demás filas se conservan intactas para auditoría administrativa.
+        query = Review.query.filter(
+            Review.status == 'approved',
+            Review.is_verified_purchase.is_(True),
+        )
         
         # Filtrar por producto si se especifica
         if product_slug:
@@ -270,8 +274,12 @@ def get_review_stats():
     try:
         product_slug = request.args.get('product_slug')
         
-        # Base query: solo reseñas aprobadas
-        query = Review.query.filter_by(status='approved')
+        # Las estadísticas públicas deben reflejar exactamente el mismo conjunto
+        # que la lista y las fichas de producto: compras verificadas aprobadas.
+        query = Review.query.filter(
+            Review.status == 'approved',
+            Review.is_verified_purchase.is_(True),
+        )
         
         if product_slug:
             query = query.filter_by(product_slug=product_slug)
@@ -319,7 +327,8 @@ def get_featured_reviews():
         
         reviews = Review.query.filter(
             Review.status == 'approved',
-            Review.rating >= 4
+            Review.is_verified_purchase.is_(True),
+            Review.rating >= 4,
         ).order_by(Review.created_at.desc()).limit(limit).all()
         
         return jsonify({
