@@ -96,6 +96,7 @@ def create_checkout_session():
         discount_code = data.get('discount_code')
         coupon_discount_amount = as_eur(data.get('discount_amount', 0), field='descuento')
         volume_discount_amount = Decimal('0.00')
+        has_non_discountable_pack = False
         checkout_pricing_snapshot = {}
         
         # ===== VALIDACIÓN DE PRECIOS CONTRA LA BASE DE DATOS =====
@@ -125,7 +126,13 @@ def create_checkout_session():
                 # when a persisted volume tier applies (17.15 × 85% =
                 # 14.5775).  Validate its *complete line total* against the
                 # same DB tier, never against the undiscounted unit price.
-                expected = calculate_checkout_line_price(db_product, quantity)
+                try:
+                    expected = calculate_checkout_line_price(db_product, quantity)
+                except ValueError as exc:
+                    return jsonify({
+                        'error': 'INVALID_PACK_QUANTITY',
+                        'message': str(exc),
+                    }), 422
                 received_line_total = sent_line_total(item_price, quantity)
                 if abs(received_line_total - expected.expected_line_total) > Decimal('0.01'):
                     price_errors.append({
@@ -136,15 +143,25 @@ def create_checkout_session():
                         'tiered_discount': db_product.tiered_discount,
                         'volume_discount': db_product.volume_discount,
                     })
-                # Stripe prices require whole cents, so each product line stays
-                # at its master unit price and the exact tier saving is applied
-                # once as a checkout discount below.  This preserves both the
-                # real quantity and the exact cart total.
-                item['price'] = float(expected.base_unit_price)
+                physical_quantity = int(quantity)
+                item['_physical_quantity'] = physical_quantity
+                item['_stripe_quantity'] = 1 if expected.fixed_pack else physical_quantity
+                item['_stripe_unit_price'] = float(
+                    expected.expected_line_total if expected.fixed_pack else expected.base_unit_price
+                )
+                if expected.fixed_pack:
+                    # Keep the physical bottle count for stock and fulfilment,
+                    # but charge Stripe one exact line for the selected pack.
+                    # This avoids fractional-cent bottle prices and prevents a
+                    # pack from being represented as a stackable discount.
+                    item['name'] = f"{db_product.name} · {expected.tier_label}"
+                    item['_pack_label'] = expected.tier_label or ''
+                    has_non_discountable_pack = True
                 item['_checkout_line_key'] = str(len(checkout_pricing_snapshot))
                 checkout_pricing_snapshot[item['_checkout_line_key']] = {
-                    'receipt_line_total': eur_metadata(expected.base_line_total, field='subtotal de línea'),
+                    'receipt_line_total': eur_metadata(expected.expected_line_total, field='subtotal de línea'),
                     'reservation_only': bool(db_product.reservation_only),
+                    'pack_label': expected.tier_label if expected.fixed_pack else '',
                 }
                 volume_discount_amount += expected.volume_discount_amount
             else:
@@ -161,6 +178,12 @@ def create_checkout_session():
                 'price_updates': price_errors
             }), 409
         # ===== FIN VALIDACIÓN DE PRECIOS =====
+
+        if has_non_discountable_pack and (coupon_discount_amount > 0 or discount_code):
+            return jsonify({
+                'error': 'COUPON_NOT_COMBINABLE',
+                'message': 'Los packs del Temprano tienen un precio cerrado y no se pueden combinar con códigos de descuento.',
+            }), 422
 
         # Capture the exact Holded-master VAT rule now, before a Checkout
         # Session is opened. The later webhook applies this snapshot to
@@ -196,7 +219,10 @@ def create_checkout_session():
         # checkout discount so Stripe can charge an amount that matches the
         # cart even where the discounted unit price has fractional cents.
         subtotal = sum(
-            (as_eur(item['price'], field='precio') * Decimal(str(item['quantity'])))
+            (
+                as_eur(item['_stripe_unit_price'], field='precio')
+                * Decimal(str(item['_stripe_quantity']))
+            )
             for item in items
         )
         subtotal = as_eur(subtotal, field='subtotal')
@@ -253,6 +279,8 @@ def create_checkout_session():
                 'slug': str(item.get('slug') or ''),
                 'sku': str(item.get('sku') or ''),
                 'checkout_line_key': str(item.get('_checkout_line_key') or ''),
+                'physical_quantity': str(item.get('_physical_quantity') or item.get('quantity') or 1),
+                'pack_label': str(item.get('_pack_label') or ''),
             }
             line_items.append({
                 'price_data': {
@@ -264,9 +292,9 @@ def create_checkout_session():
                     },
                     # Stripe accepts only integer cents.  Never derive these
                     # from binary floating point (17.15 * 100 truncates to 1714).
-                    'unit_amount': eur_to_cents(item['price'], field='precio'),
+                    'unit_amount': eur_to_cents(item['_stripe_unit_price'], field='precio'),
                 },
-                'quantity': item['quantity'],
+                'quantity': item['_stripe_quantity'],
             })
         
         # Create Stripe Checkout Session
@@ -516,6 +544,10 @@ def stripe_webhook():
                     sku = product_metadata.get('sku', '')
                     product_slug = product_metadata.get('slug', '')
                     checkout_line_key = product_metadata.get('checkout_line_key', '')
+                    try:
+                        physical_quantity = max(1, int(product_metadata.get('physical_quantity') or item.quantity or 1))
+                    except (TypeError, ValueError):
+                        physical_quantity = int(item.quantity or 1)
 
                     # Compatibilidad para sesiones creadas antes de añadir metadata.
                     if not sku:
@@ -536,8 +568,10 @@ def stripe_webhook():
 
                     order_item = {
                         'name': item.description,
-                        'quantity': item.quantity,
-                        'price': float(as_eur(unit_price, field='precio unitario')),
+                        # Stripe charges a fixed pack as one line, while stock
+                        # and fulfilment must still receive its bottle count.
+                        'quantity': physical_quantity,
+                        'price': float((line_total / Decimal(str(physical_quantity))).quantize(Decimal('0.0001'))),
                         # Stripe has already allocated any checkout coupon over
                         # its line items. Preserve the exact gross line amount
                         # so fiscal pack expansion can distribute that charged
@@ -553,6 +587,8 @@ def stripe_webhook():
                         ))
                     if receipt_line.get('reservation_only'):
                         order_item['reservation_only'] = True
+                    if receipt_line.get('pack_label'):
+                        order_item['pack_label'] = receipt_line['pack_label']
                     if product_slug:
                         order_item['slug'] = product_slug
                     items.append(order_item)

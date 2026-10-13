@@ -13,6 +13,11 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from src.services.money import CENT, MoneyValueError, as_eur
+from src.services.scheduled_pack_pricing import (
+    fixed_pack_tiers,
+    fixed_pack_tier_for_quantity,
+    resolve_fixed_pack_price,
+)
 
 HUNDRED = Decimal("100")
 
@@ -29,6 +34,7 @@ class CheckoutLinePrice:
     bundle_quantity: int | None = None
     paid_quantity: int | None = None
     tier_label: str | None = None
+    fixed_pack: bool = False
 
 
 def _decimal(value: Any, *, field: str) -> Decimal:
@@ -148,6 +154,25 @@ def calculate_checkout_line_price(product: Any, quantity: int) -> CheckoutLinePr
 
     base_unit_price = as_eur(getattr(product, "price", None), field="precio maestro")
     base_line_total = (base_unit_price * normalized_quantity).quantize(CENT, rounding=ROUND_HALF_UP)
+    fixed_pack_tier = fixed_pack_tier_for_quantity(product, normalized_quantity)
+    if fixed_pack_tier is not None:
+        # A published pack has one exact commercial price.  It is never
+        # represented as a volume saving or a coupon because that would let it
+        # stack with another promotion and distort the customer receipt.
+        expected_line_total = resolve_fixed_pack_price(fixed_pack_tier)
+        return CheckoutLinePrice(
+            base_unit_price=(expected_line_total / normalized_quantity).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
+            base_line_total=expected_line_total,
+            tier_discount_percent=Decimal("0"),
+            expected_line_total=expected_line_total,
+            volume_discount_amount=Decimal("0.00"),
+            bundle_quantity=normalized_quantity,
+            paid_quantity=normalized_quantity,
+            tier_label=str(fixed_pack_tier.get("label") or f"Pack de {normalized_quantity}"),
+            fixed_pack=True,
+        )
+    if fixed_pack_tiers(product):
+        raise ValueError("Selecciona uno de los packs publicados para este producto.")
     tier = _applicable_tier(product, normalized_quantity)
     payable_units = _bundle_payable_units(tier, normalized_quantity) if tier else None
     bundle_quantity = None

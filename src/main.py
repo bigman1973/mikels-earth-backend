@@ -474,6 +474,42 @@ def create_tables():
                             'La cosecha 2026/27 se sirve por reserva. Se envasa el 16 de octubre '
                             'y se envía la última semana de octubre.'
                         ),
+                        # Precios de paquete cerrados. La API resuelve
+                        # reservationPrice hasta las 23:59:59 de Madrid del
+                        # 25 de octubre (22:59:59Z tras el cambio horario);
+                        # desde el 26 aplica regularPrice sin cupón.
+                        'tiered_discount': [
+                            {
+                                'actualQuantity': 1,
+                                'label': '1 botella 500 ml',
+                                'reservationPrice': 17.50,
+                                'regularPrice': 19.90,
+                                'priceEndsAt': '2026-10-25T22:59:59Z',
+                            },
+                            {
+                                'actualQuantity': 3,
+                                'label': 'Pack de 3',
+                                'reservationPrice': 49.90,
+                                'regularPrice': 56.70,
+                                'priceEndsAt': '2026-10-25T22:59:59Z',
+                            },
+                            {
+                                'actualQuantity': 6,
+                                'label': 'Pack de 6',
+                                'featured': True,
+                                'reservationPrice': 94.50,
+                                'regularPrice': 107.40,
+                                'priceEndsAt': '2026-10-25T22:59:59Z',
+                            },
+                            {
+                                'actualQuantity': 12,
+                                'label': 'Caja de 12',
+                                'reservationPrice': 178.50,
+                                'regularPrice': 202.80,
+                                'priceEndsAt': '2026-10-25T22:59:59Z',
+                            },
+                        ],
+                        'volume_discount': None,
                     }
                     has_changed = False
                     for field, value in temprano_values.items():

@@ -5,6 +5,7 @@ Los campos JSON permiten flexibilidad para datos estructurados variables.
 """
 from datetime import datetime
 from src.models.user import db
+from src.services.scheduled_pack_pricing import active_catalogue_price, serialize_tiered_pricing
 
 
 class WebProduct(db.Model):
@@ -113,7 +114,10 @@ class WebProduct(db.Model):
             'sku': self.sku,
             'description': description,
             'longDescription': long_description,
-            'price': self.price,
+            # A dated reservation price is resolved here, at request time, so
+            # the public catalogue switches on its declared date without a
+            # manual panel edit or a customer-facing coupon.
+            'price': float(active_catalogue_price(self)),
             'currency': self.currency,
             'image': self.image,
             'images': self.images or [],
@@ -145,8 +149,9 @@ class WebProduct(db.Model):
             result['originalPrice'] = self.original_price
         if self.volume_discount:
             result['volumeDiscount'] = self.volume_discount
-        if self.tiered_discount:
-            result['tieredDiscount'] = self.tiered_discount
+        serialized_tiers = serialize_tiered_pricing(self)
+        if serialized_tiers:
+            result['tieredDiscount'] = serialized_tiers
         if self.addons:
             result['addons'] = self.addons
         if self.variants:

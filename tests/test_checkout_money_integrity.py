@@ -288,6 +288,71 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         self.assertEqual(response.get_json()['error'], 'PRICE_MISMATCH')
         create_session.assert_not_called()
 
+    @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
+    def test_temprano_closed_packs_charge_the_published_reservation_price(self, create_session):
+        packs = (
+            (1, Decimal('17.50'), Decimal('17.50')),
+            (3, Decimal('49.90'), Decimal('16.6333')),
+            (6, Decimal('94.50'), Decimal('15.7500')),
+            (12, Decimal('178.50'), Decimal('14.8750')),
+        )
+        with self.app.app_context():
+            temprano = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').first()
+            temprano.tiered_discount = [
+                {'actualQuantity': 1, 'reservationPrice': 17.50, 'regularPrice': 19.90, 'priceEndsAt': '2026-10-25T22:59:59Z'},
+                {'actualQuantity': 3, 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': '2026-10-25T22:59:59Z'},
+                {'actualQuantity': 6, 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': '2026-10-25T22:59:59Z'},
+                {'actualQuantity': 12, 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': '2026-10-25T22:59:59Z'},
+            ]
+            db.session.commit()
+
+        for quantity, expected_total, browser_unit_price in packs:
+            with self.subTest(quantity=quantity):
+                create_session.reset_mock()
+                create_session.return_value = SimpleNamespace(
+                    id=f'cs_test_pack_{quantity}', url=f'https://checkout.stripe.test/pack-{quantity}',
+                )
+                response = self.client.post('/api/stripe/create-checkout-session', json={
+                    'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', browser_unit_price, quantity=quantity)],
+                    'customer_info': self.customer,
+                })
+                self.assertEqual(response.status_code, 200)
+                line = create_session.call_args.kwargs['line_items'][0]
+                self.assertEqual(line['quantity'], 1)
+                self.assertEqual(line['price_data']['unit_amount'], eur_to_cents(expected_total))
+                metadata = line['price_data']['product_data']['metadata']
+                self.assertEqual(metadata['physical_quantity'], str(quantity))
+                self.assertEqual(create_session.call_args.kwargs['metadata']['total'], format(expected_total, '.2f'))
+
+    @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
+    def test_temprano_rejects_unpublished_quantity_and_coupon_combination(self, create_session):
+        with self.app.app_context():
+            temprano = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').first()
+            temprano.tiered_discount = [
+                {'actualQuantity': 1, 'reservationPrice': 17.50, 'regularPrice': 19.90, 'priceEndsAt': '2026-10-25T22:59:59Z'},
+                {'actualQuantity': 3, 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': '2026-10-25T22:59:59Z'},
+                {'actualQuantity': 6, 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': '2026-10-25T22:59:59Z'},
+                {'actualQuantity': 12, 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': '2026-10-25T22:59:59Z'},
+            ]
+            db.session.commit()
+
+        invalid_quantity = self.client.post('/api/stripe/create-checkout-session', json={
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=2)],
+            'customer_info': self.customer,
+        })
+        self.assertEqual(invalid_quantity.status_code, 422)
+        self.assertEqual(invalid_quantity.get_json()['error'], 'INVALID_PACK_QUANTITY')
+
+        coupon_attempt = self.client.post('/api/stripe/create-checkout-session', json={
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
+            'customer_info': self.customer,
+            'discount_code': 'BIENVENIDA10',
+            'discount_amount': 1.75,
+        })
+        self.assertEqual(coupon_attempt.status_code, 422)
+        self.assertEqual(coupon_attempt.get_json()['error'], 'COUPON_NOT_COMBINABLE')
+        create_session.assert_not_called()
+
     def test_exact_cent_helpers_never_truncate_binary_float_values(self):
         self.assertEqual(eur_to_cents(17.15), 1715)
         self.assertEqual(eur_to_cents(19.90), 1990)
