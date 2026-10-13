@@ -435,6 +435,52 @@ def create_tables():
             except Exception as mig_err_editorial:
                 db.session.rollback()
                 print(f"Migration editorial copy (non-critical): {mig_err_editorial}")
+            # Corrección editorial y comercial de la reserva Temprano 2026/27.
+            # Mantiene precio, stock, descuentos, imágenes y configuración de
+            # venta; únicamente sustituye texto, distintivos y alegaciones
+            # retiradas. Es idempotente para que un despliegue no revierta la
+            # corrección manual de datos si ya está aplicada.
+            try:
+                temprano = WebProduct.query.filter_by(
+                    slug='aceite-temprano-sin-filtrar'
+                ).first()
+                if temprano:
+                    temprano_values = {
+                        'name': 'Aceite de oliva virgen extra Temprano 2026/27 sin filtrar — Reserva',
+                        'description': 'Reserva de la cosecha 2026/27. AOVE sin filtrar de aceituna verde.',
+                        'long_description': (
+                            'Reserva de la cosecha 2026/27.\n\n'
+                            'Elaborado con aceituna verde, recolectada al principio de campaña y sin filtrar. '
+                            'Perfil verde, con amargor y picor.\n\n'
+                            'Plata en OLIVE JAPAN 2026, Tokio.\n\n'
+                            'Se envasa el 16 de octubre.'
+                        ),
+                        'tags': ['Prensado en Frío', 'Sin Filtrar'],
+                        'claims': [],
+                        'award': 'Medalla de Plata · OLIVE JAPAN 2026',
+                        'badges': [{
+                            'text': 'Medalla de Plata · OLIVE JAPAN 2026',
+                            'detailOnly': True,
+                        }],
+                        'reservation_message': (
+                            'La cosecha 2026/27 se sirve por reserva. Se envasa el 16 de octubre '
+                            'y se envía la última semana de octubre.'
+                        ),
+                    }
+                    has_changed = False
+                    for field, value in temprano_values.items():
+                        if getattr(temprano, field) != value:
+                            setattr(temprano, field, value)
+                            has_changed = True
+                    if has_changed:
+                        db.session.commit()
+                        print("Migration: Temprano 2026/27 reservation copy updated")
+            except Exception as temprano_editorial_migration_error:
+                db.session.rollback()
+                print(
+                    'Migration Temprano 2026/27 editorial copy (non-critical): '
+                    f"{temprano_editorial_migration_error}"
+                )
             # Seed de cupones manuales (idempotente - no duplica)
             try:
                 from src.models.coupon import Coupon
