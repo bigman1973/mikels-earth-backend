@@ -73,7 +73,7 @@ def reserve_checkout_stock(items, checkout_token, expires_at=None):
         product_id = item.get('id')
         quantity = int(item.get('quantity') or 0)
         if not product_id or quantity < 1:
-            raise StockUnavailableError([{'name': item.get('name') or 'Producto', 'available': 0}])
+            raise StockUnavailableError([{'name': item.get('name') or 'Producto', 'available': False}])
         requested[int(product_id)] += quantity
         display[int(product_id)] = item.get('name') or 'Producto'
 
@@ -90,8 +90,9 @@ def reserve_checkout_stock(items, checkout_token, expires_at=None):
         if not sellable or available.get(product_id, 0) < quantity:
             unavailable.append({
                 'name': display[product_id],
-                'available': available.get(product_id, 0) if sellable else 0,
-                'requested': quantity,
+                # Checkout needs only the commercial state. Exact stock and
+                # requested units are internal operational data.
+                'available': False,
             })
 
     if unavailable:
@@ -147,8 +148,7 @@ def consume_paid_reservation(checkout_token, order_id, reference):
         if product is None or int(product.stock or 0) < reservation.quantity:
             raise StockUnavailableError([{
                 'name': product.name if product else 'Producto eliminado',
-                'available': int(product.stock or 0) if product else 0,
-                'requested': reservation.quantity,
+                'available': False,
             }])
         before = int(product.stock or 0)
         after = before - reservation.quantity
@@ -203,7 +203,17 @@ def restock_fully_refunded_order(order_id, reference):
             continue
         before = int(product.stock or 0)
         restored = abs(int(capture.quantity_delta))
+        # Reservation allocations are an explicit web-sales ceiling. A refund
+        # can restore a legitimately sold bottle, but must never push the
+        # available web stock above the allocation reserved for this campaign.
+        reservation_cap = (
+            int(product.reservation_stock_total)
+            if product.reservation_only and product.reservation_stock_total is not None
+            else None
+        )
         after = before + restored
+        if reservation_cap is not None:
+            after = min(after, reservation_cap)
         product.stock = after
         product.sold_out = False
         reversal = StockMovement(

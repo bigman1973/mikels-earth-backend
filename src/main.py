@@ -474,6 +474,10 @@ def create_tables():
                             'La cosecha 2026/27 se sirve por reserva. Se envasa el 16 de octubre '
                             'y se envía la última semana de octubre.'
                         ),
+                        # El palé contiene 1.080 botellas, pero 240 ya están
+                        # comprometidas con Corea. El cupo vendible de la web
+                        # es 840; la cifra no se serializa en la API pública.
+                        'reservation_stock_total': 840,
                         # Precios de paquete cerrados. La API resuelve
                         # reservationPrice hasta las 23:59:59 de Madrid del
                         # 25 de octubre (22:59:59Z tras el cambio horario);
@@ -512,10 +516,28 @@ def create_tables():
                         'volume_discount': None,
                     }
                     has_changed = False
+                    previous_allocation = int(temprano.reservation_stock_total or temprano.stock or 0)
+                    current_web_stock = max(0, int(temprano.stock or 0))
                     for field, value in temprano_values.items():
                         if getattr(temprano, field) != value:
                             setattr(temprano, field, value)
                             has_changed = True
+                    # Ajuste idempotente de la asignación web: conservamos las
+                    # botellas ya cobradas desde la asignación anterior y
+                    # retiramos del escaparate las 240 comprometidas con Corea.
+                    # El movimiento queda en el historial de stock, nunca se
+                    # corrige una venta ni se modifica Holded.
+                    already_paid = max(0, previous_allocation - current_web_stock)
+                    adjusted_web_stock = max(0, 840 - already_paid)
+                    if current_web_stock != adjusted_web_stock:
+                        from src.services.stock_service import adjust_web_stock
+                        adjust_web_stock(
+                            temprano,
+                            adjusted_web_stock,
+                            reason='reservation_allocation_korea_commitment_2026_27',
+                            reference='Reserva Temprano 2026/27 · 240 botellas comprometidas con Corea',
+                        )
+                        has_changed = True
                     if has_changed:
                         db.session.commit()
                         print("Migration: Temprano 2026/27 reservation copy updated")

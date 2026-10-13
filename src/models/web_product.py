@@ -123,7 +123,14 @@ class WebProduct(db.Model):
             'images': self.images or [],
             'category': self.category,
             'tags': self.tags or [],
-            'stock': self.stock,
+            # The storefront needs to know only whether an item can currently
+            # be bought. Exact units and reservation allocations stay inside
+            # the authorised administration and stock-control paths.
+            'available': bool(
+                self.active
+                and not self.sold_out
+                and int(self.stock or 0) > 0
+            ),
             'weight': self.weight,
             'ingredients': self.ingredients,
             'nutritionalInfo': self.nutritional_info,
@@ -135,7 +142,6 @@ class WebProduct(db.Model):
         if self.reservation_only:
             result['reservationOnly'] = True
             result['reservationMessage'] = self.reservation_message or ''
-            result['reservationStockTotal'] = self.reservation_stock_total or self.stock or 0
         
         # Campos opcionales - solo incluir si tienen valor
         # El stock web es la disponibilidad comercial publicada. Un producto
@@ -180,6 +186,8 @@ class WebProduct(db.Model):
     def to_admin_dict(self):
         """Devuelve el producto con todos los campos para el panel admin."""
         d = self.to_frontend_dict()
+        # Exact inventory belongs to the protected administrative payload only.
+        d['stock'] = int(self.stock or 0)
         d['sku'] = self.sku
         d['active'] = self.active
         d['visibleInStore'] = self.visible_in_store

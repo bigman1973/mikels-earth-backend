@@ -32,7 +32,7 @@ class ReservationCatalogueTests(unittest.TestCase):
                 reservation_message=(
                     'La cosecha 2026/27 se sirve por reserva. Se embotella a finales de octubre y te llega en cuanto salga.'
                 ),
-                reservation_stock_total=1080,
+                reservation_stock_total=840,
                 tiered_discount=[{
                     'minQuantity': 12,
                     'label': 'Caja de 12',
@@ -79,7 +79,9 @@ class ReservationCatalogueTests(unittest.TestCase):
             product = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').one()
             data = product.to_frontend_dict()
             self.assertTrue(data['reservationOnly'])
-            self.assertEqual(data['reservationStockTotal'], 1080)
+            self.assertTrue(data['available'])
+            self.assertNotIn('stock', data)
+            self.assertNotIn('reservationStockTotal', data)
             self.assertIn('cosecha 2026/27', data['reservationMessage'])
 
 

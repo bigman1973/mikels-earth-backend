@@ -103,6 +103,45 @@ class StockPaymentIntegrityTests(unittest.TestCase):
             self.assertEqual(WebProduct.query.get(self.product_id).stock, 2)
             self.assertEqual(StockMovement.query.filter_by(reason='refund_restock').count(), 1)
 
+    def test_reservation_refund_never_exceeds_the_internal_allocation_cap(self):
+        with self.app.app_context():
+            product = WebProduct.query.get(self.product_id)
+            product.reservation_only = True
+            product.reservation_stock_total = 840
+            product.stock = 840
+            db.session.commit()
+
+            order = Order(
+                order_number='MKL-STOCK-CAP-TEST',
+                customer_email='cliente@example.com',
+                customer_name='Cliente',
+                shipping_address='Calle 1',
+                shipping_city='Lleida',
+                shipping_postal_code='25001',
+                shipping_country='España',
+                items=[],
+                subtotal=17.15,
+                total=17.15,
+                payment_status='refunded',
+            )
+            db.session.add(order)
+            db.session.flush()
+            db.session.add(StockMovement(
+                order_id=order.id,
+                product_id=self.product_id,
+                quantity_delta=-1,
+                reason='payment_capture',
+                reference='cs_test_cap',
+                stock_before=840,
+                stock_after=839,
+            ))
+            db.session.commit()
+
+            restock_fully_refunded_order(order.id, 'pi_test_cap_refund')
+            db.session.commit()
+
+            self.assertEqual(WebProduct.query.get(self.product_id).stock, 840)
+
     @patch('src.routes.stripe_routes.stripe.checkout.Session.retrieve')
     def test_paid_session_status_exposes_customer_confirmation_details(self, retrieve):
         retrieve.return_value = SimpleNamespace(
