@@ -15,8 +15,8 @@ from src.services.scheduled_pack_pricing import (
 ENDS_AT = '2026-10-25T22:59:59Z'
 TIERS = [
     {'actualQuantity': 1, 'label': '1 botella 500 ml', 'reservationPrice': 17.50, 'regularPrice': 19.90, 'priceEndsAt': ENDS_AT},
-    {'actualQuantity': 3, 'label': 'Pack de 3', 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': ENDS_AT},
-    {'actualQuantity': 6, 'label': 'Pack de 6', 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': ENDS_AT, 'featured': True},
+    {'actualQuantity': 3, 'label': 'Pack de 3', 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': ENDS_AT, 'featured': True},
+    {'actualQuantity': 6, 'label': 'Pack de 6', 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': ENDS_AT},
     {'actualQuantity': 12, 'label': 'Caja de 12', 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': ENDS_AT},
 ]
 
@@ -45,6 +45,10 @@ class ScheduledPackPricingTests(unittest.TestCase):
         self.assertEqual(fixed_pack_quantity_options(self.product), [1, 3, 6, 12])
         prices = [Decimal(str(tier['reservationPrice'])) / Decimal(str(tier['actualQuantity'])) for tier in TIERS]
         self.assertEqual(prices, sorted(prices, reverse=True))
+
+    def test_pack_of_three_is_the_only_recommended_option(self):
+        featured = [tier['actualQuantity'] for tier in TIERS if tier.get('featured')]
+        self.assertEqual(featured, [3])
 
     def test_public_tiers_expose_active_price_and_reference_price(self):
         rows = serialize_tiered_pricing(

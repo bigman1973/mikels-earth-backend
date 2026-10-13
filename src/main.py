@@ -493,6 +493,7 @@ def create_tables():
                             {
                                 'actualQuantity': 3,
                                 'label': 'Pack de 3',
+                                'featured': True,
                                 'reservationPrice': 49.90,
                                 'regularPrice': 56.70,
                                 'priceEndsAt': '2026-10-25T22:59:59Z',
@@ -500,7 +501,6 @@ def create_tables():
                             {
                                 'actualQuantity': 6,
                                 'label': 'Pack de 6',
-                                'featured': True,
                                 'reservationPrice': 94.50,
                                 'regularPrice': 107.40,
                                 'priceEndsAt': '2026-10-25T22:59:59Z',
