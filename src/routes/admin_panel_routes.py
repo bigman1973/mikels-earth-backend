@@ -2790,9 +2790,9 @@ def run_translations_migration():
             'long_description_en': 'Our nectarines are harvested at their peak ripeness and preserved in a delicate light syrup. Each jar captures the essence of Mediterranean summer fruit, crafted with the same care our family has used for over 200 years.'
         },
         'aceite-temprano-sin-filtrar': {
-            'name_en': 'Unfiltered Early Harvest Extra Virgin Olive Oil 500ml',
-            'description_en': 'Premium unfiltered early harvest EVOO with intense green colour and robust flavour. Cold-pressed from green olives in Córdoba.',
-            'long_description_en': 'Our early harvest olive oil is pressed from green olives collected in October-November, before full ripeness. This produces an oil with higher polyphenol content, more intense flavour and a beautiful green hue. Unfiltered to preserve all natural sediments and maximum nutritional value.'
+            'name_en': 'Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27 — Reservation',
+            'description_en': 'Reservation for the 2026/27 harvest. Unfiltered extra virgin olive oil from green olives.',
+            'long_description_en': 'Reservation for the 2026/27 harvest. Harvest 2026/27 · analysis in progress. Made with green olives collected before ripening, in a single pass, and left unfiltered. It yields less oil per kilo; that is why its profile is green, bitter, and peppery. From our olive grove in the Córdoba countryside. It is bottled on October 16.'
         },
         'aceite-oliva-ecologico': {
             'name_en': 'Award-Winning Organic Extra Virgin Olive Oil',
