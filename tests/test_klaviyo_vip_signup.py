@@ -33,6 +33,7 @@ class KlaviyoVipSignupTests(unittest.TestCase):
         create_payload = requests.post.call_args_list[0].kwargs['json']
         self.assertEqual(create_payload['data']['attributes']['name'], 'Black Friday VIP 2026')
         self.assertEqual(create_payload['data']['attributes']['opt_in_process'], 'single_opt_in')
+        self.assertEqual(requests.get.call_args.kwargs['params']['filter'], "equals(name,'Black Friday VIP 2026')")
         subscription_payload = requests.post.call_args_list[1].kwargs['json']
         profile = subscription_payload['data']['attributes']['profiles']['data'][0]['attributes']
         self.assertEqual(profile['email'], 'vip@example.com')

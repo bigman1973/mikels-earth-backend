@@ -325,7 +325,7 @@ def _get_vip_list_id():
             f'{KLAVIYO_API_URL}/lists',
             headers=_get_headers(),
             params={
-                'filter': f"equals(name,['{VIP_LIST_NAME}'])",
+                'filter': f"equals(name,'{VIP_LIST_NAME}')",
                 'page[size]': 10,
             },
             timeout=15,
