@@ -15,11 +15,14 @@ class KlaviyoVipSignupTests(unittest.TestCase):
     def test_creates_a_single_opt_in_vip_list_and_subscribes_contact(self, requests):
         lookup = Mock(status_code=200)
         lookup.json.return_value = {'data': []}
+        profile_lookup = Mock(status_code=200)
+        profile_lookup.json.return_value = {'data': []}
         created = Mock(status_code=201)
         created.json.return_value = {'data': {'id': 'vip-list-id'}}
+        profile_created = Mock(status_code=201)
         subscribed = Mock(status_code=202)
-        requests.get.return_value = lookup
-        requests.post.side_effect = [created, subscribed]
+        requests.get.side_effect = [lookup, profile_lookup]
+        requests.post.side_effect = [created, profile_created, subscribed]
 
         accepted, error = klaviyo_service.klaviyo_subscribe_vip_contact(
             email='vip@example.com',
@@ -33,13 +36,15 @@ class KlaviyoVipSignupTests(unittest.TestCase):
         create_payload = requests.post.call_args_list[0].kwargs['json']
         self.assertEqual(create_payload['data']['attributes']['name'], 'Black Friday VIP 2026')
         self.assertEqual(create_payload['data']['attributes']['opt_in_process'], 'single_opt_in')
-        self.assertEqual(requests.get.call_args.kwargs['params']['filter'], "equals(name,'Black Friday VIP 2026')")
-        subscription_payload = requests.post.call_args_list[1].kwargs['json']
+        self.assertEqual(requests.get.call_args_list[0].kwargs['params']['filter'], "equals(name,'Black Friday VIP 2026')")
+        profile_payload = requests.post.call_args_list[1].kwargs['json']
+        self.assertEqual(profile_payload['data']['attributes']['email'], 'vip@example.com')
+        self.assertEqual(profile_payload['data']['attributes']['first_name'], 'Marisa')
+        self.assertEqual(profile_payload['data']['attributes']['properties']['MikelsVIPConsentIP'], '198.51.100.42')
+        self.assertEqual(profile_payload['data']['attributes']['properties']['MikelsVIPConsentAt'], '2026-10-13T12:00:00')
+        subscription_payload = requests.post.call_args_list[2].kwargs['json']
         profile = subscription_payload['data']['attributes']['profiles']['data'][0]['attributes']
         self.assertEqual(profile['email'], 'vip@example.com')
-        self.assertEqual(profile['first_name'], 'Marisa')
-        self.assertEqual(profile['properties']['MikelsVIPConsentIP'], '198.51.100.42')
-        self.assertEqual(profile['properties']['MikelsVIPConsentAt'], '2026-10-13T12:00:00')
         self.assertEqual(profile['subscriptions']['email']['marketing']['consent'], 'SUBSCRIBED')
         self.assertEqual(subscription_payload['data']['relationships']['list']['data']['id'], 'vip-list-id')
 
@@ -48,16 +53,19 @@ class KlaviyoVipSignupTests(unittest.TestCase):
     def test_reuses_existing_dedicated_vip_list(self, requests):
         lookup = Mock(status_code=200)
         lookup.json.return_value = {'data': [{'id': 'existing-vip-list'}]}
+        profile_lookup = Mock(status_code=200)
+        profile_lookup.json.return_value = {'data': []}
+        profile_created = Mock(status_code=201)
         subscribed = Mock(status_code=202)
-        requests.get.return_value = lookup
-        requests.post.return_value = subscribed
+        requests.get.side_effect = [lookup, profile_lookup]
+        requests.post.side_effect = [profile_created, subscribed]
 
         accepted, error = klaviyo_service.klaviyo_subscribe_vip_contact(email='vip@example.com')
 
         self.assertTrue(accepted)
         self.assertIsNone(error)
-        self.assertEqual(requests.post.call_count, 1)
-        payload = requests.post.call_args.kwargs['json']
+        self.assertEqual(requests.post.call_count, 2)
+        payload = requests.post.call_args_list[1].kwargs['json']
         self.assertEqual(payload['data']['relationships']['list']['data']['id'], 'existing-vip-list')
 
     @patch('src.services.klaviyo_service.send_klaviyo_event', return_value=(True, None))

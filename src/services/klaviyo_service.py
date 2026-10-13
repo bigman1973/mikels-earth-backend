@@ -365,11 +365,56 @@ def _get_vip_list_id():
         return None, f'Klaviyo excepción preparando la lista VIP: {exc}'
 
 
+def _store_vip_consent_on_profile(*, email, first_name='', consented_at=None, source_ip=''):
+    """Persist VIP consent evidence on the profile before the subscription job."""
+    attributes = {
+        'email': email,
+        'properties': {
+            'MikelsVIPConsentAt': consented_at.isoformat() if consented_at else '',
+            'MikelsVIPConsentIP': source_ip,
+            'MikelsVIPConsentSource': 'mikels-vip-black-friday-2026',
+        },
+    }
+    if first_name:
+        attributes['first_name'] = first_name
+    payload = {'data': {'type': 'profile', 'attributes': attributes}}
+    try:
+        profile_id = _find_klaviyo_profile_id(email)
+        if profile_id:
+            payload['data']['id'] = profile_id
+            response = requests.patch(
+                f'{KLAVIYO_API_URL}/profiles/{profile_id}',
+                headers=_get_headers(),
+                json=payload,
+                timeout=15,
+            )
+        else:
+            response = requests.post(
+                f'{KLAVIYO_API_URL}/profiles',
+                headers=_get_headers(),
+                json=payload,
+                timeout=15,
+            )
+        if response.status_code in [200, 201, 202, 204]:
+            return True, None
+        return False, f'Klaviyo HTTP {response.status_code} al guardar el consentimiento VIP: {response.text[:500]}'
+    except Exception as exc:
+        return False, f'Klaviyo excepción guardando el consentimiento VIP: {exc}'
+
+
 def klaviyo_subscribe_vip_contact(*, email, first_name='', consented_at=None, source_ip=''):
     """Subscribe a consenting visitor to the dedicated single-opt-in VIP list."""
     list_id, error = _get_vip_list_id()
     if not list_id:
         return False, error
+    profile_saved, profile_error = _store_vip_consent_on_profile(
+        email=email,
+        first_name=first_name,
+        consented_at=consented_at,
+        source_ip=source_ip,
+    )
+    if not profile_saved:
+        return False, profile_error
 
     attributes = {
         'email': email,
@@ -381,14 +426,6 @@ def klaviyo_subscribe_vip_contact(*, email, first_name='', consented_at=None, so
             },
         },
     }
-    if first_name:
-        attributes['first_name'] = first_name
-    if consented_at:
-        attributes['properties'] = {
-            'MikelsVIPConsentAt': consented_at.isoformat(),
-            'MikelsVIPConsentIP': source_ip,
-            'MikelsVIPConsentSource': 'mikels-vip-black-friday-2026',
-        }
 
     payload = {
         'data': {
