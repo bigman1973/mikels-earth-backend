@@ -63,10 +63,14 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
     Returns:
         True si el evento se envió correctamente, False en caso contrario
     """
+    def result(success, error=None):
+        return (success, error) if return_result else success
+
     api_key = _get_api_key()
     if not api_key:
-        print("ERROR: KLAVIYO_API_KEY no configurada")
-        return False
+        error = 'KLAVIYO_API_KEY no configurada'
+        print(f"ERROR: {error}")
+        return result(False, error)
     
     # Construir el perfil
     profile_data = {
@@ -111,9 +115,6 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
         }
     }
     
-    def result(success, error=None):
-        return (success, error) if return_result else success
-
     try:
         payload = _json_safe_payload(payload)
         response = requests.post(
@@ -292,6 +293,156 @@ def add_contact_to_klaviyo(
     except Exception as e:
         print(f"❌ [KLAVIYO] Excepción: {str(e)}")
         return {"success": False, "error": str(e)}
+
+
+VIP_LIST_NAME = 'Black Friday VIP 2026'
+_vip_list_id_cache = None
+
+
+def _get_vip_list_id():
+    """Return the dedicated VIP list ID, creating the approved list once.
+
+    The list is intentionally separate from the regular newsletter so its
+    membership can be used for the Black Friday campaign without enrolling a
+    person in the welcome-coupon flow.
+    """
+    global _vip_list_id_cache
+
+    if _vip_list_id_cache:
+        return _vip_list_id_cache, None
+
+    api_key = _get_api_key()
+    if not api_key:
+        return None, 'KLAVIYO_API_KEY no configurada'
+
+    configured_list_id = str(os.getenv('KLAVIYO_VIP_LIST_ID') or '').strip()
+    if configured_list_id:
+        _vip_list_id_cache = configured_list_id
+        return _vip_list_id_cache, None
+
+    try:
+        response = requests.get(
+            f'{KLAVIYO_API_URL}/lists',
+            headers=_get_headers(),
+            params={
+                'filter': f"equals(name,['{VIP_LIST_NAME}'])",
+                'page[size]': 10,
+            },
+            timeout=15,
+        )
+        if response.status_code != 200:
+            return None, f'Klaviyo HTTP {response.status_code} al buscar la lista VIP: {response.text[:500]}'
+
+        existing_lists = response.json().get('data', [])
+        if existing_lists:
+            _vip_list_id_cache = existing_lists[0].get('id')
+            if _vip_list_id_cache:
+                return _vip_list_id_cache, None
+
+        create_response = requests.post(
+            f'{KLAVIYO_API_URL}/lists',
+            headers=_get_headers(),
+            json={
+                'data': {
+                    'type': 'list',
+                    'attributes': {
+                        'name': VIP_LIST_NAME,
+                        'opt_in_process': 'single_opt_in',
+                    },
+                },
+            },
+            timeout=15,
+        )
+        if create_response.status_code not in [200, 201]:
+            return None, f'Klaviyo HTTP {create_response.status_code} al crear la lista VIP: {create_response.text[:500]}'
+
+        _vip_list_id_cache = create_response.json().get('data', {}).get('id')
+        if not _vip_list_id_cache:
+            return None, 'Klaviyo no devolvió el identificador de la lista VIP'
+        print(f'✅ [KLAVIYO] Lista VIP preparada: {VIP_LIST_NAME}')
+        return _vip_list_id_cache, None
+    except Exception as exc:
+        return None, f'Klaviyo excepción preparando la lista VIP: {exc}'
+
+
+def klaviyo_subscribe_vip_contact(*, email, first_name='', consented_at=None, source_ip=''):
+    """Subscribe a consenting visitor to the dedicated single-opt-in VIP list."""
+    list_id, error = _get_vip_list_id()
+    if not list_id:
+        return False, error
+
+    attributes = {
+        'email': email,
+        'subscriptions': {
+            'email': {
+                'marketing': {
+                    'consent': 'SUBSCRIBED',
+                },
+            },
+        },
+    }
+    if first_name:
+        attributes['first_name'] = first_name
+    if consented_at:
+        attributes['properties'] = {
+            'MikelsVIPConsentAt': consented_at.isoformat(),
+            'MikelsVIPConsentIP': source_ip,
+            'MikelsVIPConsentSource': 'mikels-vip-black-friday-2026',
+        }
+
+    payload = {
+        'data': {
+            'type': 'profile-subscription-bulk-create-job',
+            'attributes': {
+                'custom_source': 'Mikels VIP Black Friday 2026',
+                'profiles': {
+                    'data': [{
+                        'type': 'profile',
+                        'attributes': attributes,
+                    }],
+                },
+            },
+            'relationships': {
+                'list': {
+                    'data': {
+                        'type': 'list',
+                        'id': list_id,
+                    },
+                },
+            },
+        },
+    }
+
+    try:
+        response = requests.post(
+            f'{KLAVIYO_API_URL}/profile-subscription-bulk-create-jobs',
+            headers=_get_headers(),
+            json=payload,
+            timeout=15,
+        )
+        if response.status_code in [200, 201, 202, 204]:
+            print(f'✅ [KLAVIYO] Alta VIP aceptada para {email}')
+            return True, None
+        return False, f'Klaviyo HTTP {response.status_code} al suscribir VIP: {response.text[:500]}'
+    except Exception as exc:
+        return False, f'Klaviyo excepción al suscribir VIP: {exc}'
+
+
+def klaviyo_track_vip_signup(*, email, first_name='', consented_at, source_ip, signup_id):
+    """Send the event that records an accepted website VIP signup."""
+    return send_klaviyo_event(
+        metric_name='Mikels VIP Signup',
+        profile_email=email,
+        properties={
+            'ConsentDate': consented_at.isoformat(),
+            'ConsentIP': source_ip,
+            'Source': 'mikels-vip-black-friday-2026',
+            'VipSignupId': signup_id,
+        },
+        unique_id=f'vip-signup-{signup_id}',
+        profile_attrs={'first_name': first_name} if first_name else None,
+        return_result=True,
+    )
 
 
 # ============================================================

@@ -41,6 +41,7 @@ from src.routes.admin_panel_routes import admin_panel_bp  # Panel de administrac
 from src.routes.product_routes import product_bp  # Catálogo público de productos
 from src.routes.meta_catalog_routes import meta_catalog_bp  # Feed público de Meta Commerce
 from src.routes.translate_routes import translate_bp  # Traducción de reseñas
+from src.routes.vip_routes import vip_bp  # Lista VIP Black Friday
 from src.models.blog import BlogPost  # Modelo del blog
 from src.models.review import Review  # Modelo de reseñas
 from src.models.abandoned_cart import AbandonedCart  # Modelo de carrito abandonado
@@ -49,6 +50,7 @@ from src.models.admin_user import AdminUser  # Modelo usuarios admin
 from src.models.web_product import WebProduct  # Catálogo de productos web
 from src.models.newsletter_consent import NewsletterConsent  # Registro auditable de consentimientos
 from src.models.newsletter_subscriber import NewsletterSubscriber  # Una bienvenida por identidad de email
+from src.models.vip_signup import VipSignup  # Registro auditable de altas VIP
 from src.models.stock import StockReservation, StockMovement  # Reservas y trazabilidad de stock web
 from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot  # IVA capturado antes del pago
 
@@ -575,6 +577,7 @@ app.register_blueprint(admin_panel_bp, url_prefix='/api/admin')  # Panel Admin
 app.register_blueprint(product_bp, url_prefix='/api')  # Catálogo público de productos
 app.register_blueprint(meta_catalog_bp, url_prefix='/api')  # Feed público de Meta Commerce
 app.register_blueprint(translate_bp, url_prefix='/api/translate')  # Traducción de reseñas
+app.register_blueprint(vip_bp, url_prefix='/api/vip')  # Alta VIP Black Friday
 
 # Database configuration for coupons and user management
 # Use DATABASE_URL from Railway (PostgreSQL) or fallback to SQLite for local dev
