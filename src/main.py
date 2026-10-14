@@ -370,7 +370,7 @@ def create_tables():
                 translations_data = {
                     'paraguayo-almibar': ('Flat Peach in Syrup', 'Artisanal flat peach in light syrup, handpicked from our orchards in Lleida.', 'Our flat peaches are carefully selected at their optimal ripeness point and preserved in a light syrup that enhances their natural sweetness. A family recipe passed down through seven generations since 1819.'),
                     'nectarina-almibar': ('Nectarine in Syrup', 'Artisanal nectarine in light syrup, handpicked from our orchards in Lleida. Sweet, juicy and full of flavour.', 'Our nectarines are harvested at their peak ripeness and preserved in a delicate light syrup. Each jar captures the essence of Mediterranean summer fruit.'),
-                    'aceite-temprano-sin-filtrar': ('Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27 — Reservation', 'Reservation for the 2026/27 harvest. Unfiltered extra virgin olive oil from green olives.', 'Reservation for the 2026/27 harvest. Harvest 2026/27 · analysis in progress. Made with green olives collected before ripening, in a single pass, and left unfiltered. It yields less oil per kilo; that is why its profile is green, bitter, and peppery. From our olive grove in the Córdoba countryside. It is bottled on October 16.'),
+                    'aceite-temprano-sin-filtrar': ('Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27 — Reservation', 'Reservation for the 2026/27 harvest. Unfiltered extra virgin olive oil from green olives.', 'Reservation for the 2026/27 harvest. Harvest 2026/27 · analysis in progress. Made with green olives collected before ripening, in a single pass, and left unfiltered. It yields less oil per kilo; that is why its profile is green, bitter, and peppery. From our olive grove in the Córdoba countryside. We start bottling once the selected batch analysis is available, and the first reservations leave in the last week of October.'),
                     'aceite-oliva-ecologico': ('Award-Winning Organic Extra Virgin Olive Oil', 'Certified organic EVOO, internationally awarded. Cold-pressed from organically grown olives.', 'Our organic extra virgin olive oil comes from certified organic olive groves in C\u00f3rdoba. Produced using sustainable farming practices.'),
                     'aceite-5l-caja-3': ('Extra Virgin Olive Oil 5L', 'Family-size 5L container of premium EVOO. Perfect for daily cooking and generous use.', 'Our 5-litre format is designed for families and professionals who appreciate quality olive oil for everyday use.'),
                     'pack-mermelada-aceites': ('Premium Tasting Pack', 'A curated selection of our finest products. The perfect introduction to Mikels Earth.', 'Our Premium Tasting Pack brings together a carefully curated selection of our best products.'),
@@ -454,7 +454,7 @@ def create_tables():
                             'Elaborado con aceituna verde, recogida antes de madurar, en una sola pasada y sin filtrar. '
                             'Da menos aceite por kilo; de ahí su perfil verde, con amargor y picor. '
                             'Procede de nuestro olivar en la campiña cordobesa.\n\n'
-                            'Se envasa el 16 de octubre.'
+                            'Empezamos a envasar en cuanto tengamos el análisis del lote elegido y las primeras reservas salen la última semana de octubre.'
                         ),
                         'name_en': 'Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27 — Reservation',
                         'description_en': 'Reservation for the 2026/27 harvest. Unfiltered extra virgin olive oil from green olives.',
@@ -464,15 +464,14 @@ def create_tables():
                             'Made with green olives collected before ripening, in a single pass, and left unfiltered. '
                             'It yields less oil per kilo; that is why its profile is green, bitter, and peppery. '
                             'From our olive grove in the Córdoba countryside.\n\n'
-                            'It is bottled on October 16.'
+                            'We start bottling once the selected batch analysis is available, and the first reservations leave in the last week of October.'
                         ),
                         'tags': ['Prensado en Frío', 'Sin Filtrar'],
                         'claims': [],
                         'award': None,
                         'badges': [],
                         'reservation_message': (
-                            'La cosecha 2026/27 se sirve por reserva. Se envasa el 16 de octubre '
-                            'y se envía la última semana de octubre.'
+                            'La cosecha 2026/27 se sirve por reserva. Empezamos a envasar en cuanto tengamos el análisis del lote elegido y las primeras reservas salen la última semana de octubre.'
                         ),
                         # El palé contiene 1.080 botellas, pero 240 ya están
                         # comprometidas con Corea. El cupo vendible de la web

@@ -2792,7 +2792,7 @@ def run_translations_migration():
         'aceite-temprano-sin-filtrar': {
             'name_en': 'Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27 — Reservation',
             'description_en': 'Reservation for the 2026/27 harvest. Unfiltered extra virgin olive oil from green olives.',
-            'long_description_en': 'Reservation for the 2026/27 harvest. Harvest 2026/27 · analysis in progress. Made with green olives collected before ripening, in a single pass, and left unfiltered. It yields less oil per kilo; that is why its profile is green, bitter, and peppery. From our olive grove in the Córdoba countryside. It is bottled on October 16.'
+            'long_description_en': 'Reservation for the 2026/27 harvest. Harvest 2026/27 · analysis in progress. Made with green olives collected before ripening, in a single pass, and left unfiltered. It yields less oil per kilo; that is why its profile is green, bitter, and peppery. From our olive grove in the Córdoba countryside. We start bottling once the selected batch analysis is available, and the first reservations leave in the last week of October.'
         },
         'aceite-oliva-ecologico': {
             'name_en': 'Award-Winning Organic Extra Virgin Olive Oil',
