@@ -74,6 +74,13 @@ class ReservationCatalogueTests(unittest.TestCase):
             self.assertEqual(recorded.reason, 'reservation_harvest_2026_27')
             self.assertEqual(movement.id, recorded.id)
 
+    def test_korea_commitment_audit_reason_fits_the_persisted_limit(self):
+        reason = 'reservation_korea_commitment_2026'
+        self.assertLessEqual(
+            len(reason),
+            StockMovement.reason.property.columns[0].type.length,
+        )
+
     def test_public_catalogue_marks_product_as_reservation(self):
         with self.app.app_context():
             product = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').one()

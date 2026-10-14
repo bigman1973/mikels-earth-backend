@@ -534,7 +534,7 @@ def create_tables():
                         adjust_web_stock(
                             temprano,
                             adjusted_web_stock,
-                            reason='reservation_allocation_korea_commitment_2026_27',
+                            reason='reservation_korea_commitment_2026',
                             reference='Reserva Temprano 2026/27 · 240 botellas comprometidas con Corea',
                         )
                         has_changed = True
