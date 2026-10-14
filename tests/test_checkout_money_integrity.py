@@ -299,10 +299,10 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         with self.app.app_context():
             temprano = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').first()
             temprano.tiered_discount = [
-                {'actualQuantity': 1, 'reservationPrice': 17.50, 'regularPrice': 19.90, 'priceEndsAt': '2026-10-25T22:59:59Z'},
-                {'actualQuantity': 3, 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': '2026-10-25T22:59:59Z'},
-                {'actualQuantity': 6, 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': '2026-10-25T22:59:59Z'},
-                {'actualQuantity': 12, 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': '2026-10-25T22:59:59Z'},
+                {'actualQuantity': 1, 'reservationPrice': 17.50, 'regularPrice': 19.90, 'priceEndsAt': '2026-10-26T22:59:59Z'},
+                {'actualQuantity': 3, 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': '2026-10-26T22:59:59Z'},
+                {'actualQuantity': 6, 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': '2026-10-26T22:59:59Z'},
+                {'actualQuantity': 12, 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': '2026-10-26T22:59:59Z'},
             ]
             db.session.commit()
 
@@ -329,10 +329,10 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         with self.app.app_context():
             temprano = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').first()
             temprano.tiered_discount = [
-                {'actualQuantity': 1, 'reservationPrice': 17.50, 'regularPrice': 19.90, 'priceEndsAt': '2026-10-25T22:59:59Z'},
-                {'actualQuantity': 3, 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': '2026-10-25T22:59:59Z'},
-                {'actualQuantity': 6, 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': '2026-10-25T22:59:59Z'},
-                {'actualQuantity': 12, 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': '2026-10-25T22:59:59Z'},
+                {'actualQuantity': 1, 'reservationPrice': 17.50, 'regularPrice': 19.90, 'priceEndsAt': '2026-10-26T22:59:59Z'},
+                {'actualQuantity': 3, 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': '2026-10-26T22:59:59Z'},
+                {'actualQuantity': 6, 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': '2026-10-26T22:59:59Z'},
+                {'actualQuantity': 12, 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': '2026-10-26T22:59:59Z'},
             ]
             db.session.commit()
 

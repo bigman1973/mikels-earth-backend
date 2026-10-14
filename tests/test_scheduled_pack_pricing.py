@@ -12,7 +12,7 @@ from src.services.scheduled_pack_pricing import (
 )
 
 
-ENDS_AT = '2026-10-25T22:59:59Z'
+ENDS_AT = '2026-10-26T22:59:59Z'
 TIERS = [
     {'actualQuantity': 1, 'label': '1 botella 500 ml', 'reservationPrice': 17.50, 'regularPrice': 19.90, 'priceEndsAt': ENDS_AT},
     {'actualQuantity': 3, 'label': 'Pack de 3', 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': ENDS_AT, 'featured': True},
@@ -25,16 +25,16 @@ class ScheduledPackPricingTests(unittest.TestCase):
     def setUp(self):
         self.product = SimpleNamespace(price=19.90, tiered_discount=TIERS)
 
-    def test_reservation_prices_are_active_through_25_october_madrid_window(self):
-        now = datetime(2026, 10, 25, 21, 59, 59, tzinfo=timezone.utc)
+    def test_reservation_prices_are_active_through_26_october_madrid_deadline(self):
+        now = datetime(2026, 10, 26, 22, 59, 59, tzinfo=timezone.utc)
         self.assertEqual(active_catalogue_price(self.product, now=now), Decimal('17.50'))
         self.assertEqual(
             resolve_fixed_pack_price(fixed_pack_tier_for_quantity(self.product, 12), now=now),
             Decimal('178.50'),
         )
 
-    def test_regular_prices_activate_automatically_on_26_october_madrid(self):
-        now = datetime(2026, 10, 25, 23, 0, 0, tzinfo=timezone.utc)
+    def test_regular_prices_activate_automatically_on_27_october_madrid(self):
+        now = datetime(2026, 10, 26, 23, 0, 0, tzinfo=timezone.utc)
         self.assertEqual(active_catalogue_price(self.product, now=now), Decimal('19.90'))
         self.assertEqual(
             resolve_fixed_pack_price(fixed_pack_tier_for_quantity(self.product, 3), now=now),

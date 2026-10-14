@@ -480,15 +480,15 @@ def create_tables():
                         'reservation_stock_total': 840,
                         # Precios de paquete cerrados. La API resuelve
                         # reservationPrice hasta las 23:59:59 de Madrid del
-                        # 25 de octubre (22:59:59Z tras el cambio horario);
-                        # desde el 26 aplica regularPrice sin cupón.
+                        # 26 de octubre (22:59:59Z tras el cambio horario);
+                        # desde el 27 aplica regularPrice sin cupón.
                         'tiered_discount': [
                             {
                                 'actualQuantity': 1,
                                 'label': '1 botella 500 ml',
                                 'reservationPrice': 17.50,
                                 'regularPrice': 19.90,
-                                'priceEndsAt': '2026-10-25T22:59:59Z',
+                                'priceEndsAt': '2026-10-26T22:59:59Z',
                             },
                             {
                                 'actualQuantity': 3,
@@ -496,21 +496,21 @@ def create_tables():
                                 'featured': True,
                                 'reservationPrice': 49.90,
                                 'regularPrice': 56.70,
-                                'priceEndsAt': '2026-10-25T22:59:59Z',
+                                'priceEndsAt': '2026-10-26T22:59:59Z',
                             },
                             {
                                 'actualQuantity': 6,
                                 'label': 'Pack de 6',
                                 'reservationPrice': 94.50,
                                 'regularPrice': 107.40,
-                                'priceEndsAt': '2026-10-25T22:59:59Z',
+                                'priceEndsAt': '2026-10-26T22:59:59Z',
                             },
                             {
                                 'actualQuantity': 12,
                                 'label': 'Caja de 12',
                                 'reservationPrice': 178.50,
                                 'regularPrice': 202.80,
-                                'priceEndsAt': '2026-10-25T22:59:59Z',
+                                'priceEndsAt': '2026-10-26T22:59:59Z',
                             },
                         ],
                         'volume_discount': None,
