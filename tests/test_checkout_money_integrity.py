@@ -391,6 +391,17 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                 discount_value=10,
                 active=True,
             ))
+            db.session.add(Coupon(
+                code='MIKELS-ALREADY-USED',
+                description='Cupón de bienvenida ya utilizado',
+                email=self.customer['email'],
+                discount_type='percentage',
+                discount_value=10,
+                max_uses=1,
+                current_uses=1,
+                active=False,
+                used=True,
+            ))
             db.session.commit()
 
         invalid_quantity = self.client.post('/api/stripe/create-checkout-session', json={
@@ -446,6 +457,16 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         })
         self.assertEqual(post_purchase_coupon.status_code, 422)
         self.assertEqual(post_purchase_coupon.get_json()['error'], 'COUPON_NOT_COMBINABLE')
+        create_session.assert_not_called()
+
+        used_newsletter_coupon = self.client.post('/api/stripe/create-checkout-session', json={
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
+            'customer_info': self.customer,
+            'discount_code': 'MIKELS-ALREADY-USED',
+            'discount_amount': 1.75,
+        })
+        self.assertEqual(used_newsletter_coupon.status_code, 422)
+        self.assertEqual(used_newsletter_coupon.get_json()['error'], 'COUPON_INVALID')
         create_session.assert_not_called()
 
     def test_exact_cent_helpers_never_truncate_binary_float_values(self):
