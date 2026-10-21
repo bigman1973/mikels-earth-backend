@@ -32,13 +32,19 @@ def validate_coupon():
         
         # Si es válido, result es el objeto Coupon
         coupon = result
+        is_personal_newsletter_coupon = bool(
+            coupon.email
+            and coupon.code.upper().startswith('MIKELS-')
+        )
         return jsonify({
             'valid': True,
             'coupon': {
                 'code': coupon.code,
                 'discount_percentage': coupon.discount_value,  # Siempre devolver el valor
                 'discount_type': coupon.discount_type,
-                'email': coupon.email
+                # A cart needs only this eligibility flag. Do not disclose the
+                # email linked to a personal coupon to whoever submits a code.
+                'eligible_for_temprano_reservation': is_personal_newsletter_coupon,
             }
         }), 200
         

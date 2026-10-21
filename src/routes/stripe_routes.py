@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 import stripe
 import os
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import secrets
 from sqlalchemy import or_
 from src.services.whatsapp_service import notify_new_subscription
@@ -10,6 +10,7 @@ from src.services.email_dispatcher import dispatch_order_notification, dispatch_
 from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents, MoneyValueError
 from src.services.checkout_pricing import calculate_checkout_line_price, sent_line_total
 from src.services.delivery_policy import DeliveryPolicyError, validate_delivery_destination
+from src.models.user import db
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
 
@@ -93,8 +94,11 @@ def create_checkout_session():
                 ],
             }), 400
 
-        discount_code = data.get('discount_code')
-        coupon_discount_amount = as_eur(data.get('discount_amount', 0), field='descuento')
+        # ``discount_amount`` comes from a convenience calculation in the
+        # browser. It is never authoritative: the code, owner, validity and
+        # amount are re-derived from the coupon stored in the database below.
+        discount_code = str(data.get('discount_code') or '').strip().upper() or None
+        coupon_discount_amount = Decimal('0.00')
         volume_discount_amount = Decimal('0.00')
         has_non_discountable_pack = False
         checkout_pricing_snapshot = {}
@@ -179,12 +183,6 @@ def create_checkout_session():
             }), 409
         # ===== FIN VALIDACIÓN DE PRECIOS =====
 
-        if has_non_discountable_pack and (coupon_discount_amount > 0 or discount_code):
-            return jsonify({
-                'error': 'COUPON_NOT_COMBINABLE',
-                'message': 'Los packs del Temprano tienen un precio cerrado y no se pueden combinar con códigos de descuento.',
-            }), 422
-
         # Capture the exact Holded-master VAT rule now, before a Checkout
         # Session is opened. The later webhook applies this snapshot to
         # Stripe's actual charged line totals and persists it in the order.
@@ -226,6 +224,68 @@ def create_checkout_session():
             for item in items
         )
         subtotal = as_eur(subtotal, field='subtotal')
+        discountable_subtotal = as_eur(
+            subtotal - volume_discount_amount,
+            field='subtotal con descuento por cantidad',
+        )
+
+        if discount_code:
+            from src.models.coupon import Coupon
+
+            coupon = Coupon.query.filter(
+                db.func.lower(Coupon.code) == discount_code.lower()
+            ).first()
+            if not coupon:
+                return jsonify({
+                    'error': 'COUPON_INVALID',
+                    'message': 'Cupón no encontrado.',
+                }), 422
+
+            coupon_valid, coupon_message = coupon.is_valid(
+                order_amount=float(discountable_subtotal),
+                customer_email=customer_info['email'],
+            )
+            if not coupon_valid:
+                return jsonify({
+                    'error': 'COUPON_INVALID',
+                    'message': coupon_message,
+                }), 422
+
+            # Reservation packs have a published fixed price. The sole
+            # exception is a personal welcome code issued to this newsletter
+            # subscriber. Historic and current newsletter welcome codes use
+            # the MIKELS- prefix; public, manual, post-purchase and
+            # collaborator codes remain
+            # unavailable for Temprano reservations.
+            is_personal_newsletter_coupon = bool(
+                coupon.email
+                and coupon.code.upper().startswith('MIKELS-')
+            )
+            if has_non_discountable_pack and not is_personal_newsletter_coupon:
+                return jsonify({
+                    'error': 'COUPON_NOT_COMBINABLE',
+                    'message': 'En la reserva del Temprano solo puedes usar tu cupón personal activo de suscriptor.',
+                }), 422
+
+            if coupon.discount_type == 'percentage':
+                percentage = Decimal(str(coupon.discount_value))
+                if percentage < 0 or percentage > Decimal('100'):
+                    return jsonify({
+                        'error': 'COUPON_INVALID',
+                        'message': 'La configuración de este cupón no es válida.',
+                    }), 422
+                coupon_discount_amount = (
+                    discountable_subtotal * percentage / Decimal('100')
+                ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            elif coupon.discount_type == 'fixed':
+                fixed_amount = as_eur(coupon.discount_value, field='descuento de cupón')
+                coupon_discount_amount = min(fixed_amount, discountable_subtotal)
+            else:
+                return jsonify({
+                    'error': 'COUPON_INVALID',
+                    'message': 'La configuración de este cupón no es válida.',
+                }), 422
+
         discount_amount = as_eur(
             volume_discount_amount + coupon_discount_amount,
             field='descuento',
@@ -253,7 +313,6 @@ def create_checkout_session():
         # concurrent browser sessions from buying the same last web unit. The
         # reservation does not decrement stock; that happens only after Stripe
         # confirms payment in the webhook.
-        from src.models.user import db
         from src.services.stock_service import (
             StockUnavailableError,
             bind_reservation_to_session,

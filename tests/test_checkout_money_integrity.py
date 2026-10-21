@@ -9,11 +9,13 @@ from flask import Flask
 from src.models.user import db
 from src.models.order import Order
 from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
+from src.models.coupon import Coupon
 from src.models.web_product import WebProduct
 # Imported so SQLAlchemy creates the support tables touched by the checkout
 # route while this focused suite exercises a real session creation path.
 from src.models.stock import StockReservation, StockMovement  # noqa: F401
 from src.models.abandoned_cart import AbandonedCart  # noqa: F401
+from src.routes.coupon_routes import coupon_bp
 from src.routes.stripe_routes import stripe_bp
 from src.services.money import cents_to_eur, eur_to_cents
 
@@ -41,6 +43,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         )
         db.init_app(self.app)
         self.app.register_blueprint(stripe_bp)
+        self.app.register_blueprint(coupon_bp, url_prefix='/api/coupon')
 
         with self.app.app_context():
             db.create_all()
@@ -61,6 +64,13 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                         if index == 1 else None
                     ),
                 ))
+            db.session.add(Coupon(
+                code='PRUEBA10',
+                description='Cupón de prueba general',
+                discount_type='percentage',
+                discount_value=10,
+                active=True,
+            ))
             db.session.commit()
 
         self.client = self.app.test_client()
@@ -117,6 +127,25 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                 self.assertEqual(payload['missing_fields'], [field])
 
         create_session.assert_not_called()
+
+    def test_coupon_validation_exposes_eligibility_without_disclosing_owner_email(self):
+        with self.app.app_context():
+            db.session.add(Coupon(
+                code='MIKELS-PRIVATE',
+                description='Cupón de bienvenida newsletter',
+                email='suscriptora@example.com',
+                discount_type='percentage',
+                discount_value=10,
+                active=True,
+            ))
+            db.session.commit()
+
+        response = self.client.post('/api/coupon/validate', json={'code': 'MIKELS-PRIVATE'})
+
+        self.assertEqual(response.status_code, 200)
+        coupon = response.get_json()['coupon']
+        self.assertTrue(coupon['eligible_for_temprano_reservation'])
+        self.assertNotIn('email', coupon)
 
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
     def test_all_live_catalogue_prices_are_sent_to_stripe_as_exact_cents(self, create_session):
@@ -202,7 +231,9 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             ],
             'customer_info': self.customer,
             'discount_code': 'PRUEBA10',
-            'discount_amount': 7.74,
+            # The server must ignore this browser-provided amount and derive
+            # the valid code's 10% discount from its own subtotal.
+            'discount_amount': 0,
         })
 
         self.assertEqual(response.status_code, 200)
@@ -211,10 +242,11 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             [entry['price_data']['unit_amount'] for entry in params['line_items']],
             [1990, 1990, 4030],
         )
-        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 774)
+        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 1000)
         self.assertEqual(params['metadata']['subtotal'], '100.00')
-        self.assertEqual(params['metadata']['discount_amount'], '7.74')
-        self.assertEqual(params['metadata']['total'], '92.26')
+        self.assertEqual(params['metadata']['coupon_discount_amount'], '10.00')
+        self.assertEqual(params['metadata']['discount_amount'], '10.00')
+        self.assertEqual(params['metadata']['total'], '90.00')
 
     @patch('src.routes.stripe_routes.stripe.Coupon.create')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
@@ -324,8 +356,9 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                 self.assertEqual(metadata['physical_quantity'], str(quantity))
                 self.assertEqual(create_session.call_args.kwargs['metadata']['total'], format(expected_total, '.2f'))
 
+    @patch('src.routes.stripe_routes.stripe.Coupon.create')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
-    def test_temprano_rejects_unpublished_quantity_and_coupon_combination(self, create_session):
+    def test_temprano_accepts_only_active_personal_newsletter_coupons(self, create_session, create_coupon):
         with self.app.app_context():
             temprano = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').first()
             temprano.tiered_discount = [
@@ -334,6 +367,30 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                 {'actualQuantity': 6, 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': '2026-10-26T22:59:59Z'},
                 {'actualQuantity': 12, 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': '2026-10-26T22:59:59Z'},
             ]
+            db.session.add(Coupon(
+                code='MIKELS-SUBSCRIBER',
+                description='Cupón de bienvenida newsletter',
+                email=self.customer['email'],
+                discount_type='percentage',
+                discount_value=10,
+                max_uses=1,
+                active=True,
+            ))
+            db.session.add(Coupon(
+                code='IRVIANCESTRAL',
+                description='Cupón colaborador',
+                discount_type='percentage',
+                discount_value=10,
+                active=True,
+            ))
+            db.session.add(Coupon(
+                code='VUELVE10-CUSTOMER',
+                description='Cupón de próxima compra',
+                email=self.customer['email'],
+                discount_type='percentage',
+                discount_value=10,
+                active=True,
+            ))
             db.session.commit()
 
         invalid_quantity = self.client.post('/api/stripe/create-checkout-session', json={
@@ -343,14 +400,52 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         self.assertEqual(invalid_quantity.status_code, 422)
         self.assertEqual(invalid_quantity.get_json()['error'], 'INVALID_PACK_QUANTITY')
 
-        coupon_attempt = self.client.post('/api/stripe/create-checkout-session', json={
+        create_session.return_value = SimpleNamespace(
+            id='cs_test_newsletter_coupon', url='https://checkout.stripe.test/newsletter-coupon',
+        )
+        create_coupon.return_value = SimpleNamespace(id='coupon_test_newsletter')
+        newsletter_coupon = self.client.post('/api/stripe/create-checkout-session', json={
             'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
             'customer_info': self.customer,
-            'discount_code': 'BIENVENIDA10',
+            'discount_code': 'mikels-subscriber',
+            'discount_amount': 0,
+        })
+        self.assertEqual(newsletter_coupon.status_code, 200)
+        params = create_session.call_args.kwargs
+        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 175)
+        self.assertEqual(params['metadata']['subtotal'], '17.50')
+        self.assertEqual(params['metadata']['coupon_discount_amount'], '1.75')
+        self.assertEqual(params['metadata']['total'], '15.75')
+
+        create_session.reset_mock()
+        wrong_email = self.client.post('/api/stripe/create-checkout-session', json={
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
+            'customer_info': dict(self.customer, email='otra-persona@example.com'),
+            'discount_code': 'MIKELS-SUBSCRIBER',
             'discount_amount': 1.75,
         })
-        self.assertEqual(coupon_attempt.status_code, 422)
-        self.assertEqual(coupon_attempt.get_json()['error'], 'COUPON_NOT_COMBINABLE')
+        self.assertEqual(wrong_email.status_code, 422)
+        self.assertEqual(wrong_email.get_json()['error'], 'COUPON_INVALID')
+        create_session.assert_not_called()
+
+        collaborator_coupon = self.client.post('/api/stripe/create-checkout-session', json={
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
+            'customer_info': self.customer,
+            'discount_code': 'IRVIANCESTRAL',
+            'discount_amount': 1.75,
+        })
+        self.assertEqual(collaborator_coupon.status_code, 422)
+        self.assertEqual(collaborator_coupon.get_json()['error'], 'COUPON_NOT_COMBINABLE')
+        create_session.assert_not_called()
+
+        post_purchase_coupon = self.client.post('/api/stripe/create-checkout-session', json={
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
+            'customer_info': self.customer,
+            'discount_code': 'VUELVE10-CUSTOMER',
+            'discount_amount': 1.75,
+        })
+        self.assertEqual(post_purchase_coupon.status_code, 422)
+        self.assertEqual(post_purchase_coupon.get_json()['error'], 'COUPON_NOT_COMBINABLE')
         create_session.assert_not_called()
 
     def test_exact_cent_helpers_never_truncate_binary_float_values(self):
