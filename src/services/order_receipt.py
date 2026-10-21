@@ -14,7 +14,7 @@ from src.services.money import as_eur
 
 
 CENT = Decimal("0.01")
-RECEIPT_VERSION = 1
+RECEIPT_VERSION = 2
 # The approved 360 px brand asset is hosted in the Klaviyo library. This URL is
 # intentionally stable, unlike Vite's hashed build assets, and is used by the
 # customer and internal email templates.
@@ -85,8 +85,13 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
             "El resumen guardado no cuadra: líneas - descuento + envío debe coincidir con el total cobrado."
         )
 
+    # The buyer is also the delivery recipient. Keep the name in the immutable
+    # receipt so the internal notice, customer confirmation and on-screen order
+    # summary show exactly the same shipping identity.
+    customer_name = str(getattr(order, "customer_name", "") or "").strip()
     shipping_lines = [
         value for value in [
+            customer_name,
             order.shipping_address,
             " ".join(value for value in [order.shipping_postal_code, order.shipping_city] if value),
             order.shipping_country,
@@ -127,6 +132,10 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
             "total_display": format_eur(total),
             "tax_included_label": "IVA incluido",
         },
+        "customer": {
+            "name": customer_name,
+            "email": order.customer_email,
+        },
         "shipping": {
             "lines": shipping_lines,
             "phone": order.customer_phone or "",
@@ -154,7 +163,6 @@ def build_receipt_snapshot(order: Any) -> dict[str, Any]:
             if is_reservation else [
                 "Preparamos tu pedido en 1-2 días laborables.",
                 "El transporte tarda entre 24 y 72 horas en España peninsular y Portugal, y puede ser superior en Baleares.",
-                "Te llegará un correo con el número de seguimiento.",
             ]
         ),
     }

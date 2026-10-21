@@ -36,6 +36,7 @@ class OrderReceiptSnapshotTests(unittest.TestCase):
             fiscal_postal_code='25001',
             fiscal_city='Lleida',
             customer_email='cliente@example.test',
+            customer_name='Cliente de prueba',
             email_sent=True,
             customer_notes='mañanas',
         )
@@ -49,6 +50,8 @@ class OrderReceiptSnapshotTests(unittest.TestCase):
         self.assertEqual(receipt['totals']['shipping_display'], 'GRATIS')
         self.assertEqual(receipt['totals']['total_display'], '56,24 €')
         self.assertEqual(receipt['totals']['tax_included_label'], 'IVA incluido')
+        self.assertEqual(receipt['customer']['name'], 'Cliente de prueba')
+        self.assertEqual(receipt['shipping']['lines'][0], 'Cliente de prueba')
         self.assertIn('+34 600 000 000', receipt['shipping']['phone'])
         self.assertTrue(receipt['billing']['requested'])
         self.assertTrue(receipt['confirmation']['sent'])
@@ -56,7 +59,6 @@ class OrderReceiptSnapshotTests(unittest.TestCase):
         self.assertEqual(receipt['next_steps'], [
             'Preparamos tu pedido en 1-2 días laborables.',
             'El transporte tarda entre 24 y 72 horas en España peninsular y Portugal, y puede ser superior en Baleares.',
-            'Te llegará un correo con el número de seguimiento.',
         ])
 
     def test_receipt_refuses_to_render_when_line_sum_and_total_do_not_match(self):

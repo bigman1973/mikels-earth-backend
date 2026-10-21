@@ -180,7 +180,9 @@ class StockPaymentIntegrityTests(unittest.TestCase):
         data = response.get_json()
         self.assertEqual(data['order']['order_number'], 'MKL-CONFIRMATION-TEST')
         self.assertEqual(data['order']['receipt']['lines'][0]['amount_display'], '17,15 €')
-        self.assertEqual(data['order']['receipt']['shipping']['lines'][0], 'Calle 1')
+        self.assertEqual(data['order']['receipt']['customer']['name'], 'Cliente')
+        self.assertEqual(data['order']['receipt']['shipping']['lines'][0], 'Cliente')
+        self.assertEqual(data['order']['receipt']['shipping']['lines'][1], 'Calle 1')
         self.assertEqual(data['customer_email'], 'cliente@example.com')
         self.assertTrue(data['order']['receipt']['confirmation']['sent'])
 
