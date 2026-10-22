@@ -972,7 +972,7 @@ def test_email():
     """Endpoint temporal de diagnóstico para probar envío de email"""
     from src.services.email_service import send_email
     import os
-    api_key = os.getenv('BREVO_API_KEY', 'NOT SET')
+    api_key = os.getenv('BREVO_API_KEY')
     key_preview = api_key[:10] + '...' if len(api_key) > 10 else api_key
     to_email = request.args.get('to', 'info@mikels.es')
     result = send_email(
