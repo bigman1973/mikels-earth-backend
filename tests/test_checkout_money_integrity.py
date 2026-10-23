@@ -128,7 +128,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
 
         create_session.assert_not_called()
 
-    def test_coupon_validation_exposes_eligibility_without_disclosing_owner_email(self):
+    def test_coupon_validation_accepts_a_valid_coupon_without_disclosing_owner_email(self):
         with self.app.app_context():
             db.session.add(Coupon(
                 code='MIKELS-PRIVATE',
@@ -358,7 +358,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
 
     @patch('src.routes.stripe_routes.stripe.Coupon.create')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
-    def test_temprano_accepts_only_active_personal_newsletter_coupons(self, create_session, create_coupon):
+    def test_temprano_accepts_active_coupons_and_keeps_personal_coupon_guards(self, create_session, create_coupon):
         with self.app.app_context():
             temprano = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').first()
             temprano.tiered_discount = [
@@ -445,20 +445,26 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             'discount_code': 'IRVIANCESTRAL',
             'discount_amount': 1.75,
         })
-        self.assertEqual(collaborator_coupon.status_code, 422)
-        self.assertEqual(collaborator_coupon.get_json()['error'], 'COUPON_NOT_COMBINABLE')
-        create_session.assert_not_called()
+        self.assertEqual(collaborator_coupon.status_code, 200)
+        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 175)
+        self.assertEqual(create_session.call_args.kwargs['metadata']['total'], '15.75')
 
+        create_session.reset_mock()
+        create_coupon.reset_mock()
+        create_session.return_value = SimpleNamespace(
+            id='cs_test_post_purchase_coupon', url='https://checkout.stripe.test/post-purchase-coupon',
+        )
         post_purchase_coupon = self.client.post('/api/stripe/create-checkout-session', json={
             'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
             'customer_info': self.customer,
             'discount_code': 'VUELVE10-CUSTOMER',
             'discount_amount': 1.75,
         })
-        self.assertEqual(post_purchase_coupon.status_code, 422)
-        self.assertEqual(post_purchase_coupon.get_json()['error'], 'COUPON_NOT_COMBINABLE')
-        create_session.assert_not_called()
+        self.assertEqual(post_purchase_coupon.status_code, 200)
+        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 175)
+        self.assertEqual(create_session.call_args.kwargs['metadata']['total'], '15.75')
 
+        create_session.reset_mock()
         used_newsletter_coupon = self.client.post('/api/stripe/create-checkout-session', json={
             'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
             'customer_info': self.customer,

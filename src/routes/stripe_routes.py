@@ -100,7 +100,6 @@ def create_checkout_session():
         discount_code = str(data.get('discount_code') or '').strip().upper() or None
         coupon_discount_amount = Decimal('0.00')
         volume_discount_amount = Decimal('0.00')
-        has_non_discountable_pack = False
         checkout_pricing_snapshot = {}
         
         # ===== VALIDACIÓN DE PRECIOS CONTRA LA BASE DE DATOS =====
@@ -160,7 +159,6 @@ def create_checkout_session():
                     # pack from being represented as a stackable discount.
                     item['name'] = f"{db_product.name} · {expected.tier_label}"
                     item['_pack_label'] = expected.tier_label or ''
-                    has_non_discountable_pack = True
                 item['_checkout_line_key'] = str(len(checkout_pricing_snapshot))
                 checkout_pricing_snapshot[item['_checkout_line_key']] = {
                     'receipt_line_total': eur_metadata(expected.expected_line_total, field='subtotal de línea'),
@@ -249,22 +247,6 @@ def create_checkout_session():
                 return jsonify({
                     'error': 'COUPON_INVALID',
                     'message': coupon_message,
-                }), 422
-
-            # Reservation packs have a published fixed price. The sole
-            # exception is a personal welcome code issued to this newsletter
-            # subscriber. Historic and current newsletter welcome codes use
-            # the MIKELS- prefix; public, manual, post-purchase and
-            # collaborator codes remain
-            # unavailable for Temprano reservations.
-            is_personal_newsletter_coupon = bool(
-                coupon.email
-                and coupon.code.upper().startswith('MIKELS-')
-            )
-            if has_non_discountable_pack and not is_personal_newsletter_coupon:
-                return jsonify({
-                    'error': 'COUPON_NOT_COMBINABLE',
-                    'message': 'En la reserva del Temprano solo puedes usar tu cupón personal activo de suscriptor.',
                 }), 422
 
             if coupon.discount_type == 'percentage':

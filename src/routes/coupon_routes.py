@@ -32,19 +32,16 @@ def validate_coupon():
         
         # Si es válido, result es el objeto Coupon
         coupon = result
-        is_personal_newsletter_coupon = bool(
-            coupon.email
-            and coupon.code.upper().startswith('MIKELS-')
-        )
         return jsonify({
             'valid': True,
             'coupon': {
                 'code': coupon.code,
                 'discount_percentage': coupon.discount_value,  # Siempre devolver el valor
                 'discount_type': coupon.discount_type,
-                # A cart needs only this eligibility flag. Do not disclose the
-                # email linked to a personal coupon to whoever submits a code.
-                'eligible_for_temprano_reservation': is_personal_newsletter_coupon,
+                # Todo código vigente se puede introducir en una reserva. La
+                # vinculación de un cupón personal al email se comprueba de
+                # nuevo, de forma autoritativa, al crear el checkout.
+                'eligible_for_temprano_reservation': True,
             }
         }), 200
         
