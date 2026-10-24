@@ -19,7 +19,6 @@ def translate_with_openai(text, title, target_lang):
         return None, None
     
     print(f"[TRANSLATE] Using API base: {api_base}")
-    print(f"[TRANSLATE] API key starts with: {api_key[:10]}...")
     
     target_name = 'English' if target_lang == 'en' else 'Spanish'
     
