@@ -1,10 +1,9 @@
-"""Authoritative fixed-pack pricing with a date-bounded reservation price.
+"""Authoritative fixed-pack pricing.
 
-A pack is a published commercial option, not a checkout discount.  The only
-source of truth is ``WebProduct.tiered_discount``.  A tier becomes a fixed
-pack when it has both ``actualQuantity`` and either ``reservationPrice`` or
-``regularPrice``.  The reservation price is active through ``priceEndsAt``
-(UTC ISO-8601); after that instant, the regular price applies automatically.
+A pack is a published commercial option, not a checkout discount. The only
+source of truth is ``WebProduct.tiered_discount``. A normal fixed pack stores
+its current total in ``price``. Legacy date-bounded tiers remain readable
+while their catalogue data is migrated to the normal fixed-price shape.
 """
 from __future__ import annotations
 
@@ -58,7 +57,8 @@ def is_fixed_pack_tier(tier: Any) -> bool:
     return (
         isinstance(tier, dict)
         and _quantity(tier) is not None
-        and (_decimal(tier.get("reservationPrice"), field="precio de reserva") is not None
+        and (_decimal(tier.get("price"), field="precio de paquete") is not None
+             or _decimal(tier.get("reservationPrice"), field="precio de reserva") is not None
              or _decimal(tier.get("regularPrice"), field="precio normal") is not None)
     )
 
@@ -76,6 +76,10 @@ def resolve_fixed_pack_price(tier: dict[str, Any], *, now: datetime | None = Non
     """Return the live, non-discountable price of one fixed pack."""
     if not is_fixed_pack_tier(tier):
         raise ValueError("El tramo no es un paquete de precio fijo válido.")
+
+    fixed_price = _decimal(tier.get("price"), field="precio de paquete")
+    if fixed_price is not None:
+        return fixed_price
 
     reservation_price = _decimal(tier.get("reservationPrice"), field="precio de reserva")
     regular_price = _decimal(tier.get("regularPrice"), field="precio normal")
@@ -116,6 +120,7 @@ def serialize_fixed_pack_tier(tier: dict[str, Any], *, now: datetime | None = No
     if quantity is None:
         raise ValueError("El paquete no tiene cantidad válida.")
     active_price = resolve_fixed_pack_price(tier, now=now)
+    fixed_price = _decimal(tier.get("price"), field="precio de paquete")
     regular_price = _decimal(tier.get("regularPrice"), field="precio normal")
     reservation_price = _decimal(tier.get("reservationPrice"), field="precio de reserva")
     deadline = _ends_at(tier)
@@ -123,7 +128,8 @@ def serialize_fixed_pack_tier(tier: dict[str, Any], *, now: datetime | None = No
     result["actualQuantity"] = quantity
     result["minQuantity"] = quantity
     result["price"] = float(active_price)
-    result["regularPrice"] = float(regular_price or active_price)
+    if fixed_price is None:
+        result["regularPrice"] = float(regular_price or active_price)
     if reservation_price is not None:
         result["reservationPrice"] = float(reservation_price)
     if deadline is not None:

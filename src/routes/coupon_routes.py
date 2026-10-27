@@ -38,10 +38,6 @@ def validate_coupon():
                 'code': coupon.code,
                 'discount_percentage': coupon.discount_value,  # Siempre devolver el valor
                 'discount_type': coupon.discount_type,
-                # Todo código vigente se puede introducir en una reserva. La
-                # vinculación de un cupón personal al email se comprueba de
-                # nuevo, de forma autoritativa, al crear el checkout.
-                'eligible_for_temprano_reservation': True,
             }
         }), 200
         

@@ -20,6 +20,13 @@ TIERS = [
     {'actualQuantity': 12, 'label': 'Caja de 12', 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': ENDS_AT},
 ]
 
+ORDINARY_TIERS = [
+    {'actualQuantity': 1, 'label': '1 botella 500 ml', 'price': 19.90},
+    {'actualQuantity': 3, 'label': 'Pack de 3', 'featured': True, 'price': 56.70},
+    {'actualQuantity': 6, 'label': 'Pack de 6', 'price': 107.40},
+    {'actualQuantity': 12, 'label': 'Caja de 12', 'price': 202.80},
+]
+
 
 class ScheduledPackPricingTests(unittest.TestCase):
     def setUp(self):
@@ -58,6 +65,23 @@ class ScheduledPackPricingTests(unittest.TestCase):
         self.assertEqual([row['price'] for row in rows], [17.5, 49.9, 94.5, 178.5])
         self.assertEqual([row['regularPrice'] for row in rows], [19.9, 56.7, 107.4, 202.8])
         self.assertTrue(all(row['fixedPack'] for row in rows))
+
+    def test_ordinary_fixed_packs_need_no_reservation_fields(self):
+        product = SimpleNamespace(price=19.90, tiered_discount=ORDINARY_TIERS)
+
+        self.assertEqual(active_catalogue_price(product), Decimal('19.90'))
+        self.assertEqual(
+            resolve_fixed_pack_price(fixed_pack_tier_for_quantity(product, 12)),
+            Decimal('202.80'),
+        )
+        rows = serialize_tiered_pricing(product)
+        self.assertEqual([row['price'] for row in rows], [19.9, 56.7, 107.4, 202.8])
+        self.assertTrue(all(row['fixedPack'] for row in rows))
+        for row in rows:
+            self.assertNotIn('regularPrice', row)
+            self.assertNotIn('reservationPrice', row)
+            self.assertNotIn('priceEndsAt', row)
+            self.assertNotIn('reservationPriceActive', row)
 
 
 if __name__ == '__main__':

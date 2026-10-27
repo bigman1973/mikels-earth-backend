@@ -162,9 +162,10 @@ def create_checkout_session():
                 item['_checkout_line_key'] = str(len(checkout_pricing_snapshot))
                 checkout_pricing_snapshot[item['_checkout_line_key']] = {
                     'receipt_line_total': eur_metadata(expected.expected_line_total, field='subtotal de línea'),
-                    'reservation_only': bool(db_product.reservation_only),
                     'pack_label': expected.tier_label if expected.fixed_pack else '',
                 }
+                if db_product.reservation_only:
+                    checkout_pricing_snapshot[item['_checkout_line_key']]['reservation_only'] = True
                 volume_discount_amount += expected.volume_discount_amount
             else:
                 return jsonify({

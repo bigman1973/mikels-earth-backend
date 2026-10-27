@@ -194,9 +194,10 @@ class WebProduct(db.Model):
         d['displayOrder'] = self.display_order
         d['shippingCost'] = self.shipping_cost or 0
         d['preparationCost'] = self.preparation_cost or 0
-        d['reservationOnly'] = bool(self.reservation_only)
-        d['reservationMessage'] = self.reservation_message or ''
-        d['reservationStockTotal'] = self.reservation_stock_total
+        if self.reservation_only or self.reservation_message or self.reservation_stock_total is not None:
+            d['reservationOnly'] = bool(self.reservation_only)
+            d['reservationMessage'] = self.reservation_message or ''
+            d['reservationStockTotal'] = self.reservation_stock_total
         d['createdAt'] = self.created_at.isoformat() if self.created_at else None
         d['updatedAt'] = self.updated_at.isoformat() if self.updated_at else None
         return d

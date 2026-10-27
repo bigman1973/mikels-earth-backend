@@ -370,7 +370,7 @@ def create_tables():
                 translations_data = {
                     'paraguayo-almibar': ('Flat Peach in Syrup', 'Artisanal flat peach in light syrup, handpicked from our orchards in Lleida.', 'Our flat peaches are carefully selected at their optimal ripeness point and preserved in a light syrup that enhances their natural sweetness. A family recipe passed down through seven generations since 1819.'),
                     'nectarina-almibar': ('Nectarine in Syrup', 'Artisanal nectarine in light syrup, handpicked from our orchards in Lleida. Sweet, juicy and full of flavour.', 'Our nectarines are harvested at their peak ripeness and preserved in a delicate light syrup. Each jar captures the essence of Mediterranean summer fruit.'),
-                    'aceite-temprano-sin-filtrar': ('Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27 — Reservation', 'Reservation for the 2026/27 harvest. Unfiltered extra virgin olive oil from green olives.', 'Reservation for the 2026/27 harvest. Harvest 2026/27 · analysis in progress. Made with green olives collected before ripening, in a single pass, and left unfiltered. It yields less oil per kilo; that is why its profile is green, bitter, and peppery. From our olive grove in the Córdoba countryside. We start bottling once the selected batch analysis is available, and the first reservations leave in the last week of October.'),
+                    'aceite-temprano-sin-filtrar': ('Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27', 'Unfiltered extra virgin olive oil from green olives, harvested for the 2026/27 season.', 'Made with green olives collected before ripening, in a single pass, and left unfiltered. It yields less oil per kilo; that is why its profile is green, bitter, and peppery. From our olive grove in the Córdoba countryside. Ideal to enjoy raw on salads, toast and carpaccios.'),
                     'aceite-oliva-ecologico': ('Award-Winning Organic Extra Virgin Olive Oil', 'Certified organic EVOO, internationally awarded. Cold-pressed from organically grown olives.', 'Our organic extra virgin olive oil comes from certified organic olive groves in C\u00f3rdoba. Produced using sustainable farming practices.'),
                     'aceite-5l-caja-3': ('Extra Virgin Olive Oil 5L', 'Family-size 5L container of premium EVOO. Perfect for daily cooking and generous use.', 'Our 5-litre format is designed for families and professionals who appreciate quality olive oil for everyday use.'),
                     'pack-mermelada-aceites': ('Premium Tasting Pack', 'A curated selection of our finest products. The perfect introduction to Mikels Earth.', 'Our Premium Tasting Pack brings together a carefully curated selection of our best products.'),
@@ -435,115 +435,80 @@ def create_tables():
             except Exception as mig_err_editorial:
                 db.session.rollback()
                 print(f"Migration editorial copy (non-critical): {mig_err_editorial}")
-            # Corrección editorial y comercial de la reserva Temprano 2026/27.
-            # Mantiene precio, stock, descuentos, imágenes y configuración de
-            # venta; únicamente sustituye texto, distintivos y alegaciones
-            # retiradas. Es idempotente para que un despliegue no revierta la
-            # corrección manual de datos si ya está aplicada.
+            # Fin de la campaña Temprano 2026/27: pasa a venta ordinaria.
+            # La transición solo actualiza catálogo y precios publicados. No
+            # modifica el stock existente, sus reservas de checkout ni el
+            # historial de movimientos o pedidos.
             try:
                 temprano = WebProduct.query.filter_by(
                     slug='aceite-temprano-sin-filtrar'
                 ).first()
                 if temprano:
                     temprano_values = {
-                        'name': 'Aceite de oliva virgen extra Temprano 2026/27 sin filtrar — Reserva',
-                        'description': 'Reserva de la cosecha 2026/27. AOVE sin filtrar de aceituna verde.',
+                        'name': 'Aceite de oliva virgen extra Temprano 2026/27 sin filtrar',
+                        'description': 'AOVE sin filtrar de aceituna verde de la cosecha 2026/27.',
                         'long_description': (
-                            'Reserva de la cosecha 2026/27.\n\n'
-                            'Cosecha 2026/27 · analítica en curso.\n\n'
                             'Elaborado con aceituna verde, recogida antes de madurar, en una sola pasada y sin filtrar. '
                             'Da menos aceite por kilo; de ahí su perfil verde, con amargor y picor. '
                             'Procede de nuestro olivar en la campiña cordobesa.\n\n'
-                            'Empezamos a envasar en cuanto tengamos el análisis del lote elegido y las primeras reservas salen la última semana de octubre.'
+                            'Ideal para disfrutar en crudo: ensaladas, tostadas y carpaccios.'
                         ),
-                        'name_en': 'Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27 — Reservation',
-                        'description_en': 'Reservation for the 2026/27 harvest. Unfiltered extra virgin olive oil from green olives.',
+                        'name_en': 'Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27',
+                        'description_en': 'Unfiltered extra virgin olive oil from green olives, harvested for the 2026/27 season.',
                         'long_description_en': (
-                            'Reservation for the 2026/27 harvest.\n\n'
-                            'Harvest 2026/27 · analysis in progress.\n\n'
                             'Made with green olives collected before ripening, in a single pass, and left unfiltered. '
                             'It yields less oil per kilo; that is why its profile is green, bitter, and peppery. '
                             'From our olive grove in the Córdoba countryside.\n\n'
-                            'We start bottling once the selected batch analysis is available, and the first reservations leave in the last week of October.'
+                            'Ideal to enjoy raw on salads, toast and carpaccios.'
                         ),
                         'tags': ['Prensado en Frío', 'Sin Filtrar'],
                         'claims': [],
                         'award': None,
                         'badges': [],
-                        'reservation_message': (
-                            'La cosecha 2026/27 se sirve por reserva. Empezamos a envasar en cuanto tengamos el análisis del lote elegido y las primeras reservas salen la última semana de octubre.'
-                        ),
-                        # El palé contiene 1.080 botellas, pero 240 ya están
-                        # comprometidas con Corea. El cupo vendible de la web
-                        # es 840; la cifra no se serializa en la API pública.
-                        'reservation_stock_total': 840,
-                        # Precios de paquete cerrados. La API resuelve
-                        # reservationPrice hasta las 23:59:59 de Madrid del
-                        # 26 de octubre (22:59:59Z tras el cambio horario);
-                        # desde el 27 aplica regularPrice sin cupón.
+                        'price': 19.90,
+                        'reservation_only': False,
+                        'reservation_message': None,
+                        'reservation_stock_total': None,
+                        # Packs cerrados con precios ordinarios ya vigentes.
+                        # Cada pack conserva su descuento comercial frente a
+                        # comprar las botellas sueltas.
                         'tiered_discount': [
                             {
                                 'actualQuantity': 1,
                                 'label': '1 botella 500 ml',
-                                'reservationPrice': 17.50,
-                                'regularPrice': 19.90,
-                                'priceEndsAt': '2026-10-26T22:59:59Z',
+                                'price': 19.90,
                             },
                             {
                                 'actualQuantity': 3,
                                 'label': 'Pack de 3',
                                 'featured': True,
-                                'reservationPrice': 49.90,
-                                'regularPrice': 56.70,
-                                'priceEndsAt': '2026-10-26T22:59:59Z',
+                                'price': 56.70,
                             },
                             {
                                 'actualQuantity': 6,
                                 'label': 'Pack de 6',
-                                'reservationPrice': 94.50,
-                                'regularPrice': 107.40,
-                                'priceEndsAt': '2026-10-26T22:59:59Z',
+                                'price': 107.40,
                             },
                             {
                                 'actualQuantity': 12,
                                 'label': 'Caja de 12',
-                                'reservationPrice': 178.50,
-                                'regularPrice': 202.80,
-                                'priceEndsAt': '2026-10-26T22:59:59Z',
+                                'price': 202.80,
                             },
                         ],
                         'volume_discount': None,
                     }
                     has_changed = False
-                    previous_allocation = int(temprano.reservation_stock_total or temprano.stock or 0)
-                    current_web_stock = max(0, int(temprano.stock or 0))
                     for field, value in temprano_values.items():
                         if getattr(temprano, field) != value:
                             setattr(temprano, field, value)
                             has_changed = True
-                    # Ajuste idempotente de la asignación web: conservamos las
-                    # botellas ya cobradas desde la asignación anterior y
-                    # retiramos del escaparate las 240 comprometidas con Corea.
-                    # El movimiento queda en el historial de stock, nunca se
-                    # corrige una venta ni se modifica Holded.
-                    already_paid = max(0, previous_allocation - current_web_stock)
-                    adjusted_web_stock = max(0, 840 - already_paid)
-                    if current_web_stock != adjusted_web_stock:
-                        from src.services.stock_service import adjust_web_stock
-                        adjust_web_stock(
-                            temprano,
-                            adjusted_web_stock,
-                            reason='reservation_korea_commitment_2026',
-                            reference='Reserva Temprano 2026/27 · 240 botellas comprometidas con Corea',
-                        )
-                        has_changed = True
                     if has_changed:
                         db.session.commit()
-                        print("Migration: Temprano 2026/27 reservation copy updated")
+                        print("Migration: Temprano 2026/27 switched to ordinary sale")
             except Exception as temprano_editorial_migration_error:
                 db.session.rollback()
                 print(
-                    'Migration Temprano 2026/27 editorial copy (non-critical): '
+                    'Migration Temprano 2026/27 ordinary sale (non-critical): '
                     f"{temprano_editorial_migration_error}"
                 )
             # Seed de cupones manuales (idempotente - no duplica)

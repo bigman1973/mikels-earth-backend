@@ -24,11 +24,9 @@ class PublicProductAvailabilityTests(unittest.TestCase):
                     name='Temprano',
                     slug='aceite-temprano-sin-filtrar',
                     sku='MIKVET500',
-                    price=17.50,
+                    price=19.90,
                     category='Aceites',
                     stock=839,
-                    reservation_only=True,
-                    reservation_stock_total=840,
                     active=True,
                     visible_in_store=True,
                 ),
@@ -70,12 +68,16 @@ class PublicProductAvailabilityTests(unittest.TestCase):
             self.assertNotIn('stock', product)
             self.assertNotIn('reservationStockTotal', product)
             self.assertNotIn('inventoryLevel', product)
+        self.assertNotIn('reservationOnly', products['aceite-temprano-sin-filtrar'])
+        self.assertNotIn('reservationMessage', products['aceite-temprano-sin-filtrar'])
 
     def test_protected_admin_payload_keeps_exact_inventory(self):
         with self.app.app_context():
             payload = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').one().to_admin_dict()
         self.assertEqual(payload['stock'], 839)
-        self.assertEqual(payload['reservationStockTotal'], 840)
+        self.assertNotIn('reservationOnly', payload)
+        self.assertNotIn('reservationMessage', payload)
+        self.assertNotIn('reservationStockTotal', payload)
 
 
 if __name__ == '__main__':

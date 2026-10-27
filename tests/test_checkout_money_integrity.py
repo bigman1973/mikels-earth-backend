@@ -59,7 +59,10 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                     visible_in_store=True,
                     tiered_discount=(
                         [
-                            {'minQuantity': 12, 'label': 'Caja de 12', 'bundleQuantity': 12, 'paidQuantity': 11},
+                            {'actualQuantity': 1, 'label': '1 botella 500 ml', 'price': 19.90},
+                            {'actualQuantity': 3, 'label': 'Pack de 3', 'featured': True, 'price': 56.70},
+                            {'actualQuantity': 6, 'label': 'Pack de 6', 'price': 107.40},
+                            {'actualQuantity': 12, 'label': 'Caja de 12', 'price': 202.80},
                         ]
                         if index == 1 else None
                     ),
@@ -144,7 +147,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         coupon = response.get_json()['coupon']
-        self.assertTrue(coupon['eligible_for_temprano_reservation'])
+        self.assertNotIn('eligible_for_temprano_reservation', coupon)
         self.assertNotIn('email', coupon)
 
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
@@ -199,7 +202,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
     def test_checkout_accepts_portugal_and_baleares_from_the_minimum_order(self, create_session):
         cases = (
             ('Portugal', '4000-001', 1, 'cs_test_portugal', 'PT'),
-            ('España', '07001', 3, 'cs_test_baleares', 'ES'),
+            ('España', '07001', 6, 'cs_test_baleares', 'ES'),
         )
         for country, postal_code, quantity, session_id, country_code in cases:
             with self.subTest(country=country, postal_code=postal_code):
@@ -209,8 +212,9 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                     url=f'https://checkout.stripe.test/{session_id}',
                 )
                 customer = dict(self.customer, country=country, postal_code=postal_code)
+                browser_unit_price = '19.90' if quantity == 1 else '17.90'
                 response = self.client.post('/api/stripe/create-checkout-session', json={
-                    'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=quantity)],
+                    'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', browser_unit_price, quantity=quantity)],
                     'customer_info': customer,
                 })
                 self.assertEqual(response.status_code, 200)
@@ -225,7 +229,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         create_coupon.return_value = SimpleNamespace(id='coupon_test_10')
         response = self.client.post('/api/stripe/create-checkout-session', json={
             'items': [
-                self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=2),
+                self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=1),
                 self._checkout_item(4, 'aceite-oliva-ecologico', '19.90', quantity=1),
                 self._checkout_item(7, 'pack-fruta-premium', '40.30', quantity=1),
             ],
@@ -242,41 +246,35 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             [entry['price_data']['unit_amount'] for entry in params['line_items']],
             [1990, 1990, 4030],
         )
-        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 1000)
-        self.assertEqual(params['metadata']['subtotal'], '100.00')
-        self.assertEqual(params['metadata']['coupon_discount_amount'], '10.00')
-        self.assertEqual(params['metadata']['discount_amount'], '10.00')
-        self.assertEqual(params['metadata']['total'], '90.00')
+        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 801)
+        self.assertEqual(params['metadata']['subtotal'], '80.10')
+        self.assertEqual(params['metadata']['coupon_discount_amount'], '8.01')
+        self.assertEqual(params['metadata']['discount_amount'], '8.01')
+        self.assertEqual(params['metadata']['total'], '72.09')
 
     @patch('src.routes.stripe_routes.stripe.Coupon.create')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
-    def test_each_volume_tier_creates_a_checkout_at_the_cart_total(
+    def test_each_ordinary_pack_creates_a_checkout_at_its_published_total(
         self,
         create_session,
         create_coupon,
     ):
-        """The server accepts the same tier amount shown by the cart.
-
-        Stripe unit amounts are whole cents, so the checkout retains the
-        19.90 € catalogue line and applies one free bottle per full box as a
-        session discount. At 12 units the payable total is 11 × 19.90 €.
-        """
+        """The server charges each normal fixed pack as one exact line."""
         cases = (
-            (2, Decimal('0'), Decimal('39.80')),
-            (12, Decimal('0'), Decimal('218.90')),
-            (24, Decimal('0'), Decimal('437.80')),
-            (36, Decimal('0'), Decimal('656.70')),
+            (1, Decimal('19.90')),
+            (3, Decimal('56.70')),
+            (6, Decimal('107.40')),
+            (12, Decimal('202.80')),
         )
-        for quantity, percent, expected_total in cases:
+        for quantity, expected_total in cases:
             with self.subTest(quantity=quantity):
                 create_session.reset_mock()
                 create_coupon.reset_mock()
                 create_session.return_value = SimpleNamespace(
-                    id=f'cs_test_tier_{quantity}',
-                    url=f'https://checkout.stripe.test/tier-{quantity}',
+                    id=f'cs_test_pack_{quantity}',
+                    url=f'https://checkout.stripe.test/pack-{quantity}',
                 )
-                payable_units = quantity - (quantity // 12)
-                cart_unit_price = (Decimal('19.90') * payable_units / Decimal(quantity)).quantize(Decimal('0.0001'))
+                cart_unit_price = (expected_total / Decimal(quantity)).quantize(Decimal('0.0001'))
                 response = self.client.post('/api/stripe/create-checkout-session', json={
                     'items': [self._checkout_item(
                         1,
@@ -291,26 +289,19 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
                 params = create_session.call_args.kwargs
                 self.assertEqual(
                     params['line_items'][0]['price_data']['unit_amount'],
-                    1990,
+                    eur_to_cents(expected_total),
                 )
-                self.assertEqual(params['line_items'][0]['quantity'], quantity)
-                expected_discount = (Decimal('19.90') * quantity - expected_total).quantize(Decimal('0.01'))
-                self.assertEqual(params['metadata']['subtotal'], format(Decimal('19.90') * quantity, '.2f'))
-                self.assertEqual(params['metadata']['volume_discount_amount'], format(expected_discount, '.2f'))
-                self.assertEqual(params['metadata']['discount_amount'], format(expected_discount, '.2f'))
+                self.assertEqual(params['line_items'][0]['quantity'], 1)
+                self.assertEqual(params['metadata']['subtotal'], format(expected_total, '.2f'))
+                self.assertEqual(params['metadata']['volume_discount_amount'], '0.00')
+                self.assertEqual(params['metadata']['discount_amount'], '0.00')
                 self.assertEqual(params['metadata']['total'], format(expected_total, '.2f'))
-                charged_total = (
-                    Decimal(params['line_items'][0]['price_data']['unit_amount'])
-                    * quantity / Decimal('100') - expected_discount
-                )
+                charged_total = Decimal(params['line_items'][0]['price_data']['unit_amount']) / Decimal('100')
                 self.assertEqual(charged_total, expected_total)
-                if expected_discount:
-                    self.assertEqual(create_coupon.call_args.kwargs['amount_off'], eur_to_cents(expected_discount))
-                else:
-                    create_coupon.assert_not_called()
+                create_coupon.assert_not_called()
 
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
-    def test_volume_tier_rejects_an_undiscounted_browser_price(self, create_session):
+    def test_ordinary_pack_rejects_a_price_that_does_not_match_its_total(self, create_session):
         create_session.return_value = SimpleNamespace(id='cs_should_not_exist', url='https://checkout.stripe.test/nope')
         response = self.client.post('/api/stripe/create-checkout-session', json={
             'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=12)],
@@ -321,20 +312,20 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         create_session.assert_not_called()
 
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
-    def test_temprano_closed_packs_charge_the_published_reservation_price(self, create_session):
+    def test_temprano_closed_packs_charge_the_published_ordinary_price(self, create_session):
         packs = (
-            (1, Decimal('17.50'), Decimal('17.50')),
-            (3, Decimal('49.90'), Decimal('16.6333')),
-            (6, Decimal('94.50'), Decimal('15.7500')),
-            (12, Decimal('178.50'), Decimal('14.8750')),
+            (1, Decimal('19.90'), Decimal('19.90')),
+            (3, Decimal('56.70'), Decimal('18.9000')),
+            (6, Decimal('107.40'), Decimal('17.9000')),
+            (12, Decimal('202.80'), Decimal('16.9000')),
         )
         with self.app.app_context():
             temprano = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').first()
             temprano.tiered_discount = [
-                {'actualQuantity': 1, 'reservationPrice': 17.50, 'regularPrice': 19.90, 'priceEndsAt': '2026-10-26T22:59:59Z'},
-                {'actualQuantity': 3, 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': '2026-10-26T22:59:59Z'},
-                {'actualQuantity': 6, 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': '2026-10-26T22:59:59Z'},
-                {'actualQuantity': 12, 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': '2026-10-26T22:59:59Z'},
+                {'actualQuantity': 1, 'price': 19.90},
+                {'actualQuantity': 3, 'price': 56.70},
+                {'actualQuantity': 6, 'price': 107.40},
+                {'actualQuantity': 12, 'price': 202.80},
             ]
             db.session.commit()
 
@@ -362,10 +353,10 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         with self.app.app_context():
             temprano = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').first()
             temprano.tiered_discount = [
-                {'actualQuantity': 1, 'reservationPrice': 17.50, 'regularPrice': 19.90, 'priceEndsAt': '2026-10-26T22:59:59Z'},
-                {'actualQuantity': 3, 'reservationPrice': 49.90, 'regularPrice': 56.70, 'priceEndsAt': '2026-10-26T22:59:59Z'},
-                {'actualQuantity': 6, 'reservationPrice': 94.50, 'regularPrice': 107.40, 'priceEndsAt': '2026-10-26T22:59:59Z'},
-                {'actualQuantity': 12, 'reservationPrice': 178.50, 'regularPrice': 202.80, 'priceEndsAt': '2026-10-26T22:59:59Z'},
+                {'actualQuantity': 1, 'price': 19.90},
+                {'actualQuantity': 3, 'price': 56.70},
+                {'actualQuantity': 6, 'price': 107.40},
+                {'actualQuantity': 12, 'price': 202.80},
             ]
             db.session.add(Coupon(
                 code='MIKELS-SUBSCRIBER',
@@ -405,7 +396,7 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             db.session.commit()
 
         invalid_quantity = self.client.post('/api/stripe/create-checkout-session', json={
-            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=2)],
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=2)],
             'customer_info': self.customer,
         })
         self.assertEqual(invalid_quantity.status_code, 422)
@@ -416,38 +407,38 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
         )
         create_coupon.return_value = SimpleNamespace(id='coupon_test_newsletter')
         newsletter_coupon = self.client.post('/api/stripe/create-checkout-session', json={
-            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=1)],
             'customer_info': self.customer,
             'discount_code': 'mikels-subscriber',
             'discount_amount': 0,
         })
         self.assertEqual(newsletter_coupon.status_code, 200)
         params = create_session.call_args.kwargs
-        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 175)
-        self.assertEqual(params['metadata']['subtotal'], '17.50')
-        self.assertEqual(params['metadata']['coupon_discount_amount'], '1.75')
-        self.assertEqual(params['metadata']['total'], '15.75')
+        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 199)
+        self.assertEqual(params['metadata']['subtotal'], '19.90')
+        self.assertEqual(params['metadata']['coupon_discount_amount'], '1.99')
+        self.assertEqual(params['metadata']['total'], '17.91')
 
         create_session.reset_mock()
         wrong_email = self.client.post('/api/stripe/create-checkout-session', json={
-            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=1)],
             'customer_info': dict(self.customer, email='otra-persona@example.com'),
             'discount_code': 'MIKELS-SUBSCRIBER',
-            'discount_amount': 1.75,
+            'discount_amount': 1.99,
         })
         self.assertEqual(wrong_email.status_code, 422)
         self.assertEqual(wrong_email.get_json()['error'], 'COUPON_INVALID')
         create_session.assert_not_called()
 
         collaborator_coupon = self.client.post('/api/stripe/create-checkout-session', json={
-            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=1)],
             'customer_info': self.customer,
             'discount_code': 'IRVIANCESTRAL',
-            'discount_amount': 1.75,
+            'discount_amount': 1.99,
         })
         self.assertEqual(collaborator_coupon.status_code, 200)
-        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 175)
-        self.assertEqual(create_session.call_args.kwargs['metadata']['total'], '15.75')
+        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 199)
+        self.assertEqual(create_session.call_args.kwargs['metadata']['total'], '17.91')
 
         create_session.reset_mock()
         create_coupon.reset_mock()
@@ -455,21 +446,21 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             id='cs_test_post_purchase_coupon', url='https://checkout.stripe.test/post-purchase-coupon',
         )
         post_purchase_coupon = self.client.post('/api/stripe/create-checkout-session', json={
-            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=1)],
             'customer_info': self.customer,
             'discount_code': 'VUELVE10-CUSTOMER',
-            'discount_amount': 1.75,
+            'discount_amount': 1.99,
         })
         self.assertEqual(post_purchase_coupon.status_code, 200)
-        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 175)
-        self.assertEqual(create_session.call_args.kwargs['metadata']['total'], '15.75')
+        self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 199)
+        self.assertEqual(create_session.call_args.kwargs['metadata']['total'], '17.91')
 
         create_session.reset_mock()
         used_newsletter_coupon = self.client.post('/api/stripe/create-checkout-session', json={
-            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '17.50', quantity=1)],
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=1)],
             'customer_info': self.customer,
             'discount_code': 'MIKELS-ALREADY-USED',
-            'discount_amount': 1.75,
+            'discount_amount': 1.99,
         })
         self.assertEqual(used_newsletter_coupon.status_code, 422)
         self.assertEqual(used_newsletter_coupon.get_json()['error'], 'COUPON_INVALID')
