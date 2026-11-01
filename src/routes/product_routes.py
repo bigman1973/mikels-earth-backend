@@ -8,6 +8,7 @@ precio válido nunca se incluye en la respuesta pública.
 """
 from flask import Blueprint, jsonify, request
 from src.models.web_product import WebProduct
+from src.services.protected_catalogue import is_full_price_only
 
 product_bp = Blueprint('products', __name__)
 
@@ -63,7 +64,7 @@ def _serialize_product(product, addon_products, lang):
         addon_data['product'] = addon_product_data
         resolved_addons.append(addon_data)
 
-    if product.addons is not None:
+    if product.addons is not None and not is_full_price_only(product):
         data['addons'] = resolved_addons
 
     return data

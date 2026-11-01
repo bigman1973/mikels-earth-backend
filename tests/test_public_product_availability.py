@@ -4,6 +4,7 @@ from flask import Flask
 
 from src.models.user import db
 from src.models.web_product import WebProduct
+from src.models.order import Order  # noqa: F401
 from src.routes.product_routes import product_bp
 
 
@@ -29,6 +30,11 @@ class PublicProductAvailabilityTests(unittest.TestCase):
                     stock=839,
                     active=True,
                     visible_in_store=True,
+                    subscription_available=True,
+                    subscription_discount=10,
+                    subscription_frequencies=[{'value': 'monthly', 'discount': 10}],
+                    tiered_discount=[{'actualQuantity': 3, 'label': 'Pack de 3', 'price': 56.70}],
+                    addons=[{'productSlug': 'estuche-regalo-temprano'}],
                 ),
                 WebProduct(
                     name='Sin existencias',
@@ -39,6 +45,17 @@ class PublicProductAvailabilityTests(unittest.TestCase):
                     stock=0,
                     active=True,
                     visible_in_store=True,
+                ),
+                WebProduct(
+                    name='Borrador cosecha anterior',
+                    slug='aceite-temprano-sin-filtrar-cosecha-2025-26',
+                    sku='MIKVET5002526',
+                    price=119.40,
+                    category='Aceites',
+                    stock=1200,
+                    active=False,
+                    visible_in_store=False,
+                    reservation_stock_total=1200,
                 ),
             ])
             db.session.commit()
@@ -70,6 +87,25 @@ class PublicProductAvailabilityTests(unittest.TestCase):
             self.assertNotIn('inventoryLevel', product)
         self.assertNotIn('reservationOnly', products['aceite-temprano-sin-filtrar'])
         self.assertNotIn('reservationMessage', products['aceite-temprano-sin-filtrar'])
+        self.assertNotIn('tieredDiscount', products['aceite-temprano-sin-filtrar'])
+        self.assertNotIn('addons', products['aceite-temprano-sin-filtrar'])
+        self.assertFalse(products['aceite-temprano-sin-filtrar']['subscriptionAvailable'])
+        self.assertNotIn('subscriptionDiscount', products['aceite-temprano-sin-filtrar'])
+        self.assertNotIn('subscriptionFrequencies', products['aceite-temprano-sin-filtrar'])
+
+    def test_inactive_and_hidden_draft_is_not_publicly_listed_or_resolved(self):
+        listing = self.client.get('/api/products')
+        self.assertEqual(listing.status_code, 200)
+        product_slugs = {
+            product['slug']
+            for product in listing.get_json()['products']
+        }
+        self.assertNotIn('aceite-temprano-sin-filtrar-cosecha-2025-26', product_slugs)
+        self.assertNotIn('1200', listing.get_data(as_text=True))
+
+        detail = self.client.get('/api/products/aceite-temprano-sin-filtrar-cosecha-2025-26')
+        self.assertEqual(detail.status_code, 404)
+        self.assertNotIn('1200', detail.get_data(as_text=True))
 
     def test_protected_admin_payload_keeps_exact_inventory(self):
         with self.app.app_context():

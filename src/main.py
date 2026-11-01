@@ -324,10 +324,6 @@ def create_tables():
                         gift_box.visible_in_store = False
 
                 addon_assignments = {
-                    'aceite-temprano-sin-filtrar': [{
-                        'productSlug': 'estuche-regalo-temprano',
-                        'label': 'Añadir Estuche Regalo Premium Temprano',
-                    }],
                     'aceite-oliva-ecologico': [{
                         'productSlug': 'estuche-regalo-ecologico',
                         'label': 'Añadir Estuche Regalo Premium Eco',
@@ -365,12 +361,25 @@ def create_tables():
             except Exception as mig_err_i18n:
                 db.session.rollback()
                 print(f"Migration i18n fields (non-critical): {mig_err_i18n}")
+            # Aviso editorial opcional de storefront. Se mantiene separado de
+            # las descripciones para que el frontend pueda resolver enlaces.
+            try:
+                db.session.execute(db.text(
+                    'ALTER TABLE web_products ADD COLUMN IF NOT EXISTS storefront_notice TEXT'
+                ))
+                db.session.commit()
+                print("Migration: storefront_notice added to web_products")
+            except Exception as storefront_notice_migration_error:
+                db.session.rollback()
+                print(
+                    'Migration storefront notice (non-critical): '
+                    f"{storefront_notice_migration_error}"
+                )
             # Seed de traducciones EN (idempotente - solo actualiza si name_en es NULL)
             try:
                 translations_data = {
                     'paraguayo-almibar': ('Flat Peach in Syrup', 'Artisanal flat peach in light syrup, handpicked from our orchards in Lleida.', 'Our flat peaches are carefully selected at their optimal ripeness point and preserved in a light syrup that enhances their natural sweetness. A family recipe passed down through seven generations since 1819.'),
                     'nectarina-almibar': ('Nectarine in Syrup', 'Artisanal nectarine in light syrup, handpicked from our orchards in Lleida. Sweet, juicy and full of flavour.', 'Our nectarines are harvested at their peak ripeness and preserved in a delicate light syrup. Each jar captures the essence of Mediterranean summer fruit.'),
-                    'aceite-temprano-sin-filtrar': ('Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27', 'Unfiltered extra virgin olive oil from green olives, harvested for the 2026/27 season.', 'Made with green olives collected before ripening, in a single pass, and left unfiltered. It yields less oil per kilo; that is why its profile is green, bitter, and peppery. From our olive grove in the Córdoba countryside. Ideal to enjoy raw on salads, toast and carpaccios.'),
                     'aceite-oliva-ecologico': ('Award-Winning Organic Extra Virgin Olive Oil', 'Certified organic EVOO, internationally awarded. Cold-pressed from organically grown olives.', 'Our organic extra virgin olive oil comes from certified organic olive groves in C\u00f3rdoba. Produced using sustainable farming practices.'),
                     'aceite-5l-caja-3': ('Extra Virgin Olive Oil 5L', 'Family-size 5L container of premium EVOO. Perfect for daily cooking and generous use.', 'Our 5-litre format is designed for families and professionals who appreciate quality olive oil for everyday use.'),
                     'pack-mermelada-aceites': ('Premium Tasting Pack', 'A curated selection of our finest products. The perfect introduction to Mikels Earth.', 'Our Premium Tasting Pack brings together a carefully curated selection of our best products.'),
@@ -403,13 +412,16 @@ def create_tables():
                     db.session.execute(db.text(
                         f"UPDATE web_products "
                         f"SET {column} = REPLACE(REPLACE({column}, :old_brand, :new_brand), :old_brand_plain, :new_brand) "
-                        f"WHERE {column} LIKE :old_pattern OR {column} LIKE :old_plain_pattern"
+                        f"WHERE ({column} LIKE :old_pattern OR {column} LIKE :old_plain_pattern) "
+                        f"AND slug <> :protected_slug AND (sku IS NULL OR sku <> :protected_sku)"
                     ), {
                         'old_brand': "Mikel's Earth",
                         'old_brand_plain': 'Mikels Earth',
                         'new_brand': "Mikel's Fruit",
                         'old_pattern': "%Mikel's Earth%",
-                        'old_plain_pattern': '%Mikels Earth%'
+                        'old_plain_pattern': '%Mikels Earth%',
+                        'protected_slug': 'aceite-temprano-sin-filtrar',
+                        'protected_sku': 'MIKVET500',
                     })
 
                 garrafa = WebProduct.query.filter_by(slug='aceite-5l-caja-3').first()
@@ -435,82 +447,6 @@ def create_tables():
             except Exception as mig_err_editorial:
                 db.session.rollback()
                 print(f"Migration editorial copy (non-critical): {mig_err_editorial}")
-            # Fin de la campaña Temprano 2026/27: pasa a venta ordinaria.
-            # La transición solo actualiza catálogo y precios publicados. No
-            # modifica el stock existente, sus reservas de checkout ni el
-            # historial de movimientos o pedidos.
-            try:
-                temprano = WebProduct.query.filter_by(
-                    slug='aceite-temprano-sin-filtrar'
-                ).first()
-                if temprano:
-                    temprano_values = {
-                        'name': 'Aceite de oliva virgen extra Temprano 2026/27 sin filtrar',
-                        'description': 'AOVE sin filtrar de aceituna verde de la cosecha 2026/27.',
-                        'long_description': (
-                            'Elaborado con aceituna verde, recogida antes de madurar, en una sola pasada y sin filtrar. '
-                            'Da menos aceite por kilo; de ahí su perfil verde, con amargor y picor. '
-                            'Procede de nuestro olivar en la campiña cordobesa.\n\n'
-                            'Ideal para disfrutar en crudo: ensaladas, tostadas y carpaccios.'
-                        ),
-                        'name_en': 'Unfiltered Early Harvest Extra Virgin Olive Oil 2026/27',
-                        'description_en': 'Unfiltered extra virgin olive oil from green olives, harvested for the 2026/27 season.',
-                        'long_description_en': (
-                            'Made with green olives collected before ripening, in a single pass, and left unfiltered. '
-                            'It yields less oil per kilo; that is why its profile is green, bitter, and peppery. '
-                            'From our olive grove in the Córdoba countryside.\n\n'
-                            'Ideal to enjoy raw on salads, toast and carpaccios.'
-                        ),
-                        'tags': ['Prensado en Frío', 'Sin Filtrar'],
-                        'claims': [],
-                        'award': None,
-                        'badges': [],
-                        'price': 19.90,
-                        'reservation_only': False,
-                        'reservation_message': None,
-                        'reservation_stock_total': None,
-                        # Packs cerrados con precios ordinarios ya vigentes.
-                        # Cada pack conserva su descuento comercial frente a
-                        # comprar las botellas sueltas.
-                        'tiered_discount': [
-                            {
-                                'actualQuantity': 1,
-                                'label': '1 botella 500 ml',
-                                'price': 19.90,
-                            },
-                            {
-                                'actualQuantity': 3,
-                                'label': 'Pack de 3',
-                                'featured': True,
-                                'price': 56.70,
-                            },
-                            {
-                                'actualQuantity': 6,
-                                'label': 'Pack de 6',
-                                'price': 107.40,
-                            },
-                            {
-                                'actualQuantity': 12,
-                                'label': 'Caja de 12',
-                                'price': 202.80,
-                            },
-                        ],
-                        'volume_discount': None,
-                    }
-                    has_changed = False
-                    for field, value in temprano_values.items():
-                        if getattr(temprano, field) != value:
-                            setattr(temprano, field, value)
-                            has_changed = True
-                    if has_changed:
-                        db.session.commit()
-                        print("Migration: Temprano 2026/27 switched to ordinary sale")
-            except Exception as temprano_editorial_migration_error:
-                db.session.rollback()
-                print(
-                    'Migration Temprano 2026/27 ordinary sale (non-critical): '
-                    f"{temprano_editorial_migration_error}"
-                )
             # Seed de cupones manuales (idempotente - no duplica)
             try:
                 from src.models.coupon import Coupon
@@ -624,6 +560,28 @@ def create_tables():
             except Exception as seed_err:
                 db.session.rollback()
                 print(f"Seed products (non-critical): {seed_err}")
+            # El producto 2026/27 MIKVET500 se mantiene intacto. Este seed crea
+            # o actualiza únicamente el borrador separado de la cosecha 2025/26
+            # y no llama a Holded ni a ningún servicio externo.
+            try:
+                from src.services.previous_harvest_draft import seed_previous_harvest_draft
+
+                draft, action, used_fallback = seed_previous_harvest_draft()
+                db.session.commit()
+                if used_fallback:
+                    print(
+                        'Seed previous harvest draft: colisión detectada para '
+                        f'slug/SKU propuestos; se usaron identificadores seguros '
+                        f'{draft.slug} / {draft.sku} ({action})'
+                    )
+                else:
+                    print(f"Seed previous harvest draft: {action} ({draft.slug} / {draft.sku})")
+            except Exception as previous_harvest_draft_error:
+                db.session.rollback()
+                print(
+                    'Seed previous harvest draft (non-critical): '
+                    f"{previous_harvest_draft_error}"
+                )
             # Fix: resetear secuencia de IDs de web_products para evitar conflictos
             try:
                 db.session.execute(db.text("SELECT setval('web_products_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM web_products), false)"))

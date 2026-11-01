@@ -10,6 +10,12 @@ from src.services.email_dispatcher import dispatch_order_notification, dispatch_
 from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents, MoneyValueError
 from src.services.checkout_pricing import calculate_checkout_line_price, sent_line_total
 from src.services.delivery_policy import DeliveryPolicyError, validate_delivery_destination
+from src.services.protected_catalogue import (
+    contains_promotion_protected_product,
+    is_full_price_only,
+    is_mixed_with_full_price_only_product,
+    is_protected_component_pack,
+)
 from src.models.user import db
 
 stripe_bp = Blueprint('stripe', __name__, url_prefix='/api/stripe')
@@ -106,6 +112,7 @@ def create_checkout_session():
         # Evita que se pueda comprar a un precio desactualizado
         from src.models.web_product import WebProduct
         price_errors = []
+        checkout_products = []
         for item in items:
             product_id = item.get('id')
             item_slug = item.get('slug')
@@ -120,6 +127,22 @@ def create_checkout_session():
                 db_product = WebProduct.query.filter_by(slug=item_slug).first()
             
             if db_product:
+                # Fail closed: inactive and exhausted products may not reach
+                # pricing. Visibility is deliberately not a saleability
+                # condition: gift cases stay hidden but are legitimate active
+                # add-ons, and mixed packs remain sellable at full price.
+                # The private previous-harvest draft is inactive, so it stays
+                # unpurchasable even through an old cart or direct API call.
+                if (
+                    not db_product.active
+                    or db_product.sold_out
+                    or int(db_product.stock or 0) <= 0
+                ):
+                    return jsonify({
+                        'error': 'PRODUCT_UNAVAILABLE',
+                        'message': 'Uno de los productos ya no está disponible. Actualiza tu carrito.',
+                    }), 409
+                checkout_products.append(db_product)
                 # Captura autoritativa de identidad en el momento de compra.
                 # El navegador no decide el SKU que acabará en el pedido.
                 item['id'] = db_product.id
@@ -172,6 +195,15 @@ def create_checkout_session():
                     'error': 'PRODUCT_NOT_FOUND',
                     'message': 'Uno de los productos ya no está disponible. Actualiza tu carrito.',
                 }), 409
+
+        # MIKVET500 is sold only as its own full-price product. A direct cart
+        # call cannot turn it into a Black Friday/mixed bundle by adding any
+        # independently sold item to the same checkout.
+        if is_mixed_with_full_price_only_product(checkout_products):
+            return jsonify({
+                'error': 'PRODUCT_UNAVAILABLE',
+                'message': 'Uno de los productos ya no está disponible. Actualiza tu carrito.',
+            }), 409
         
         if price_errors:
             # Devolver error con los precios actualizados para que el frontend actualice el carrito
@@ -229,6 +261,11 @@ def create_checkout_session():
         )
 
         if discount_code:
+            if contains_promotion_protected_product(checkout_products):
+                return jsonify({
+                    'error': 'PROMOTION_NOT_AVAILABLE',
+                    'message': 'El código no se puede aplicar a este pedido.',
+                }), 422
             from src.models.coupon import Coupon
 
             coupon = Coupon.query.filter(
@@ -439,6 +476,22 @@ def create_subscription_checkout():
         item = data['item']
         customer_info = data['customer_info']
         frequency = item.get('subscription_frequency')
+
+        # Do not accept a browser-supplied subscription configuration for the
+        # protected full-price SKU. Resolve by the authoritative catalogue ID
+        # or slug when present; checking the supplied SKU also blocks a direct
+        # attempt that omits both identifiers.
+        from src.models.web_product import WebProduct
+        subscription_product = None
+        if item.get('id'):
+            subscription_product = WebProduct.query.get(item['id'])
+        if subscription_product is None and item.get('slug'):
+            subscription_product = WebProduct.query.filter_by(slug=item['slug']).first()
+        if is_full_price_only(subscription_product or str(item.get('sku') or '')) or is_protected_component_pack(subscription_product or str(item.get('sku') or '')):
+            return jsonify({
+                'error': 'PROMOTION_NOT_AVAILABLE',
+                'message': 'La suscripción no está disponible para este producto.',
+            }), 422
         
         if not frequency:
             return jsonify({'error': 'Subscription frequency is required'}), 400

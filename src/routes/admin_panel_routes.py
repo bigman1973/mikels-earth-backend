@@ -747,6 +747,7 @@ def create_web_product():
             free_shipping=data.get('freeShipping', False),
             limited_edition=data.get('limitedEdition', False),
             award=data.get('award'),
+            storefront_notice=data.get('storefrontNotice'),
             active=data.get('active', True),
             visible_in_store=data.get('visibleInStore', True),
             display_order=int(data.get('displayOrder', 0)),
@@ -860,6 +861,8 @@ def update_web_product(product_id):
             product.limited_edition = data['limitedEdition']
         if 'award' in data:
             product.award = data['award']
+        if 'storefrontNotice' in data:
+            product.storefront_notice = data['storefrontNotice']
         if 'active' in data:
             product.active = data['active']
         if 'visibleInStore' in data:

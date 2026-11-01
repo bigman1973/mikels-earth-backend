@@ -5,6 +5,7 @@ Los campos JSON permiten flexibilidad para datos estructurados variables.
 """
 from datetime import datetime
 from src.models.user import db
+from src.services.protected_catalogue import is_full_price_only
 from src.services.scheduled_pack_pricing import active_catalogue_price, serialize_tiered_pricing
 
 
@@ -79,6 +80,8 @@ class WebProduct(db.Model):
     free_shipping = db.Column(db.Boolean, default=False)
     limited_edition = db.Column(db.Boolean, default=False)
     award = db.Column(db.String(200))
+    # Optional copy displayed above a storefront product page when supplied.
+    storefront_notice = db.Column(db.Text)
     active = db.Column(db.Boolean, default=True, nullable=False)  # Se puede vender y resolver en checkout/addons
     visible_in_store = db.Column(db.Boolean, default=True, nullable=False)  # Aparece en el catálogo público
     
@@ -106,6 +109,7 @@ class WebProduct(db.Model):
         name = (self.name_en if lang == 'en' and self.name_en else self.name)
         description = (self.description_en if lang == 'en' and self.description_en else self.description)
         long_description = (self.long_description_en if lang == 'en' and self.long_description_en else self.long_description)
+        full_price_only = is_full_price_only(self)
         
         result = {
             'id': self.id,
@@ -134,10 +138,12 @@ class WebProduct(db.Model):
             'weight': self.weight,
             'ingredients': self.ingredients,
             'nutritionalInfo': self.nutritional_info,
-            'subscriptionAvailable': self.subscription_available or False,
-            'subscriptionDiscount': self.subscription_discount,
-            'subscriptionFrequencies': self.subscription_frequencies or [],
+            'subscriptionAvailable': False if full_price_only else (self.subscription_available or False),
         }
+
+        if not full_price_only:
+            result['subscriptionDiscount'] = self.subscription_discount
+            result['subscriptionFrequencies'] = self.subscription_frequencies or []
 
         if self.reservation_only:
             result['reservationOnly'] = True
@@ -153,12 +159,12 @@ class WebProduct(db.Model):
             result['soldOutMessage'] = self.sold_out_message
         if self.original_price:
             result['originalPrice'] = self.original_price
-        if self.volume_discount:
+        if self.volume_discount and not full_price_only:
             result['volumeDiscount'] = self.volume_discount
-        serialized_tiers = serialize_tiered_pricing(self)
+        serialized_tiers = None if full_price_only else serialize_tiered_pricing(self)
         if serialized_tiers:
             result['tieredDiscount'] = serialized_tiers
-        if self.addons:
+        if self.addons and not full_price_only:
             result['addons'] = self.addons
         if self.variants:
             result['variants'] = self.variants
@@ -178,6 +184,8 @@ class WebProduct(db.Model):
             result['limitedEdition'] = True
         if self.award:
             result['award'] = self.award
+        if self.storefront_notice:
+            result['storefrontNotice'] = self.storefront_notice
         if self.subscription_terms:
             result['subscriptionTerms'] = self.subscription_terms
         
