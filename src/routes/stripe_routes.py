@@ -12,9 +12,8 @@ from src.services.checkout_pricing import calculate_checkout_line_price, sent_li
 from src.services.delivery_policy import DeliveryPolicyError, validate_delivery_destination
 from src.services.protected_catalogue import (
     contains_promotion_protected_product,
-    is_full_price_only,
     is_mixed_with_full_price_only_product,
-    is_protected_component_pack,
+    is_promotion_protected,
 )
 from src.models.user import db
 
@@ -166,8 +165,8 @@ def create_checkout_session():
                         'sent_price': item_price,
                         'current_price': float(expected.base_unit_price),
                         'expected_line_total': float(expected.expected_line_total),
-                        'tiered_discount': db_product.tiered_discount,
-                        'volume_discount': db_product.volume_discount,
+                        'tiered_discount': None if is_promotion_protected(db_product) else db_product.tiered_discount,
+                        'volume_discount': None if is_promotion_protected(db_product) else db_product.volume_discount,
                     })
                 physical_quantity = int(quantity)
                 item['_physical_quantity'] = physical_quantity
@@ -196,9 +195,9 @@ def create_checkout_session():
                     'message': 'Uno de los productos ya no está disponible. Actualiza tu carrito.',
                 }), 409
 
-        # MIKVET500 is sold only as its own full-price product. A direct cart
-        # call cannot turn it into a Black Friday/mixed bundle by adding any
-        # independently sold item to the same checkout.
+        # Preserve the existing protected-unit/nonprotected-item mixed-cart
+        # gate. Distinct fixed-price container SKUs are checked as containers,
+        # not expanded into their internal unit quantities.
         if is_mixed_with_full_price_only_product(checkout_products):
             return jsonify({
                 'error': 'PRODUCT_UNAVAILABLE',
@@ -213,6 +212,16 @@ def create_checkout_session():
                 'price_updates': price_errors
             }), 409
         # ===== FIN VALIDACIÓN DE PRECIOS =====
+
+        # Stripe distributes a checkout-wide discount over all lines. A tier
+        # on an unrelated line must not indirectly discount a protected pack.
+        if contains_promotion_protected_product(checkout_products) and (
+            discount_code or volume_discount_amount > 0
+        ):
+            return jsonify({
+                'error': 'PROMOTION_NOT_AVAILABLE',
+                'message': 'El código o descuento no se puede aplicar a este pedido.',
+            }), 422
 
         # Capture the exact Holded-master VAT rule now, before a Checkout
         # Session is opened. The later webhook applies this snapshot to
@@ -261,11 +270,6 @@ def create_checkout_session():
         )
 
         if discount_code:
-            if contains_promotion_protected_product(checkout_products):
-                return jsonify({
-                    'error': 'PROMOTION_NOT_AVAILABLE',
-                    'message': 'El código no se puede aplicar a este pedido.',
-                }), 422
             from src.models.coupon import Coupon
 
             coupon = Coupon.query.filter(
@@ -477,21 +481,50 @@ def create_subscription_checkout():
         customer_info = data['customer_info']
         frequency = item.get('subscription_frequency')
 
-        # Do not accept a browser-supplied subscription configuration for the
-        # protected full-price SKU. Resolve by the authoritative catalogue ID
-        # or slug when present; checking the supplied SKU also blocks a direct
-        # attempt that omits both identifiers.
+        # Resolve every supplied identifier independently: a forged ordinary
+        # ID must not mask a protected slug/SKU. Never accept an unresolved
+        # subscription product based only on browser-supplied names/prices.
         from src.models.web_product import WebProduct
-        subscription_product = None
+        subscription_products = []
+        unresolved_identifier = False
         if item.get('id'):
-            subscription_product = WebProduct.query.get(item['id'])
-        if subscription_product is None and item.get('slug'):
-            subscription_product = WebProduct.query.filter_by(slug=item['slug']).first()
-        if is_full_price_only(subscription_product or str(item.get('sku') or '')) or is_protected_component_pack(subscription_product or str(item.get('sku') or '')):
+            product = WebProduct.query.get(item['id'])
+            unresolved_identifier |= product is None
+            if product is not None:
+                subscription_products.append(product)
+        if item.get('slug'):
+            product = WebProduct.query.filter_by(slug=item['slug']).first()
+            unresolved_identifier |= product is None
+            if product is not None:
+                subscription_products.append(product)
+        if item.get('sku'):
+            product = WebProduct.query.filter(
+                db.func.upper(WebProduct.sku) == str(item['sku']).strip().upper()
+            ).first()
+            unresolved_identifier |= product is None
+            if product is not None:
+                subscription_products.append(product)
+        if contains_promotion_protected_product(subscription_products) or is_promotion_protected(item):
             return jsonify({
                 'error': 'PROMOTION_NOT_AVAILABLE',
                 'message': 'La suscripción no está disponible para este producto.',
             }), 422
+
+        if unresolved_identifier or not subscription_products:
+            return jsonify({'error': 'PRODUCT_NOT_FOUND'}), 409
+        if len({product.id for product in subscription_products}) != 1:
+            return jsonify({'error': 'PRODUCT_IDENTITY_MISMATCH'}), 422
+        subscription_product = subscription_products[0]
+        if not subscription_product.active or subscription_product.sold_out or int(subscription_product.stock or 0) <= 0:
+            return jsonify({'error': 'PRODUCT_UNAVAILABLE'}), 409
+        # Fill missing fields from the resolved product rather than trusting a
+        # caller to relabel the subscription as a different catalogue item.
+        item.update({
+            'id': subscription_product.id,
+            'slug': subscription_product.slug,
+            'sku': subscription_product.sku,
+            'name': subscription_product.name,
+        })
         
         if not frequency:
             return jsonify({'error': 'Subscription frequency is required'}), 400

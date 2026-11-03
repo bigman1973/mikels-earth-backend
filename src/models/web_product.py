@@ -5,7 +5,7 @@ Los campos JSON permiten flexibilidad para datos estructurados variables.
 """
 from datetime import datetime
 from src.models.user import db
-from src.services.protected_catalogue import is_full_price_only
+from src.services.protected_catalogue import is_full_price_only, protect_public_properties
 from src.services.scheduled_pack_pricing import active_catalogue_price, serialize_tiered_pricing
 
 
@@ -189,7 +189,7 @@ class WebProduct(db.Model):
         if self.subscription_terms:
             result['subscriptionTerms'] = self.subscription_terms
         
-        return result
+        return protect_public_properties(self, result)
     
     def to_admin_dict(self):
         """Devuelve el producto con todos los campos para el panel admin."""

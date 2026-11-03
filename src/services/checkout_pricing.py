@@ -18,7 +18,7 @@ from src.services.scheduled_pack_pricing import (
     fixed_pack_tier_for_quantity,
     resolve_fixed_pack_price,
 )
-from src.services.protected_catalogue import is_full_price_only
+from src.services.protected_catalogue import is_promotion_protected
 
 HUNDRED = Decimal("100")
 
@@ -71,6 +71,9 @@ def volume_discount_percent(product: Any, quantity: int) -> Decimal:
         raise ValueError("La cantidad debe ser un entero positivo.") from exc
     if normalized_quantity < 1:
         raise ValueError("La cantidad debe ser un entero positivo.")
+
+    if is_promotion_protected(product):
+        return Decimal("0")
 
     tiers = getattr(product, "tiered_discount", None)
     if isinstance(tiers, list):
@@ -155,10 +158,10 @@ def calculate_checkout_line_price(product: Any, quantity: int) -> CheckoutLinePr
 
     base_unit_price = as_eur(getattr(product, "price", None), field="precio maestro")
     base_line_total = (base_unit_price * normalized_quantity).quantize(CENT, rounding=ROUND_HALF_UP)
-    # MIKVET500 is deliberately excluded from every persisted tier or legacy
-    # volume rule. This check is at the authoritative checkout calculation so
-    # a stale browser payload cannot reinstate a promotional price.
-    if is_full_price_only(product):
+    # The three unit SKUs and known legacy component packs are excluded from
+    # all persisted tiers, bundles and volume rules. Distinct fixed-price pack
+    # SKUs do not inherit this exclusion from their internal components.
+    if is_promotion_protected(product):
         return CheckoutLinePrice(
             base_unit_price=base_unit_price,
             base_line_total=base_line_total,

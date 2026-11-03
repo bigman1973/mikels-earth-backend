@@ -3,23 +3,60 @@ Rutas para gestión de cupones de descuento
 """
 from flask import Blueprint, request, jsonify
 from src.models.coupon import Coupon
+from src.models.web_product import WebProduct
+from src.services.protected_catalogue import is_promotion_protected
 
 coupon_bp = Blueprint('coupon', __name__)
+
+
+def _has_protected_cart_item(data):
+    """Check optional cart context; a context-free preview is not sale approval.
+
+    Resolve each identifier independently so a forged SKU cannot hide a protected
+    database ID/slug. Checkout remains authoritative for callers omitting items.
+    """
+    items = data.get('items', [])
+    if isinstance(items, dict):
+        items = [items]
+    if not isinstance(items, list):
+        return False
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if is_promotion_protected(item):
+            return True
+        if item.get('id'):
+            product = WebProduct.query.get(item['id'])
+            if is_promotion_protected(product):
+                return True
+        if item.get('slug'):
+            product = WebProduct.query.filter_by(slug=item['slug']).first()
+            if is_promotion_protected(product):
+                return True
+    return False
 
 
 @coupon_bp.route('/validate', methods=['POST'])
 def validate_coupon():
     """
     Validar si un cupón es válido (universal - funciona para todos los tipos)
-    Body: { "code": "CODIGO", "email": "user@example.com" (opcional) }
+    Body: { "code": "CODIGO", "email": "user@example.com", "items": [...] }
+    Email e items son opcionales; sin carrito solo se valida el código.
     """
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         code = data.get('code')
         email = data.get('email')  # Opcional
         
         if not code:
             return jsonify({'error': 'Coupon code is required'}), 400
+
+        if _has_protected_cart_item(data):
+            return jsonify({
+                'valid': False,
+                'error': 'PROMOTION_NOT_AVAILABLE',
+                'message': 'El código no se puede aplicar a este pedido.',
+            }), 200
         
         # Validar cupón (busca por código case-insensitive)
         is_valid, result = Coupon.validate_coupon(code, email)
@@ -53,12 +90,19 @@ def use_coupon():
     Body: { "code": "MIKELS10-XXXXXXXX", "email": "user@example.com" }
     """
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         code = data.get('code')
         email = data.get('email')
         
         if not code or not email:
             return jsonify({'error': 'Code and email are required'}), 400
+
+        if _has_protected_cart_item(data):
+            return jsonify({
+                'success': False,
+                'error': 'PROMOTION_NOT_AVAILABLE',
+                'message': 'El código no se puede aplicar a este pedido.',
+            }), 422
         
         # Validar cupón primero
         is_valid, result = Coupon.validate_coupon(code, email)

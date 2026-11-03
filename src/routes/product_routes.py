@@ -8,7 +8,7 @@ precio válido nunca se incluye en la respuesta pública.
 """
 from flask import Blueprint, jsonify, request
 from src.models.web_product import WebProduct
-from src.services.protected_catalogue import is_full_price_only
+from src.services.protected_catalogue import is_promotion_protected, protect_public_properties
 
 product_bp = Blueprint('products', __name__)
 
@@ -18,6 +18,7 @@ def _resolve_addons(products, lang):
     addon_slugs = {
         addon.get('productSlug')
         for product in products
+        if not is_promotion_protected(product)
         for addon in (product.addons or [])
         if isinstance(addon, dict) and addon.get('productSlug')
     }
@@ -34,7 +35,9 @@ def _resolve_addons(products, lang):
 
 def _serialize_product(product, addon_products, lang):
     """Serializa un producto y conserva solo addons completamente resolubles."""
-    data = product.to_frontend_dict(lang=lang)
+    data = protect_public_properties(product, product.to_frontend_dict(lang=lang))
+    if is_promotion_protected(product):
+        return data
     resolved_addons = []
 
     for addon in product.addons or []:
@@ -44,6 +47,7 @@ def _serialize_product(product, addon_products, lang):
         addon_product = addon_products.get(addon.get('productSlug'))
         if (
             addon_product is None
+            or is_promotion_protected(addon_product)
             or addon_product.sold_out
             or addon_product.price is None
             or addon_product.price <= 0
@@ -64,7 +68,7 @@ def _serialize_product(product, addon_products, lang):
         addon_data['product'] = addon_product_data
         resolved_addons.append(addon_data)
 
-    if product.addons is not None and not is_full_price_only(product):
+    if product.addons is not None:
         data['addons'] = resolved_addons
 
     return data
