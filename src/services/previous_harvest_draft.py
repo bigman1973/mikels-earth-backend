@@ -53,9 +53,9 @@ DRAFT_VALUES = {
     'images': [],
     'category': 'Aceites',
     'tags': [],
-    # This is an authorised internal opening inventory only. Public product
-    # payloads intentionally expose availability, never this quantity.
-    'stock': 1200,
+    # No opening quantity is inferred while the ERP harvest is unconfirmed.
+    # Existing quantities are retained below, never reset by an application boot.
+    'stock': 0,
     'weight': '500 ml',
     'sold_out': False,
     'sold_out_message': None,
@@ -157,6 +157,11 @@ def seed_previous_harvest_draft() -> tuple[WebProduct, str, bool]:
             raise RuntimeError('No se encontró un slug y SKU seguros para el borrador 2025/26.')
 
     for field, value in DRAFT_VALUES.items():
+        # Inventory and reviewed photos are operational data, not catalogue
+        # defaults. A redeploy must not invent a quantity or discard a supplied
+        # photo. This does not activate or publish the non-public draft.
+        if existing is not None and field in {'stock', 'image', 'images'}:
+            continue
         setattr(product, field, value)
 
     return product, action, used_fallback

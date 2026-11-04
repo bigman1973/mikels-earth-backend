@@ -49,6 +49,9 @@ class TempranoHarvestIntegrityTests(unittest.TestCase):
             current = WebProduct(name=CURRENT_TITLE, slug='aceite-temprano-sin-filtrar', sku='MIKVET500', price=19.90, category='Aceites', stock=44, active=True, visible_in_store=True)
             db.session.add(current)
             old, _, _ = seed_previous_harvest_draft()
+            # Explicit synthetic stock belongs to this in-memory fixture only.
+            # The real seed must not infer any ERP harvest quantity.
+            old.stock = 1200
             db.session.commit()
             self.current_id, self.old_id = current.id, old.id
         self.client = self.app.test_client()

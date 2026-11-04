@@ -45,7 +45,7 @@ class PreviousHarvestDraftSeedTests(unittest.TestCase):
             self.assertEqual(product.sku, PROPOSED_SKU)
             self.assertEqual(product.price, 59.70)
             self.assertIsNone(product.original_price)
-            self.assertEqual(product.stock, 1200)
+            self.assertEqual(product.stock, 0)
             self.assertFalse(product.active)
             self.assertFalse(product.visible_in_store)
             self.assertFalse(product.sold_out)
@@ -146,6 +146,22 @@ class PreviousHarvestDraftSeedTests(unittest.TestCase):
                 'stock': current_harvest.stock,
                 'tiered_discount': current_harvest.tiered_discount,
             }, before)
+
+    def test_boot_never_resets_existing_inventory_or_reviewed_photos(self):
+        with self.app.app_context():
+            product, _, _ = seed_previous_harvest_draft()
+            product.stock = 37
+            product.image = 'https://example.test/reviewed-previous-harvest.webp'
+            product.images = [product.image]
+            db.session.commit()
+            updated, action, _ = seed_previous_harvest_draft()
+            db.session.commit()
+            self.assertEqual(action, 'updated')
+            self.assertEqual(updated.stock, 37)
+            self.assertEqual(updated.image, product.image)
+            self.assertEqual(updated.images, [product.image])
+            self.assertFalse(updated.active)
+            self.assertFalse(updated.visible_in_store)
 
     def test_seed_selects_safe_deterministic_identifiers_after_a_collision(self):
         with self.app.app_context():
