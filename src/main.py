@@ -42,6 +42,7 @@ from src.routes.product_routes import product_bp  # Catálogo público de produc
 from src.routes.meta_catalog_routes import meta_catalog_bp  # Feed público de Meta Commerce
 from src.routes.translate_routes import translate_bp  # Traducción de reseñas
 from src.routes.vip_routes import vip_bp  # Lista VIP Black Friday
+from src.services.form_security import configure_form_security
 from src.models.blog import BlogPost  # Modelo del blog
 from src.models.review import Review  # Modelo de reseñas
 from src.models.abandoned_cart import AbandonedCart  # Modelo de carrito abandonado
@@ -56,6 +57,7 @@ from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot  # IVA capturad
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 app.config['SECRET_KEY'] = os.environ['SECRET_KEY'].strip()
+configure_form_security(app)
 
 # Enable CORS
 # Permitir múltiples orígenes: producción, Vercel preview, y desarrollo local
@@ -107,6 +109,12 @@ def create_tables():
     # quedar bloqueado por migraciones; la primera petición funcional seguirá
     # ejecutando este bloque completo antes de consultar o modificar datos.
     if request.path == '/api/health':
+        return None
+
+    # Form requests never trigger legacy create_all/seeds/migrations. A filled
+    # honeypot must have zero DB effects, and the form audit requires explicitly
+    # approved SQL rather than application-start schema changes.
+    if request.path in ('/api/vip/signup', '/api/contact/send-message'):
         return None
 
     if not hasattr(app, 'tables_created'):

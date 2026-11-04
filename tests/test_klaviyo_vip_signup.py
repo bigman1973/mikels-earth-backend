@@ -85,6 +85,32 @@ class KlaviyoVipSignupTests(unittest.TestCase):
         self.assertEqual(send_event.call_args.kwargs['properties']['ConsentIP'], '198.51.100.42')
         self.assertEqual(send_event.call_args.kwargs['profile_attrs'], {'first_name': 'Marisa'})
 
+    @patch('src.services.klaviyo_service.requests')
+    def test_existing_profile_is_never_patched_or_resubscribed(self, requests):
+        lookup = Mock(status_code=200)
+        lookup.json.return_value = {'data': [{'id': 'existing-profile'}]}
+        requests.get.return_value = lookup
+        with patch('src.services.klaviyo_service._get_vip_list_id', return_value=('vip-list', None)):
+            accepted, error = klaviyo_service.klaviyo_subscribe_vip_contact(
+                email='existing@example.com', first_name='New name',
+                consented_at=datetime(2026, 11, 4), source_ip='198.51.100.4',
+            )
+        self.assertFalse(accepted)
+        self.assertIn('Perfil existente conservado', error)
+        requests.patch.assert_not_called()
+        requests.post.assert_not_called()
+        requests.delete.assert_not_called()
+
+    @patch('src.services.klaviyo_service.requests')
+    def test_failed_existing_profile_lookup_never_creates_or_subscribes(self, requests):
+        requests.get.return_value = Mock(status_code=500)
+        with patch('src.services.klaviyo_service._get_vip_list_id', return_value=('vip-list', None)):
+            accepted, error = klaviyo_service.klaviyo_subscribe_vip_contact(email='existing@example.com')
+        self.assertFalse(accepted)
+        self.assertIn('verificar', error)
+        requests.patch.assert_not_called()
+        requests.post.assert_not_called()
+
     @patch.dict(os.environ, {'KLAVIYO_API_KEY': ''}, clear=False)
     def test_reports_a_tuple_when_the_vip_event_has_no_configured_key(self):
         accepted, error = klaviyo_service.klaviyo_track_vip_signup(

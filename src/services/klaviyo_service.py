@@ -366,7 +366,12 @@ def _get_vip_list_id():
 
 
 def _store_vip_consent_on_profile(*, email, first_name='', consented_at=None, source_ip=''):
-    """Persist VIP consent evidence on the profile before the subscription job."""
+    """Create evidence on NEW profiles only; never overwrite existing consent.
+
+    Existing profile consent/subscription handling needs an explicit reviewed
+    policy. Fail closed instead of silently re-subscribing or changing evidence.
+    The local VipSignup remains the immutable source for this new declaration.
+    """
     attributes = {
         'email': email,
         'properties': {
@@ -379,15 +384,19 @@ def _store_vip_consent_on_profile(*, email, first_name='', consented_at=None, so
         attributes['first_name'] = first_name
     payload = {'data': {'type': 'profile', 'attributes': attributes}}
     try:
-        profile_id = _find_klaviyo_profile_id(email)
-        if profile_id:
-            payload['data']['id'] = profile_id
-            response = requests.patch(
-                f'{KLAVIYO_API_URL}/profiles/{profile_id}',
-                headers=_get_headers(),
-                json=payload,
-                timeout=15,
-            )
+        # Do not use the general helper: it conflates lookup failure with
+        # missing profile. Only a successful empty lookup permits creation.
+        lookup = requests.get(
+            f'{KLAVIYO_API_URL}/profiles/', headers=_get_headers(),
+            params={'filter': f"equals(email,'{email}')", 'page[size]': 1}, timeout=15,
+        )
+        if lookup.status_code != 200:
+            return False, 'No se ha podido verificar el perfil VIP existente.'
+        profiles = lookup.json().get('data')
+        if not isinstance(profiles, list):
+            return False, 'Respuesta de verificación de perfil VIP no válida.'
+        if profiles:
+            return False, 'Perfil existente conservado; integración VIP pendiente de política de consentimiento aprobada.'
         else:
             response = requests.post(
                 f'{KLAVIYO_API_URL}/profiles',
@@ -858,7 +867,8 @@ def klaviyo_send_contact_confirmation(name, email, message=''):
         metric_name="Mikels Contact Confirmation",
         profile_email=email,
         properties=properties,
-        profile_attrs={"first_name": name.split(' ')[0] if name else ''}
+        # Transactional contact confirmation is not permission to overwrite
+        # the name/consent of an existing profile. The name stays in the event.
     )
 
 

@@ -1,0 +1,41 @@
+{
+  "version": "2026-11-04-keyless-v1",
+  "scope": ["POST /api/vip/signup", "POST /api/contact/send-message"],
+  "honeypot": {
+    "primary_field": "website",
+    "server_aliases": ["website", "_hp"],
+    "empty_value": "",
+    "frontend": "Campo de texto invisible visualmente, fuera del tabulado (tabIndex=-1), aria-hidden y autoComplete=off. No usar required. Enviar website vacío; contacto mantiene _hp y _ts por compatibilidad.",
+    "filled_response": {"status": 200, "json": {"success": true, "message": "Solicitud recibida correctamente."}},
+    "filled_effects": "Ninguna alta, correo, Klaviyo, consentimiento ni fila de auditoría. Comprobar antes de consultar IP o DB."
+  },
+  "rate_limit": {
+    "max_requests": 3,
+    "rolling_window_seconds": 3600,
+    "buckets": ["IP compartido vip+contact (3 total)", "IP+endpoint vip (3)", "IP+endpoint contact (3)"],
+    "limited_status": 429,
+    "limited_code": "rate_limited",
+    "retry_after_header": true,
+    "unavailable_status": 503,
+    "unavailable_code": "form_unavailable"
+  },
+  "email": {
+    "delivery": "trim y lowercase del correo original; no sustituirlo por la identidad canónica",
+    "canonical": "Solo gmail.com/googlemail.com: quitar puntos de localpart, unificar dominio gmail.com y eliminar etiqueta + como alias del mismo buzón; otros dominios intactos.",
+    "vip_duplicate": "200 éxito genérico sin nueva alta ni flujo; registrar solo intento y flag de duplicado separado",
+    "contact_duplicate": "Solo marca de auditoría. Mensajes legítimos diferentes de la misma persona siguen enviándose dentro del límite IP."
+  },
+  "phone": {
+    "required_vip": false,
+    "required_contact": false,
+    "empty_allowed": true,
+    "rejected_pattern": "Exactamente 10 dígitos sin prefijo explícito + o 00; ignorar espacios, guiones, puntos y paréntesis para contar",
+    "spanish_nine_digits_allowed": true,
+    "invalid_status": 400,
+    "invalid_code": "invalid_phone"
+  },
+  "contact_existing_ts": "Preservar _ts y las comprobaciones anti-spam existentes; no introducirlo como campo obligatorio",
+  "success_existing": {"vip_new_status": 201, "contact_status": 200},
+  "turnstile": "No activo, no requerido, no llamadas externas de verificación",
+  "deployment_blocker": "Migración PG explícita pendiente; verificación de peer/cabecera de Railway y configuración aprobada de FORM_CLIENT_IP_MODE pendientes. No confiar en X-Forwarded-For del cliente."
+}
