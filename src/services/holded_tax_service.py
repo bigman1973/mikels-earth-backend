@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from typing import Any, Iterable, Mapping
+from src.services.product_identity import harvest_product_name
 
 
 TAX_RATE_BY_ID = {
@@ -330,7 +331,7 @@ def _expand_pack_document_items(
             Decimal("0.000001"), rounding=ROUND_HALF_UP
         )
         document_items.append({
-            "name": component.product.get("name") or component_sku,
+            "name": harvest_product_name(component_sku, component.product.get("name") or component_sku),
             "description": f"Incluido en {product.get('name') or pack_sku}",
             "units": _display_units(units),
             "subtotal": float(unit_base),
@@ -361,7 +362,7 @@ def prepare_simple_document_item(order_item: dict[str, Any], index: HoldedMaster
     )
 
     return {
-        "name": order_item.get("name") or product.get("name") or sku,
+        "name": harvest_product_name(sku, order_item.get("name") or product.get("name") or sku),
         "description": order_item.get("description", ""),
         "units": _display_units(units),
         "subtotal": float(unit_base),

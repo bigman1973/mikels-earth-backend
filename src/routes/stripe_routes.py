@@ -10,6 +10,7 @@ from src.services.email_dispatcher import dispatch_order_notification, dispatch_
 from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents, MoneyValueError
 from src.services.checkout_pricing import calculate_checkout_line_price, sent_line_total
 from src.services.delivery_policy import DeliveryPolicyError, validate_delivery_destination
+from src.services.product_identity import TEMPRANO_NAMES_BY_SKU, harvest_product_name
 from src.services.protected_catalogue import (
     contains_promotion_protected_product,
     is_mixed_with_full_price_only_product,
@@ -147,6 +148,8 @@ def create_checkout_session():
                 item['id'] = db_product.id
                 item['sku'] = db_product.sku or ''
                 item['slug'] = db_product.slug
+                item['name'] = harvest_product_name(db_product.sku, db_product.name)
+                item['weight'] = db_product.weight or ''
                 # The cart can legitimately send a fractional-cent unit price
                 # when a persisted volume tier applies (17.15 × 85% =
                 # 14.5775).  Validate its *complete line total* against the
@@ -179,10 +182,16 @@ def create_checkout_session():
                     # but charge Stripe one exact line for the selected pack.
                     # This avoids fractional-cent bottle prices and prevents a
                     # pack from being represented as a stackable discount.
-                    item['name'] = f"{db_product.name} · {expected.tier_label}"
+                    if item['sku'] not in TEMPRANO_NAMES_BY_SKU:
+                        item['name'] = f"{item['name']} · {expected.tier_label}"
                     item['_pack_label'] = expected.tier_label or ''
                 item['_checkout_line_key'] = str(len(checkout_pricing_snapshot))
                 checkout_pricing_snapshot[item['_checkout_line_key']] = {
+                    'id': db_product.id,
+                    'sku': item['sku'],
+                    'slug': item['slug'],
+                    'name': item['name'],
+                    'physical_quantity': physical_quantity,
                     'receipt_line_total': eur_metadata(expected.expected_line_total, field='subtotal de línea'),
                     'pack_label': expected.tier_label if expected.fixed_pack else '',
                 }
@@ -195,9 +204,9 @@ def create_checkout_session():
                     'message': 'Uno de los productos ya no está disponible. Actualiza tu carrito.',
                 }), 409
 
-        # Preserve the existing protected-unit/nonprotected-item mixed-cart
-        # gate. Distinct fixed-price container SKUs are checked as containers,
-        # not expanded into their internal unit quantities.
+        # Preserve the mixed-cart gate except for the two exact Temprano
+        # harvest SKUs. This ordinary cart has independent per-line prices;
+        # the promotion veto below still forbids indirect discounts/coupons.
         if is_mixed_with_full_price_only_product(checkout_products):
             return jsonify({
                 'error': 'PRODUCT_UNAVAILABLE',
@@ -359,6 +368,7 @@ def create_checkout_session():
         line_items = []
         for item in items:
             product_metadata = {
+                'product_id': str(item['id']),
                 'slug': str(item.get('slug') or ''),
                 'sku': str(item.get('sku') or ''),
                 'checkout_line_key': str(item.get('_checkout_line_key') or ''),
@@ -672,8 +682,15 @@ def stripe_webhook():
                     sku = product_metadata.get('sku', '')
                     product_slug = product_metadata.get('slug', '')
                     checkout_line_key = product_metadata.get('checkout_line_key', '')
+                    receipt_line = receipt_pricing.get(str(checkout_line_key), {})
+                    # New sessions carry the trusted identity saved before
+                    # payment. Neither Stripe descriptions nor a renamed live
+                    # catalogue may change the paid order's harvest or ID.
+                    sku = receipt_line.get('sku', sku)
+                    product_slug = receipt_line.get('slug', product_slug)
+                    product_id = receipt_line.get('id') or product_metadata.get('product_id')
                     try:
-                        physical_quantity = max(1, int(product_metadata.get('physical_quantity') or item.quantity or 1))
+                        physical_quantity = max(1, int(receipt_line.get('physical_quantity') or product_metadata.get('physical_quantity') or item.quantity or 1))
                     except (TypeError, ValueError):
                         physical_quantity = int(item.quantity or 1)
 
@@ -683,19 +700,23 @@ def stripe_webhook():
                         db_product = None
                         if product_slug:
                             db_product = WebProduct.query.filter_by(slug=product_slug).first()
-                        if not db_product:
-                            db_product = WebProduct.query.filter(
+                        else:
+                            candidates = WebProduct.query.filter(
                                 or_(
                                     WebProduct.name == item.description,
                                     WebProduct.name_en == item.description
                                 )
-                            ).first()
+                            ).limit(2).all()
+                            # Do not guess a harvest from an ambiguous old
+                            # description shared by independently stocked SKUs.
+                            db_product = candidates[0] if len(candidates) == 1 else None
                         if db_product:
                             sku = db_product.sku or ''
                             product_slug = db_product.slug
+                            product_id = db_product.id
 
                     order_item = {
-                        'name': item.description,
+                        'name': receipt_line.get('name') or harvest_product_name(sku, item.description),
                         # Stripe charges a fixed pack as one line, while stock
                         # and fulfilment must still receive its bottle count.
                         'quantity': physical_quantity,
@@ -707,7 +728,8 @@ def stripe_webhook():
                         'gross_total': float(line_total),
                         'sku': sku
                     }
-                    receipt_line = receipt_pricing.get(str(checkout_line_key), {})
+                    if product_id:
+                        order_item['id'] = int(product_id)
                     if receipt_line.get('receipt_line_total') is not None:
                         order_item['receipt_line_total'] = float(as_eur(
                             receipt_line['receipt_line_total'],

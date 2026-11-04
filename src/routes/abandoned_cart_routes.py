@@ -11,6 +11,7 @@ from src.models.abandoned_cart import AbandonedCart
 from src.services.email_dispatcher import dispatch_started_checkout_event
 from src.services.checkout_pricing import calculate_checkout_line_price
 from src.services.order_receipt import format_eur
+from src.services.product_identity import harvest_product_name
 
 abandoned_cart_bp = Blueprint('abandoned_cart', __name__)
 
@@ -52,7 +53,8 @@ def _canonical_cart_items(items):
         item = deepcopy(raw_item)
         item.update({
             'id': product.id,
-            'name': product.name,
+            'sku': product.sku or '',
+            'name': harvest_product_name(product.sku, product.name),
             'slug': product.slug,
             'image': product.image or raw_item.get('image', ''),
             # Keep the catalogue unit price for recovery. The CartContext
