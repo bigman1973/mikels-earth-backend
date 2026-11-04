@@ -2501,7 +2501,7 @@ def admin_validate_coupon():
     order_amount = float(data.get('order_amount', 0))
     email = data.get('email')
     
-    is_valid, result = Coupon.validate_coupon(code, email)
+    is_valid, result = Coupon.validate_coupon(code, email, order_amount=order_amount)
     
     if is_valid:
         coupon = result

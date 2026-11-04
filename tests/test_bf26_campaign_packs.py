@@ -328,7 +328,7 @@ class BF26LocalCheckoutTests(unittest.TestCase):
             self.assertEqual(Coupon.query.filter_by(code='LOCAL10').one().current_uses, 0)
 
     def test_client_promotion_flags_do_not_create_or_hide_database_promotion(self):
-        with patch.object(Coupon, 'validate_coupon', return_value=(True, SimpleNamespace(code='LOCAL10', discount_value=10, discount_type='percentage'))) as validator:
+        with patch.object(Coupon, 'validate_coupon', return_value=(True, SimpleNamespace(code='LOCAL10', discount_value=10, discount_type='percentage', min_order_amount=0))) as validator:
             preview = self.client.post('/api/coupon/validate', json={'code': 'LOCAL10', 'items': [self.item('NORMAL-LOCAL', inPromotion=True)]})
             self.assertTrue(preview.get_json()['valid'])
             validator.assert_called_once()

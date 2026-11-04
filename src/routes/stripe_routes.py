@@ -301,7 +301,7 @@ def create_checkout_session():
                 }), 422
 
             coupon_valid, coupon_message = coupon.is_valid(
-                order_amount=float(discountable_subtotal),
+                order_amount=discountable_subtotal,
                 customer_email=customer_info['email'],
             )
             if not coupon_valid:

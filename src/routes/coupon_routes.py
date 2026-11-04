@@ -4,6 +4,7 @@ Rutas para gestión de cupones de descuento
 from flask import Blueprint, request, jsonify
 from src.models.coupon import Coupon
 from src.services.protected_catalogue import is_promotion_protected
+from src.services.money import as_eur, MoneyValueError
 from src.services.cart_promotions import (
     PROMOTION_COUPON_MESSAGE, cart_contains_in_promotion,
     cart_item_references, resolve_product_references,
@@ -30,8 +31,9 @@ def _has_protected_cart_item(data):
 def validate_coupon():
     """
     Validar si un cupón es válido (universal - funciona para todos los tipos)
-    Body: { "code": "CODIGO", "email": "user@example.com", "items": [...] }
-    Email e items son opcionales; sin carrito solo se valida el código.
+    Body: { "code": "CODIGO", "email": "user@example.com", "items": [...], "order_amount": 49 }
+    Email, items e importe son opcionales; sin importe solo se valida el código.
+    El pago vuelve a comprobar el mínimo con el subtotal calculado en servidor.
     """
     try:
         data = request.get_json(silent=True) or {}
@@ -54,8 +56,18 @@ def validate_coupon():
                 'message': 'El código no se puede aplicar a este pedido.',
             }), 200
         
+        amount_context = {}
+        if 'order_amount' in data:
+            try:
+                amount = as_eur(data['order_amount'], field='subtotal')
+                if amount < 0:
+                    raise MoneyValueError('El subtotal no puede ser negativo.')
+            except (MoneyValueError, ArithmeticError):
+                return jsonify({'error': 'INVALID_ORDER_AMOUNT'}), 400
+            amount_context['order_amount'] = amount
+
         # Validar cupón (busca por código case-insensitive)
-        is_valid, result = Coupon.validate_coupon(code, email)
+        is_valid, result = Coupon.validate_coupon(code, email, **amount_context)
         
         if not is_valid:
             return jsonify({
@@ -71,6 +83,7 @@ def validate_coupon():
                 'code': coupon.code,
                 'discount_percentage': coupon.discount_value,  # Siempre devolver el valor
                 'discount_type': coupon.discount_type,
+                'min_order_amount': coupon.min_order_amount,
             }
         }), 200
         

@@ -3,6 +3,7 @@ Modelo de Cupón para descuentos - Sistema completo de gestión
 """
 from datetime import datetime, timedelta
 from src.models.user import db
+from src.services.money import as_eur, MoneyValueError
 
 
 class Coupon(db.Model):
@@ -53,8 +54,12 @@ class Coupon(db.Model):
             return False
         return datetime.utcnow() > self.expires_at
     
-    def is_valid(self, order_amount=0, customer_email=None):
-        """Check if coupon is valid for use"""
+    def is_valid(self, order_amount=None, customer_email=None):
+        """Check validity; an omitted subtotal is only a code preview.
+
+        Checkout always supplies its canonical subtotal. Explicit zero must
+        still satisfy the minimum; use exact EUR rather than float comparisons.
+        """
         if not self.active:
             return False, "Cupón desactivado"
         
@@ -67,8 +72,19 @@ class Coupon(db.Model):
         if self.used:  # Compatibilidad con cupones de un solo uso
             return False, "Este cupón ya ha sido utilizado"
         
-        if order_amount > 0 and order_amount < self.min_order_amount:
-            return False, f"Pedido mínimo de {self.min_order_amount}€ para este cupón"
+        if order_amount is not None:
+            try:
+                amount = as_eur(order_amount, field='subtotal')
+                minimum = as_eur(
+                    self.min_order_amount if self.min_order_amount is not None else 0,
+                    field='mínimo de pedido',
+                )
+            except (MoneyValueError, ArithmeticError):
+                return False, "El importe del pedido o el mínimo del cupón no es válido"
+            if amount < 0 or minimum < 0:
+                return False, "El importe del pedido o el mínimo del cupón no es válido"
+            if amount < minimum:
+                return False, f"Pedido mínimo de {minimum:.2f}€ para este cupón"
         
         # Si el cupón está asociado a un email específico, verificar
         if self.email and customer_email:
@@ -183,6 +199,7 @@ class Coupon(db.Model):
             description='Cupón de bienvenida newsletter',
             discount_type='percentage',
             discount_value=discount_percent,
+            min_order_amount=49,
             max_uses=1,
             max_uses_per_customer=1,
             active=True,
@@ -192,7 +209,7 @@ class Coupon(db.Model):
         return coupon
     
     @classmethod
-    def validate_coupon(cls, code, email=None):
+    def validate_coupon(cls, code, email=None, order_amount=None):
         """
         Validar si un cupón es válido
         """
@@ -203,7 +220,7 @@ class Coupon(db.Model):
         if not coupon:
             return False, "Cupón no encontrado"
         
-        is_valid, message = coupon.is_valid(customer_email=email)
+        is_valid, message = coupon.is_valid(order_amount=order_amount, customer_email=email)
         if not is_valid:
             return False, message
         
