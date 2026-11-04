@@ -9,6 +9,7 @@ precio válido nunca se incluye en la respuesta pública.
 from flask import Blueprint, jsonify, request
 from src.models.web_product import WebProduct
 from src.services.protected_catalogue import is_promotion_protected, protect_public_properties
+from src.services.campaign_packs import campaign_pack_for
 
 product_bp = Blueprint('products', __name__)
 
@@ -36,7 +37,7 @@ def _resolve_addons(products, lang):
 def _serialize_product(product, addon_products, lang):
     """Serializa un producto y conserva solo addons completamente resolubles."""
     data = protect_public_properties(product, product.to_frontend_dict(lang=lang))
-    if is_promotion_protected(product):
+    if is_promotion_protected(product) or campaign_pack_for(product) is not None:
         return data
     resolved_addons = []
 
@@ -122,12 +123,11 @@ def get_products():
 
 @product_bp.route('/products/<slug>', methods=['GET'])
 def get_product_by_slug(slug):
-    """Devuelve una ficha solo si el producto está activo y visible en tienda."""
+    """Detalle directo de productos activos, incluso ocultos; inactivos 404."""
     lang = request.args.get('lang', 'es')
     product = WebProduct.query.filter_by(
         slug=slug,
-        active=True,
-        visible_in_store=True
+        active=True
     ).first()
     if not product:
         return jsonify({'error': 'Producto no encontrado'}), 404

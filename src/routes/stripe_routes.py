@@ -11,6 +11,10 @@ from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents,
 from src.services.checkout_pricing import calculate_checkout_line_price, sent_line_total
 from src.services.delivery_policy import DeliveryPolicyError, validate_delivery_destination
 from src.services.product_identity import TEMPRANO_NAMES_BY_SKU, harvest_product_name
+from src.services.campaign_packs import campaign_pack_for
+from src.services.cart_promotions import (
+    PROMOTION_COUPON_MESSAGE, cart_contains_in_promotion, resolve_product_references,
+)
 from src.services.protected_catalogue import (
     contains_promotion_protected_product,
     is_mixed_with_full_price_only_product,
@@ -108,23 +112,36 @@ def create_checkout_session():
         volume_discount_amount = Decimal('0.00')
         checkout_pricing_snapshot = {}
         
+        if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+            return jsonify({'error': 'INVALID_CART', 'message': 'El carrito no es válido.'}), 400
+        # Generic database-controlled veto, including selected add-ons. Never
+        # use browser inPromotion flags or a whitelist of this campaign's SKUs.
+        # No ERP read, stock reservation or Stripe call occurs on this path.
+        if discount_code and cart_contains_in_promotion(items):
+            return jsonify({
+                'error': 'PROMOTION_NOT_AVAILABLE',
+                'message': PROMOTION_COUPON_MESSAGE,
+            }), 422
+
         # ===== VALIDACIÓN DE PRECIOS CONTRA LA BASE DE DATOS =====
         # Evita que se pueda comprar a un precio desactualizado
         from src.models.web_product import WebProduct
         price_errors = []
         checkout_products = []
         for item in items:
-            product_id = item.get('id')
-            item_slug = item.get('slug')
             item_price = item.get('price', 0)
             quantity = item.get('quantity', 0)
             
-            # Buscar el producto en la DB por ID o slug
-            db_product = None
-            if product_id:
-                db_product = WebProduct.query.get(product_id)
-            if not db_product and item_slug:
-                db_product = WebProduct.query.filter_by(slug=item_slug).first()
+            # Resolve all identifiers independently, including SKU-only addon
+            # lines. Conflicting valid identities never select a benign SKU in
+            # place of the unavailable/promoted product originally requested.
+            candidates = resolve_product_references(item)
+            if len(candidates) > 1:
+                return jsonify({
+                    'error': 'PRODUCT_IDENTITY_MISMATCH',
+                    'message': 'La referencia de un producto no coincide. Actualiza tu carrito.',
+                }), 409
+            db_product = candidates[0] if candidates else None
             
             if db_product:
                 # Fail closed: inactive and exhausted products may not reach
@@ -168,8 +185,8 @@ def create_checkout_session():
                         'sent_price': item_price,
                         'current_price': float(expected.base_unit_price),
                         'expected_line_total': float(expected.expected_line_total),
-                        'tiered_discount': None if is_promotion_protected(db_product) else db_product.tiered_discount,
-                        'volume_discount': None if is_promotion_protected(db_product) else db_product.volume_discount,
+                        'tiered_discount': None if is_promotion_protected(db_product) or campaign_pack_for(db_product) else db_product.tiered_discount,
+                        'volume_discount': None if is_promotion_protected(db_product) or campaign_pack_for(db_product) else db_product.volume_discount,
                     })
                 physical_quantity = int(quantity)
                 item['_physical_quantity'] = physical_quantity

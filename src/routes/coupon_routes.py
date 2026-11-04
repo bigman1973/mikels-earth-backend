@@ -3,8 +3,11 @@ Rutas para gestión de cupones de descuento
 """
 from flask import Blueprint, request, jsonify
 from src.models.coupon import Coupon
-from src.models.web_product import WebProduct
 from src.services.protected_catalogue import is_promotion_protected
+from src.services.cart_promotions import (
+    PROMOTION_COUPON_MESSAGE, cart_contains_in_promotion,
+    cart_item_references, resolve_product_references,
+)
 
 coupon_bp = Blueprint('coupon', __name__)
 
@@ -15,24 +18,11 @@ def _has_protected_cart_item(data):
     Resolve each identifier independently so a forged SKU cannot hide a protected
     database ID/slug. Checkout remains authoritative for callers omitting items.
     """
-    items = data.get('items', [])
-    if isinstance(items, dict):
-        items = [items]
-    if not isinstance(items, list):
-        return False
-    for item in items:
-        if not isinstance(item, dict):
-            continue
+    for item in cart_item_references(data.get('items', [])):
         if is_promotion_protected(item):
             return True
-        if item.get('id'):
-            product = WebProduct.query.get(item['id'])
-            if is_promotion_protected(product):
-                return True
-        if item.get('slug'):
-            product = WebProduct.query.filter_by(slug=item['slug']).first()
-            if is_promotion_protected(product):
-                return True
+        if any(is_promotion_protected(product) for product in resolve_product_references(item)):
+            return True
     return False
 
 
@@ -51,6 +41,12 @@ def validate_coupon():
         if not code:
             return jsonify({'error': 'Coupon code is required'}), 400
 
+        if cart_contains_in_promotion(data.get('items', [])):
+            return jsonify({
+                'valid': False,
+                'error': 'PROMOTION_NOT_AVAILABLE',
+                'message': PROMOTION_COUPON_MESSAGE,
+            }), 200
         if _has_protected_cart_item(data):
             return jsonify({
                 'valid': False,
@@ -97,6 +93,12 @@ def use_coupon():
         if not code or not email:
             return jsonify({'error': 'Code and email are required'}), 400
 
+        if cart_contains_in_promotion(data.get('items', [])):
+            return jsonify({
+                'success': False,
+                'error': 'PROMOTION_NOT_AVAILABLE',
+                'message': PROMOTION_COUPON_MESSAGE,
+            }), 422
         if _has_protected_cart_item(data):
             return jsonify({
                 'success': False,

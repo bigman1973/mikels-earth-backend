@@ -1,0 +1,153 @@
+{
+  "version": 2,
+  "status": "local_code_only_no_activation",
+  "backend_worktree": "/home/ubuntu/work/backend-approved-mikpack-six-2026-11-04",
+  "promotion": {
+    "model_field": "in_promotion",
+    "public_field": "inPromotion",
+    "admin_field": "inPromotion",
+    "type": "boolean",
+    "default": false,
+    "badge": "En promoción",
+    "coupon_rejection_message": "Este código no se puede aplicar porque el pedido incluye productos en promoción.",
+    "rule": "Any authoritative catalogue product marked in_promotion rejects the whole coupon before Stripe, including add-ons; not a six-SKU whitelist.",
+    "draft_preparation": "Future authorised preparation may explicitly mark the six drafts inPromotion=true. No DB changes in this task; migration schema only, not executed; no seeding or activation."
+  },
+  "cart": {
+    "quantity_unit": "complete_pack",
+    "quantity_one": "one complete pack at approved total",
+    "bottle_tiers": false,
+    "keep_pack_on_coupon_rejection": true
+  },
+  "visibility": {
+    "catalogue": "active AND visible_in_store",
+    "detail": "active, including hidden",
+    "inactive_detail_http": 404,
+    "activation": "none"
+  },
+  "erp": {
+    "kind": "pack",
+    "recipe_component_count": 1,
+    "exact_recipe_required": true,
+    "document_line": "One own-SKU pack line; quantity=1 produces units=1; never six fiscal component lines.",
+    "stock_unit": "complete packs; no inferred stock or automatic component sync",
+    "manual_confirmation_required": true,
+    "confirmation_owner": "Jordi creates the six Holded masters/recipes manually and confirms exact recipes before use."
+  },
+  "packs": [
+    {
+      "sku": "BF26-TEMP6",
+      "slug": "aceite-temprano-sin-filtrar-cosecha-2025-26-pack-6",
+      "name": "Aceite de Oliva Virgen Extra Temprano sin filtrar · Cosecha 2025/26 · Pack de 6",
+      "price": 59.7,
+      "component_sku": "MIKVET5002526",
+      "component_units": 6
+    },
+    {
+      "sku": "BF26-TEMP12",
+      "slug": "aceite-temprano-sin-filtrar-cosecha-2025-26-caja-12",
+      "name": "Aceite de Oliva Virgen Extra Temprano sin filtrar · Cosecha 2025/26 · Caja de 12",
+      "price": 119.4,
+      "component_sku": "MIKVET5002526",
+      "component_units": 12
+    },
+    {
+      "sku": "BF26-ECO6",
+      "slug": "black-friday-aceite-ecologico-pack-6",
+      "name": "Aceite de Oliva Virgen Extra Ecológico · Pack de 6",
+      "price": 71.4,
+      "component_sku": "MIKBIO19",
+      "component_units": 6
+    },
+    {
+      "sku": "BF26-PARA3",
+      "slug": "black-friday-paraguayo-720g-pack-3",
+      "name": "Paraguayo en Almíbar 720 g · Pack de 3",
+      "price": 30.9,
+      "component_sku": "MIKPARA450",
+      "component_units": 3
+    },
+    {
+      "sku": "BF26-PARA6",
+      "slug": "black-friday-paraguayo-720g-pack-6",
+      "name": "Paraguayo en Almíbar 720 g · Pack de 6",
+      "price": 61.7,
+      "component_sku": "MIKPARA450",
+      "component_units": 6
+    },
+    {
+      "sku": "BF26-5L3",
+      "slug": "black-friday-aceite-5l-caja-3",
+      "name": "Aceite de Oliva Virgen Extra PET 5 L · Caja de 3",
+      "price": 96.75,
+      "component_sku": "MIKVE5LP",
+      "component_units": 3
+    }
+  ],
+  "protected": {
+    "MIKVET500": {
+      "price": 19.9,
+      "slug": "aceite-temprano-sin-filtrar",
+      "unchanged": true
+    },
+    "other_skus": [
+      "MIKVE5LP",
+      "MIKPARA450",
+      "MIKPACKF",
+      "MIKPACKTP"
+    ],
+    "previous_harvest_master": "MIKVET5002526 stays hidden; existing seed untouched",
+    "historical_gift_skus_unchanged": [
+      "MIKVET500R",
+      "MIKBIO19R",
+      "MIKPARA450R"
+    ]
+  },
+  "prohibited": [
+    "external_API_calls",
+    "ERP_writes",
+    "production_DB",
+    "Stripe_calls",
+    "Stripe_Product_ID_or_session_parameter_changes",
+    "tariff_changes",
+    "push",
+    "deploy",
+    "commit",
+    "stock_modifications",
+    "stock_sync",
+    "stock_count_exports",
+    "automatic_activation",
+    "cron",
+    "VIP_CAPTCHA_newsletter_minimum_changes"
+  ],
+  "retirement": {
+    "date": "2026-11-30",
+    "mode": "manual_only",
+    "automation": false,
+    "note": "Retirada anotada; no cron ni activación por fecha."
+  },
+  "legacy_barriers": {
+    "full_price_only_skus": [
+      "MIKVET500",
+      "MIKVE5LP",
+      "MIKPARA450"
+    ],
+    "protected_component_pack_skus": [
+      "MIKPACKF",
+      "MIKPACKTP"
+    ],
+    "fiscal_expansion_pack_skus": [
+      "MIKPACKF",
+      "MIKPACKYPO"
+    ],
+    "mixed_cart_gate": "Unchanged: protected unit mixed with unrelated item is rejected; only the exact MIKVET500+MIKVET5002526 harvest exception remains. BF26 packs do not remove this gate."
+  },
+  "readiness": {
+    "local_code": "complete",
+    "production_db_changes": false,
+    "schema_migration_executed": false,
+    "erp_masters_confirmed": false,
+    "activation": false,
+    "frontend": "separate worktree; consume inPromotion and this contract"
+  }
+}

@@ -7,6 +7,7 @@ from datetime import datetime
 from src.models.user import db
 from src.services.protected_catalogue import is_full_price_only, protect_public_properties
 from src.services.scheduled_pack_pricing import active_catalogue_price, serialize_tiered_pricing
+from src.services.campaign_packs import protect_campaign_pack_public_properties
 
 
 class WebProduct(db.Model):
@@ -84,6 +85,7 @@ class WebProduct(db.Model):
     storefront_notice = db.Column(db.Text)
     active = db.Column(db.Boolean, default=True, nullable=False)  # Se puede vender y resolver en checkout/addons
     visible_in_store = db.Column(db.Boolean, default=True, nullable=False)  # Aparece en el catálogo público
+    in_promotion = db.Column(db.Boolean, default=False, server_default=db.false(), nullable=False)
     
     # Costes logísticos (para cálculo de margen en panel admin)
     shipping_cost = db.Column(db.Float, default=0.0)  # Coste de portes por unidad
@@ -116,6 +118,7 @@ class WebProduct(db.Model):
             'name': name,
             'slug': self.slug,
             'sku': self.sku,
+            'inPromotion': bool(self.in_promotion),
             'description': description,
             'longDescription': long_description,
             # A dated reservation price is resolved here, at request time, so
@@ -189,7 +192,7 @@ class WebProduct(db.Model):
         if self.subscription_terms:
             result['subscriptionTerms'] = self.subscription_terms
         
-        return protect_public_properties(self, result)
+        return protect_campaign_pack_public_properties(self, protect_public_properties(self, result))
     
     def to_admin_dict(self):
         """Devuelve el producto con todos los campos para el panel admin."""

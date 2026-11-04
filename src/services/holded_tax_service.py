@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from typing import Any, Iterable, Mapping
 from src.services.product_identity import harvest_product_name
+from src.services.campaign_packs import campaign_pack_for
 
 
 TAX_RATE_BY_ID = {
@@ -80,9 +81,12 @@ def _product_label(product: dict[str, Any]) -> str:
 
 def _decimal(value: Any, label: str) -> Decimal:
     try:
-        return Decimal(str(value).replace(",", "."))
+        amount = Decimal(str(value).replace(",", "."))
     except Exception as exc:
         raise FiscalValidationError(f"{label} no es válido.") from exc
+    if not amount.is_finite():
+        raise FiscalValidationError(f"{label} no es válido.")
+    return amount
 
 
 def _extract_tax_ids(raw_taxes: Any) -> list[str]:
@@ -196,10 +200,31 @@ def _fiscal_pack_components(product: dict[str, Any], index: HoldedMasterIndex) -
     return fiscal_components
 
 
+def validate_campaign_pack_recipe(product: dict[str, Any], index: HoldedMasterIndex) -> None:
+    """Fail closed on exact BF26 recipes, without stock or fiscal expansion."""
+    pack = campaign_pack_for(str(product.get('sku') or '').strip())
+    if pack is None:
+        return
+    if product.get('kind') != 'pack':
+        raise FiscalValidationError(f'El maestro {pack.sku} debe tener kind=pack en Holded.')
+    raw_components = product.get('pack_items') or product.get('packItems') or []
+    if not isinstance(raw_components, list) or len(raw_components) != 1:
+        raise FiscalValidationError(f'El pack {pack.sku} debe tener un único componente en su escandallo.')
+    if not isinstance(raw_components[0], dict):
+        raise FiscalValidationError(f'El escandallo de {pack.sku} no es válido.')
+    component = _pack_components(product, index)[0]
+    component_sku = str(component.product.get('sku') or '').strip()
+    if component_sku != pack.component_sku or index.by_sku.get(component_sku) is not component.product:
+        raise FiscalValidationError(f'El pack {pack.sku} exige el componente exacto {pack.component_sku}.')
+    if not component.units.is_finite() or component.units != Decimal(pack.component_units):
+        raise FiscalValidationError(f'El pack {pack.sku} exige exactamente {pack.component_units} unidades de {pack.component_sku}.')
+
+
 def resolve_tax_profile(product: dict[str, Any], index: HoldedMasterIndex, visited: tuple[str, ...] = ()) -> TaxProfile:
     """Resolve one product tax profile, expanding only the approved mixed packs."""
     sku = str(product.get("sku") or "").strip()
     label = _product_label(product)
+    validate_campaign_pack_recipe(product, index)
 
     if sku in RETIRED_PACK_SKUS:
         raise FiscalValidationError(f"{sku} está retirado y bloqueado para emisión de documentos.")
@@ -357,6 +382,8 @@ def prepare_simple_document_item(order_item: dict[str, Any], index: HoldedMaster
     profile = resolve_tax_profile(product, index)
     price_with_iva = _as_positive_decimal(order_item.get("price"), "precio", sku)
     units = _as_positive_decimal(order_item.get("quantity", 1), "cantidad", sku)
+    if campaign_pack_for(sku) is not None and units != units.to_integral_value():
+        raise FiscalValidationError(f'La cantidad del pack {sku} debe ser un número entero.')
     unit_base = (price_with_iva / (Decimal("1") + profile.iva_rate)).quantize(
         Decimal("0.000001"), rounding=ROUND_HALF_UP
     )

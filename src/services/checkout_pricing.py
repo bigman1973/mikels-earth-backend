@@ -19,6 +19,7 @@ from src.services.scheduled_pack_pricing import (
     resolve_fixed_pack_price,
 )
 from src.services.protected_catalogue import is_promotion_protected
+from src.services.campaign_packs import campaign_pack_for
 
 HUNDRED = Decimal("100")
 
@@ -72,7 +73,7 @@ def volume_discount_percent(product: Any, quantity: int) -> Decimal:
     if normalized_quantity < 1:
         raise ValueError("La cantidad debe ser un entero positivo.")
 
-    if is_promotion_protected(product):
+    if is_promotion_protected(product) or campaign_pack_for(product) is not None:
         return Decimal("0")
 
     tiers = getattr(product, "tiered_discount", None)
@@ -156,12 +157,19 @@ def calculate_checkout_line_price(product: Any, quantity: int) -> CheckoutLinePr
     if normalized_quantity < 1:
         raise ValueError("La cantidad debe ser un entero positivo.")
 
+    complete_pack = campaign_pack_for(product) is not None
+    if complete_pack:
+        raw_quantity = _decimal(quantity, field='cantidad de packs')
+        if raw_quantity != normalized_quantity:
+            raise ValueError('La cantidad de packs debe ser un entero positivo.')
     base_unit_price = as_eur(getattr(product, "price", None), field="precio maestro")
     base_line_total = (base_unit_price * normalized_quantity).quantize(CENT, rounding=ROUND_HALF_UP)
     # The three unit SKUs and known legacy component packs are excluded from
     # all persisted tiers, bundles and volume rules. Distinct fixed-price pack
     # SKUs do not inherit this exclusion from their internal components.
-    if is_promotion_protected(product):
+    # Own pack SKUs also use the persisted complete-container price, regardless
+    # of stale bottle tiers. quantity=2 means two packs, not two bottles.
+    if is_promotion_protected(product) or complete_pack:
         return CheckoutLinePrice(
             base_unit_price=base_unit_price,
             base_line_total=base_line_total,

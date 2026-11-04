@@ -27,6 +27,7 @@ from src.services.holded_service import (
     HOLDED_API_KEY
 )
 from src.models.user import db
+from src.services.campaign_packs import campaign_pack_for
 from src.services.holded_tax_service import (
     FiscalValidationError,
     build_holded_master_index,
@@ -125,7 +126,7 @@ def get_products():
         product_data = {
             'holded_id': p.get('id'),
             'id': web_match.get('id'),  # ID de web_products para el editor
-            'name': p.get('name', ''),
+            'name': campaign_pack_for(sku).name if campaign_pack_for(sku) else p.get('name', ''),
             'sku': sku,
             'barcode': p.get('barcode', ''),
             'holded_price': p.get('price', 0),
@@ -146,6 +147,7 @@ def get_products():
             'shipping_cost': web_match.get('shipping_cost', sku_costs.get('shipping_cost', 0)),
             'preparation_cost': web_match.get('preparation_cost', sku_costs.get('preparation_cost', 0)),
             'active': web_match.get('active', True),
+            'inPromotion': bool(web_match.get('in_promotion', False)),
             'visibleInStore': web_match.get('visible_in_store', True)
         }
         result.append(product_data)
@@ -180,6 +182,7 @@ def get_products():
                 'shipping_cost': wp.get('shipping_cost', 0),
                 'preparation_cost': wp.get('preparation_cost', 0),
                 'active': wp.get('active', True),
+                'inPromotion': bool(wp.get('in_promotion', False)),
                 'visibleInStore': wp.get('visible_in_store', True)
             }
             result.append(product_data)
@@ -699,6 +702,8 @@ def create_web_product():
     from src.models.web_product import WebProduct
     try:
         data = request.get_json()
+        if 'inPromotion' in data and not isinstance(data['inPromotion'], bool):
+            return jsonify({'error': 'inPromotion debe ser un booleano.'}), 400
         
         # Validaciones básicas
         if not data.get('name') or not data.get('slug') or not data.get('category'):
@@ -750,6 +755,7 @@ def create_web_product():
             storefront_notice=data.get('storefrontNotice'),
             active=data.get('active', True),
             visible_in_store=data.get('visibleInStore', True),
+            in_promotion=data.get('inPromotion', False),
             display_order=int(data.get('displayOrder', 0)),
             shipping_cost=float(data.get('shippingCost', 0)),
             preparation_cost=float(data.get('preparationCost', 0))
@@ -782,6 +788,8 @@ def update_web_product(product_id):
             return jsonify({'error': 'Producto no encontrado'}), 404
         
         data = request.get_json()
+        if 'inPromotion' in data and not isinstance(data['inPromotion'], bool):
+            return jsonify({'error': 'inPromotion debe ser un booleano.'}), 400
         
         # Actualizar solo los campos que vienen en el body
         if 'name' in data:
@@ -867,6 +875,8 @@ def update_web_product(product_id):
             product.active = data['active']
         if 'visibleInStore' in data:
             product.visible_in_store = data['visibleInStore']
+        if 'inPromotion' in data:
+            product.in_promotion = data['inPromotion']
         if 'displayOrder' in data:
             product.display_order = int(data['displayOrder'])
         if 'shippingCost' in data:
@@ -2718,13 +2728,14 @@ def _get_web_prices():
                 if p.sku:
                     result[p.sku] = {
                         'id': p.id,
-                        'name': p.name,
+                        'name': campaign_pack_for(p).name if campaign_pack_for(p) else p.name,
                         'price': p.price,
                         'sku': p.sku,
                         'category': p.category,
                         'stock': p.stock,
                         'active': p.active,
                         'visible_in_store': p.visible_in_store,
+                        'in_promotion': bool(p.in_promotion),
                         'shipping_cost': p.shipping_cost or 0,
                         'preparation_cost': p.preparation_cost or 0
                     }

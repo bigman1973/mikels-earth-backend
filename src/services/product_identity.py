@@ -1,10 +1,11 @@
-"""Presentation identity for the two independently stocked Temprano harvests.
+"""Presentation identity for independently stocked Temprano harvests/BF26 packs.
 
 This never aliases SKUs or modifies catalogue, stock, prices or fiscal rules.
 """
 from __future__ import annotations
 
 from src.services.previous_harvest_draft import DRAFT_TITLE, PROPOSED_SKU
+from src.services.campaign_packs import campaign_pack_for
 
 
 TEMPRANO_NAMES_BY_SKU = {
@@ -14,13 +15,16 @@ TEMPRANO_NAMES_BY_SKU = {
 
 
 def harvest_product_name(sku: str, name: str) -> str:
-    """Return the approved exact harvest title for either confirmed SKU.
+    """Return the approved exact title for confirmed harvest/pack SKUs.
 
-    Older web/Holded master names can omit or misstate the harvest. These two
-    approved names are presentation-only rules, not a product or stock alias.
+    Older web/Holded master names can omit or misstate the harvest. Approved
+    names are presentation-only rules, never a product or stock alias.
     All other SKUs keep their trusted catalogue/order names unchanged. Checkout
     captures the result on its immutable line snapshot for later order/emails.
     """
+    pack = campaign_pack_for(sku)
+    if pack is not None:
+        return pack.name
     return TEMPRANO_NAMES_BY_SKU.get(
         str(sku or '').strip(), str(name or '').strip() or 'Producto',
     )

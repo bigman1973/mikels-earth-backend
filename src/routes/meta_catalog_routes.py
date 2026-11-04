@@ -16,6 +16,7 @@ from flask import Blueprint, Response, abort, send_file
 from PIL import Image
 
 from src.models.web_product import WebProduct
+from src.services.campaign_packs import campaign_pack_for
 
 meta_catalog_bp = Blueprint("meta_catalog", __name__)
 
@@ -79,7 +80,7 @@ def get_meta_catalog_feed():
             continue
         rows.append({
             "id": sku,
-            "title": str(product.name or sku),
+            "title": campaign_pack_for(sku).name if campaign_pack_for(sku) else str(product.name or sku),
             "description": _description(product),
             "availability": _availability(product),
             "condition": "new",

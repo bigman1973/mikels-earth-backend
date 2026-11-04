@@ -124,16 +124,18 @@ class HiddenAddonCatalogTests(unittest.TestCase):
             self.assertEqual(addon['product']['price'], 5.0)
             self.assertNotIn('variantId', addon)
 
-    def test_hidden_boxes_and_legacy_generic_have_no_public_product_page(self):
+    def test_active_hidden_boxes_allow_direct_detail_but_are_not_listed(self):
+        listed = {p['slug'] for p in self.client.get('/api/products').get_json()['products']}
         for slug in [
-            'estuche-regalo',
             'estuche-regalo-temprano',
             'estuche-regalo-ecologico',
             'estuche-regalo-virgen-extra',
         ]:
             with self.subTest(slug=slug):
                 response = self.client.get(f'/api/products/{slug}')
-                self.assertEqual(response.status_code, 404)
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn(slug, listed)
+        self.assertEqual(self.client.get('/api/products/estuche-regalo').status_code, 404)
 
     def test_inactive_box_is_omitted_only_from_its_oil(self):
         with self.app.app_context():
@@ -141,6 +143,7 @@ class HiddenAddonCatalogTests(unittest.TestCase):
             gift_box.active = False
             db.session.commit()
 
+        self.assertEqual(self.client.get('/api/products/estuche-regalo-temprano').status_code, 404)
         products = {
             product['slug']: product
             for product in self.client.get('/api/products').get_json()['products']

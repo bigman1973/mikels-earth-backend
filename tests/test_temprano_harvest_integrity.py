@@ -92,8 +92,8 @@ class TempranoHarvestIntegrityTests(unittest.TestCase):
 
     def items(self, old_quantity=6):
         return [
-            {'id': self.old_id, 'slug': PROPOSED_SLUG, 'sku': 'MIKVET500', 'name': 'Browser says CURRENT 2026/27', 'quantity': old_quantity, 'price': 9.95},
-            {'id': self.current_id, 'slug': 'aceite-temprano-sin-filtrar', 'sku': PROPOSED_SKU, 'name': 'Browser says OLD 2025/26', 'quantity': 2, 'price': 19.90},
+            {'id': self.old_id, 'slug': PROPOSED_SLUG, 'sku': PROPOSED_SKU, 'name': 'Browser says CURRENT 2026/27', 'quantity': old_quantity, 'price': 9.95},
+            {'id': self.current_id, 'slug': 'aceite-temprano-sin-filtrar', 'sku': 'MIKVET500', 'name': 'Browser says OLD 2025/26', 'quantity': 2, 'price': 19.90},
         ]
 
     def checkout(self, items=None, **extra):
@@ -130,6 +130,16 @@ class TempranoHarvestIntegrityTests(unittest.TestCase):
             self.assertFalse(old.visible_in_store)
             self.assertEqual((old.sku, old.slug, old.stock), (PROPOSED_SKU, PROPOSED_SLUG, 1200))
             self.assertEqual(db.session.get(WebProduct, self.current_id).stock, 44)
+
+    def test_conflicting_harvest_identifiers_fail_before_external_checkout(self):
+        self.activate_fixture()
+        items = self.items()
+        items[0]['sku'] = 'MIKVET500'
+        response = self.checkout(items)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['error'], 'PRODUCT_IDENTITY_MISMATCH')
+        self.create_session.assert_not_called()
+        self.holded.assert_not_called()
 
     def test_exact_harvest_exception_does_not_expand_other_mixed_policy(self):
         for skus in (['MIKVET500', PROPOSED_SKU], [PROPOSED_SKU, 'MIKVET500', 'MIKVET500']):
