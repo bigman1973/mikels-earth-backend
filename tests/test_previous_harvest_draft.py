@@ -33,7 +33,7 @@ class PreviousHarvestDraftSeedTests(unittest.TestCase):
             db.session.remove()
             db.drop_all()
 
-    def test_seed_creates_the_exact_non_public_case_of_twelve_draft(self):
+    def test_seed_creates_non_public_six_and_twelve_bottle_formats(self):
         with self.app.app_context():
             product, action, used_fallback = seed_previous_harvest_draft()
             db.session.commit()
@@ -43,7 +43,7 @@ class PreviousHarvestDraftSeedTests(unittest.TestCase):
             self.assertEqual(product.name, DRAFT_TITLE)
             self.assertEqual(product.slug, PROPOSED_SLUG)
             self.assertEqual(product.sku, PROPOSED_SKU)
-            self.assertEqual(product.price, 119.40)
+            self.assertEqual(product.price, 59.70)
             self.assertIsNone(product.original_price)
             self.assertEqual(product.stock, 1200)
             self.assertFalse(product.active)
@@ -62,6 +62,10 @@ class PreviousHarvestDraftSeedTests(unittest.TestCase):
             self.assertEqual(product.claims, [])
             self.assertIsNone(product.volume_discount)
             self.assertEqual(product.tiered_discount, [{
+                'actualQuantity': 6,
+                'label': 'Pack de 6 botellas de 500 ml',
+                'price': 59.70,
+            }, {
                 'actualQuantity': 12,
                 'label': 'Caja de 12 botellas de 500 ml',
                 'price': 119.40,
@@ -69,6 +73,7 @@ class PreviousHarvestDraftSeedTests(unittest.TestCase):
             self.assertIn(LOT, product.description)
             self.assertIn(AWARD, product.description)
             self.assertIn('119,40 EUR', product.description)
+            self.assertIn('59,70 EUR', product.description)
             self.assertIn('9,95 EUR', product.description)
             self.assertIn(LOT, product.description_en)
             for prohibited in ('82779', '569', 'polifenoles', 'biofenoles', 'escasez', 'stock'):
@@ -80,6 +85,21 @@ class PreviousHarvestDraftSeedTests(unittest.TestCase):
             self.assertNotIn('stock', public_payload)
             self.assertNotIn('reservationStockTotal', public_payload)
             self.assertEqual(public_payload['storefrontNotice'], STOREFRONT_NOTICE)
+
+    def test_closed_formats_price_exactly_and_never_sell_single_bottles(self):
+        from decimal import Decimal
+        from src.services.checkout_pricing import calculate_checkout_line_price
+
+        with self.app.app_context():
+            product, _, _ = seed_previous_harvest_draft()
+            for quantity, total in [(6, Decimal('59.70')), (12, Decimal('119.40'))]:
+                line = calculate_checkout_line_price(product, quantity)
+                self.assertEqual(line.expected_line_total, total)
+                self.assertEqual(line.base_unit_price, Decimal('9.9500'))
+                self.assertTrue(line.fixed_pack)
+            for quantity in (1, 3, 7):
+                with self.assertRaises(ValueError):
+                    calculate_checkout_line_price(product, quantity)
 
     def test_seed_is_idempotent_and_does_not_mutate_the_current_harvest(self):
         with self.app.app_context():

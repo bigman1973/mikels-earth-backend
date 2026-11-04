@@ -21,30 +21,30 @@ DRAFT_VALUES = {
     'name': DRAFT_TITLE,
     'description': (
         'Aceite de oliva virgen extra temprano sin filtrar de la cosecha 2025/26. '
-        'Formato exclusivo de caja de 12 botellas de 500 ml. '
-        'Precio de la caja: 119,40 EUR; 9,95 EUR por botella. '
+        'Disponible en pack de 6 y caja de 12 botellas de 500 ml, sin botella suelta. '
+        'Pack de 6: 59,70 EUR; caja de 12: 119,40 EUR; 9,95 EUR por botella. '
         f'Lote {LOT}. Reconocido con {AWARD}.'
     ),
     'long_description': (
         'Aceite de oliva virgen extra temprano sin filtrar de la cosecha 2025/26.\n\n'
-        'Se presenta exclusivamente en una caja de 12 botellas de 500 ml. '
-        'Precio de la caja: 119,40 EUR; 9,95 EUR por botella. '
+        'Se presenta en pack de 6 o caja de 12 botellas de 500 ml, sin botella suelta. '
+        'Pack de 6: 59,70 EUR; caja de 12: 119,40 EUR; 9,95 EUR por botella. '
         f'Lote {LOT}. Reconocido con {AWARD}.'
     ),
     'name_en': 'Unfiltered Early Harvest Extra Virgin Olive Oil · 2025/26 Harvest',
     'description_en': (
         'Unfiltered early harvest extra virgin olive oil from the 2025/26 harvest. '
-        'Available exclusively as a case of 12 500 ml bottles. '
-        'Case price: EUR 119.40; EUR 9.95 per bottle. '
+        'Available as a pack of 6 or a case of 12 500 ml bottles, not as single bottles. '
+        'Pack of 6: EUR 59.70; case of 12: EUR 119.40; EUR 9.95 per bottle. '
         f'Lot {LOT}. Awarded {AWARD}.'
     ),
     'long_description_en': (
         'Unfiltered early harvest extra virgin olive oil from the 2025/26 harvest.\n\n'
-        'Available exclusively as a case of 12 500 ml bottles. '
-        'Case price: EUR 119.40; EUR 9.95 per bottle. '
+        'Available as a pack of 6 or a case of 12 500 ml bottles, not as single bottles. '
+        'Pack of 6: EUR 59.70; case of 12: EUR 119.40; EUR 9.95 per bottle. '
         f'Lot {LOT}. Awarded {AWARD}.'
     ),
-    'price': 119.40,
+    'price': 59.70,
     'original_price': None,
     'currency': 'EUR',
     # No image is assigned: the current Temprano photo has not been verified as
@@ -70,6 +70,11 @@ DRAFT_VALUES = {
     'subscription_terms': None,
     'volume_discount': None,
     'tiered_discount': [
+        {
+            'actualQuantity': 6,
+            'label': 'Pack de 6 botellas de 500 ml',
+            'price': 59.70,
+        },
         {
             'actualQuantity': 12,
             'label': 'Caja de 12 botellas de 500 ml',

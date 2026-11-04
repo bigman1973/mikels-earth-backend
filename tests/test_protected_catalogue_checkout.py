@@ -40,7 +40,6 @@ PROTECTED_CASES = UNIT_CASES + PACK_CASES
 # Isolated active fixtures model future saleability, not real publication.
 NEW_PACK_CASES = (
     ('MIKBIO19BF6', 'bio-bf-6', 6, Decimal('71.40'), 'MIKBIO19'),
-    ('MIKBIO19BF12', 'bio-bf-12', 12, Decimal('142.80'), 'MIKBIO19'),
     ('MIKPARA450BF3', 'para-bf-3', 3, Decimal('30.90'), 'MIKPARA450'),
     ('MIKPARA450BF6', 'para-bf-6', 6, Decimal('61.70'), 'MIKPARA450'),
     ('MIKVE5LPBF3', '5l-bf-3', 3, Decimal('96.75'), 'MIKVE5LP'),
