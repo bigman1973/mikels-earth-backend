@@ -43,7 +43,7 @@ from src.services.order_tax_snapshot import build_tax_rule_snapshot
 from src.services.product_identity import harvest_product_name
 from src.services.protected_catalogue import (
     FULL_PRICE_ONLY_SKUS, PROTECTED_COMPONENT_PACK_SKUS,
-    is_mixed_with_full_price_only_product, is_promotion_protected,
+    is_promotion_protected,
 )
 from src.services.klaviyo_service import klaviyo_notify_new_order, klaviyo_send_order_confirmation
 
@@ -110,13 +110,14 @@ class BF26DefinitionsTests(unittest.TestCase):
         self.assertFalse(column.default.arg)
         self.assertIsNotNone(column.server_default)
 
-    def test_legacy_barriers_remain_exact(self):
+    def test_discount_protections_remain_exact_without_mixed_cart_gate(self):
         self.assertEqual(FULL_PRICE_ONLY_SKUS, {'MIKVET500', 'MIKVE5LP', 'MIKPARA450'})
         self.assertEqual(PROTECTED_COMPONENT_PACK_SKUS, {'MIKPACKF', 'MIKPACKTP'})
         self.assertEqual(FISCAL_EXPANSION_PACK_SKUS, {'MIKPACKF', 'MIKPACKYPO'})
-        self.assertTrue(is_mixed_with_full_price_only_product(['MIKVET500', 'BF26-TEMP6']))
-        self.assertTrue(is_mixed_with_full_price_only_product(['MIKVE5LP', 'BF26-5L3']))
-        self.assertFalse(is_mixed_with_full_price_only_product(['MIKVET500', 'MIKVET5002526']))
+        self.assertTrue(is_promotion_protected('MIKVET500'))
+        self.assertTrue(is_promotion_protected('MIKVE5LP'))
+        self.assertTrue(is_promotion_protected('MIKPARA450'))
+        self.assertFalse(is_promotion_protected('MIKVET5002526'))
         self.assertFalse(any(is_promotion_protected(p.sku) for p in CAMPAIGN_PACKS))
 
 
@@ -150,6 +151,8 @@ class BF26LocalCheckoutTests(unittest.TestCase):
                 WebProduct(name='Normal', sku='NORMAL-LOCAL', slug='normal-local', price=10, category='Packs', stock=1000, active=True, visible_in_store=True),
                 WebProduct(name='Generic promo, not BF26', sku='ANY-PROMO', slug='any-promo', price=7, category='Packs', stock=1000, active=True, visible_in_store=False, in_promotion=True),
                 WebProduct(name='Current protected', sku='MIKVET500', slug='aceite-temprano-sin-filtrar', price=19.90, category='Aceites', stock=1000, active=True, visible_in_store=True),
+                WebProduct(name='Garrafa fixture', sku='MIKVE5LP', slug='garrafa-local', price=43.00, category='Aceites', stock=1000, active=True, visible_in_store=True),
+                WebProduct(name='Paraguayo fixture', sku='MIKPARA450', slug='paraguayo-local', price=17.15, category='Frutas', stock=1000, active=True, visible_in_store=True),
                 WebProduct(name='Old component remains inactive', sku='MIKVET5002526', slug='aceite-temprano-sin-filtrar-cosecha-2025-26', price=119.40, category='Aceites', stock=0, active=False, visible_in_store=False),
                 Coupon(code='LOCAL10', discount_type='percentage', discount_value=10, active=True),
                 Coupon(code='LOCAL5', discount_type='fixed', discount_value=5, active=True),
@@ -344,11 +347,133 @@ class BF26LocalCheckoutTests(unittest.TestCase):
         self.assertEqual(response.get_json()['error'], 'PRODUCT_IDENTITY_MISMATCH')
         self.assert_no_external_checkout()
 
-    def test_legacy_current_unit_mixed_with_bf26_still_blocked(self):
+    def test_current_unit_mixed_with_each_bf26_sells_at_both_master_prices(self):
         self.activate_fixture()
-        response = self.checkout([self.item('MIKVET500'), self.item('BF26-TEMP6')])
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.get_json()['error'], 'PRODUCT_UNAVAILABLE')
+        for pack in CAMPAIGN_PACKS:
+            for reverse in (False, True):
+                with self.subTest(pack=pack.sku, reverse=reverse):
+                    items = [self.item('MIKVET500'), self.item(pack.sku)]
+                    response = self.checkout(items[::-1] if reverse else items)
+                    self.assertEqual(response.status_code, 200, response.get_json())
+                    params = self.session.call_args.kwargs
+                    lines = {line['price_data']['product_data']['metadata']['sku']: line for line in params['line_items']}
+                    self.assertEqual(lines['MIKVET500']['price_data']['unit_amount'], 1990)
+                    self.assertEqual(lines[pack.sku]['price_data']['unit_amount'], int(pack.price * 100))
+                    self.assertEqual(params['metadata']['total'], str(pack.price + Decimal('19.90')))
+                    self.assertEqual(params['metadata']['discount_amount'], '0.00')
+                    self.assertNotIn('discounts', params)
+                    self.assertFalse(params.get('allow_promotion_codes', False))
+        self.stripe_coupon.assert_not_called()
+
+    def complete_local_payment(self, session_id, params):
+        """Synthetic Stripe event + real local webhook; NEVER a provider payment."""
+        self.mock('src.routes.stripe_routes.dispatch_order_confirmation', return_value=(True, None))
+        self.mock('src.routes.stripe_routes.dispatch_order_notification', return_value=(True, None))
+        self.mock('src.routes.stripe_routes.dispatch_order_delivery_alert')
+        self.mock('src.services.email_dispatcher.dispatch_post_purchase_event')
+        self.mock('src.services.meta_conversions_api.dispatch_meta_purchase_event', return_value={'sent': False, 'reason': 'fixture'})
+        lines = []
+        for line in params['line_items']:
+            price = line['price_data']
+            lines.append(SimpleNamespace(
+                amount_total=price['unit_amount'] * line['quantity'],
+                quantity=line['quantity'], description=price['product_data']['name'],
+                price=SimpleNamespace(product=SimpleNamespace(metadata=price['product_data']['metadata'])),
+            ))
+        event = {'type': 'checkout.session.completed', 'data': {'object': {
+            'id': session_id, 'mode': 'payment', 'payment_status': 'paid',
+            'amount_total': sum(line.amount_total for line in lines),
+            'payment_intent': 'pi_' + session_id, 'customer_email': CUSTOMER['email'],
+            'customer_details': {'email': CUSTOMER['email']}, 'metadata': params['metadata'],
+        }}}
+        with patch('src.routes.stripe_routes.stripe.Webhook.construct_event', return_value=event), patch('src.routes.stripe_routes.stripe.checkout.Session.list_line_items', return_value=SimpleNamespace(data=lines)):
+            response = self.client.post('/api/stripe/webhook', data=b'{}', headers={'Stripe-Signature': 'fixture'})
+            self.assertEqual(response.status_code, 200, response.get_json())
+            retry = self.client.post('/api/stripe/webhook', data=b'{}', headers={'Stripe-Signature': 'fixture'})
+            self.assertTrue(retry.get_json()['duplicate'])
+
+    def assert_paid_local_cart(self, skus):
+        with self.app.app_context():
+            before = {p.sku: p.stock for p in WebProduct.query.filter(WebProduct.sku.in_(skus)).all()}
+            orders_before = Order.query.count()
+        response = self.checkout([self.item(sku) for sku in skus])
+        self.assertEqual(response.status_code, 200, response.get_json())
+        params = self.session.call_args.kwargs
+        self.assertEqual(params['metadata']['discount_amount'], '0.00')
+        self.assertEqual(params['metadata']['volume_discount_amount'], '0.00')
+        self.assertNotIn('discounts', params)
+        self.assertFalse(params.get('allow_promotion_codes', False))
+        self.assertEqual(params['metadata']['subtotal'], params['metadata']['total'])
+        self.assertEqual(len(params['line_items']), len(skus))
+        session_id = 'cs_local_bf26_' + str(self.session.call_count)
+        self.complete_local_payment(session_id, params)
+        with self.app.app_context():
+            order = Order.query.filter_by(stripe_checkout_session_id=session_id).one()
+            self.assertEqual(order.payment_status, 'paid')
+            self.assertEqual(Decimal(str(order.total)), Decimal(params['metadata']['total']))
+            self.assertEqual(Decimal(str(order.discount_amount or 0)), Decimal('0'))
+            self.assertEqual({item['sku'] for item in order.items}, set(skus))
+            self.assertEqual(Order.query.count(), orders_before + 1)
+            for sku in skus:
+                product = WebProduct.query.filter_by(sku=sku).one()
+                self.assertEqual(product.stock, before[sku] - 1)
+            if 'BF26-TEMP6' in skus or 'BF26-TEMP12' in skus:
+                self.assertIn('2025/26', str(order.receipt_snapshot['lines']))
+            if 'MIKVET500' in skus:
+                self.assertIn('2026/27', str(order.receipt_snapshot['lines']))
+            prepared = prepare_document_items(order.items, self.masters)
+            self.assertEqual({line['sku'] for line in prepared}, set(skus))
+            self.assertTrue(all(line['units'] == 1 for line in prepared))
+        self.stripe_coupon.assert_not_called()
+
+    def test_each_bf26_plus_current_unit_completes_local_paid_order_at_full_price(self):
+        self.activate_fixture()
+        for pack in CAMPAIGN_PACKS:
+            with self.subTest(pack=pack.sku):
+                self.assert_paid_local_cart([pack.sku, 'MIKVET500'])
+
+    def test_each_bf26_plus_garrafa_or_paraguayo_completes_local_paid_order(self):
+        self.activate_fixture()
+        for pack in CAMPAIGN_PACKS:
+            for sku in ('MIKVE5LP', 'MIKPARA450'):
+                with self.subTest(pack=pack.sku, unit=sku):
+                    self.assert_paid_local_cart([pack.sku, sku])
+
+    def test_current_volume_threshold_never_reduces_master_price(self):
+        with self.app.app_context():
+            current = WebProduct.query.filter_by(sku='MIKVET500').one()
+            current.volume_discount = {'minQuantity': 6, 'discount': 50}
+            current.tiered_discount = [{'minQuantity': 6, 'discount': 50}]
+            db.session.commit()
+        for quantity in (6, 12):
+            response = self.checkout([self.item('MIKVET500', quantity)])
+            self.assertEqual(response.status_code, 200, response.get_json())
+            params = self.session.call_args.kwargs
+            self.assertEqual(params['line_items'][0]['price_data']['unit_amount'], 1990)
+            self.assertEqual(params['metadata']['total'], str(Decimal('19.90') * quantity))
+            self.assertEqual(params['metadata']['volume_discount_amount'], '0.00')
+            self.assertNotIn('discounts', params)
+            self.assertFalse(params.get('allow_promotion_codes', False))
+        self.stripe_coupon.assert_not_called()
+
+    def test_current_plus_unprotected_quantity_discount_cannot_discount_current(self):
+        with self.app.app_context():
+            normal = WebProduct.query.filter_by(sku='NORMAL-LOCAL').one()
+            normal.tiered_discount = [{'minQuantity': 3, 'discount': 10}]
+            db.session.commit()
+        response = self.checkout([self.item('MIKVET500'), self.item('NORMAL-LOCAL', 3, price=9)])
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json()['error'], 'PROMOTION_NOT_AVAILABLE')
+        self.assert_no_external_checkout()
+
+    def test_current_unit_mixed_with_any_bf26_coupon_keeps_exact_cart_message(self):
+        self.activate_fixture()
+        for pack in CAMPAIGN_PACKS:
+            for reverse in (False, True):
+                items = [self.item('MIKVET500'), self.item(pack.sku), self.item('NORMAL-LOCAL')]
+                response = self.checkout(items[::-1] if reverse else items, discount_code='LOCAL10')
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.get_json()['message'], PROMOTION_COUPON_MESSAGE)
         self.assert_no_external_checkout()
 
     def test_invalid_erp_recipe_blocks_stripe_and_stock_reservation(self):

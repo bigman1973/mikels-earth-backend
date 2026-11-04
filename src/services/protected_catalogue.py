@@ -1,8 +1,8 @@
 """Catalogue protections for the three current full-price-only unit SKUs.
 
 MIKVET500 (Temprano 2026/27), MIKVE5LP (single 5 L bottle) and MIKPARA450
-(720 g jar) never receive promotions, subscriptions, add-ons or mixed sales.
-The two exact Temprano harvest SKUs may share an ordinary, non-promotional cart.
+(720 g jar) never receive promotions, subscriptions or discounted add-ons.
+All independently sold SKUs may share a cart without a checkout-wide discount.
 Known legacy component packs remain normally sellable at their master price.
 These are exact SKU rules: separately identified fixed-price containers, including
 Black Friday draft packs, do not inherit exclusions from their internal units.
@@ -55,24 +55,6 @@ def contains_full_price_only_product(products: Iterable[Any]) -> bool:
 
 def contains_promotion_protected_product(products: Iterable[Any]) -> bool:
     return any(is_promotion_protected(product) for product in products)
-
-
-def is_mixed_with_full_price_only_product(products: Iterable[Any]) -> bool:
-    """Retain the existing protected-unit/nonprotected-item mixed-cart gate.
-
-    The sole exception is an ordinary cart containing only the independently
-    stocked 2025/26 and 2026/27 Temprano SKUs. Checkout still rejects any coupon
-    or checkout-wide volume discount on a cart containing the protected harvest.
-    Normal combinations of protected units do not introduce promotions. Internal
-    quantities of distinct fixed-price containers are not standalone cart lines.
-    """
-    product_list = list(products)
-    if {sku_of(product) for product in product_list} == {'MIKVET500', 'MIKVET5002526'}:
-        return False
-    return (
-        contains_full_price_only_product(product_list)
-        and any(not is_full_price_only(product) for product in product_list)
-    )
 
 
 def protect_public_properties(product: Any, data: dict[str, Any]) -> dict[str, Any]:

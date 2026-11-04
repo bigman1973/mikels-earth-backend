@@ -23,7 +23,7 @@ from src.services.holded_tax_service import FiscalValidationError, prepare_docum
 from src.services.klaviyo_service import klaviyo_notify_new_order, klaviyo_send_order_confirmation
 from src.services.previous_harvest_draft import DRAFT_TITLE, PROPOSED_SKU, PROPOSED_SLUG, seed_previous_harvest_draft
 from src.services.product_identity import harvest_product_name
-from src.services.protected_catalogue import is_mixed_with_full_price_only_product
+from src.services.protected_catalogue import is_promotion_protected
 from src.services.stock_service import StockUnavailableError, available_stock_by_product_ids, reserve_checkout_stock, restock_fully_refunded_order
 
 CURRENT_TITLE = 'Aceite de oliva virgen extra Temprano 2026/27 sin filtrar'
@@ -141,11 +141,11 @@ class TempranoHarvestIntegrityTests(unittest.TestCase):
         self.create_session.assert_not_called()
         self.holded.assert_not_called()
 
-    def test_exact_harvest_exception_does_not_expand_other_mixed_policy(self):
-        for skus in (['MIKVET500', PROPOSED_SKU], [PROPOSED_SKU, 'MIKVET500', 'MIKVET500']):
-            self.assertFalse(is_mixed_with_full_price_only_product(skus))
-        for skus in (['MIKVET500', 'MIKOTHER'], ['MIKVE5LP', PROPOSED_SKU], ['MIKVET500', PROPOSED_SKU, 'MIKOTHER'], ['MIKVET500', 'MIKVET5002526D1']):
-            self.assertTrue(is_mixed_with_full_price_only_product(skus))
+    def test_harvest_identity_keeps_current_unit_discount_protected(self):
+        self.assertTrue(is_promotion_protected('MIKVET500'))
+        self.assertFalse(is_promotion_protected(PROPOSED_SKU))
+        for sku in ('MIKOTHER', 'MIKVET5002526D1'):
+            self.assertFalse(is_promotion_protected(sku))
 
     def test_both_pack_sizes_charge_per_line_without_global_discount(self):
         self.activate_fixture()

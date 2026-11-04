@@ -17,7 +17,6 @@ from src.services.cart_promotions import (
 )
 from src.services.protected_catalogue import (
     contains_promotion_protected_product,
-    is_mixed_with_full_price_only_product,
     is_promotion_protected,
 )
 from src.models.user import db
@@ -221,15 +220,9 @@ def create_checkout_session():
                     'message': 'Uno de los productos ya no está disponible. Actualiza tu carrito.',
                 }), 409
 
-        # Preserve the mixed-cart gate except for the two exact Temprano
-        # harvest SKUs. This ordinary cart has independent per-line prices;
-        # the promotion veto below still forbids indirect discounts/coupons.
-        if is_mixed_with_full_price_only_product(checkout_products):
-            return jsonify({
-                'error': 'PRODUCT_UNAVAILABLE',
-                'message': 'Uno de los productos ya no está disponible. Actualiza tu carrito.',
-            }), 409
-        
+        # Different full-price SKUs may share an ordinary cart. Only an actual
+        # coupon/quantity discount triggers the protected-product veto below.
+        # Availability, identity, master-price and fiscal checks stay intact.
         if price_errors:
             # Devolver error con los precios actualizados para que el frontend actualice el carrito
             return jsonify({

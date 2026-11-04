@@ -20,7 +20,6 @@ from src.services.protected_catalogue import (
     FULL_PRICE_ONLY_SKUS,
     PROTECTED_COMPONENT_PACK_SKUS,
     is_full_price_only,
-    is_mixed_with_full_price_only_product,
     is_promotion_protected,
 )
 
@@ -309,7 +308,7 @@ class ProtectedCatalogueCheckoutTests(unittest.TestCase):
                 self.assertNotIn('discounts', params)
         self.create_coupon.assert_not_called()
 
-    def test_existing_gate_rejects_protected_unit_with_nonprotected_cart_item(self):
+    def test_protected_unit_with_other_item_sells_at_full_price_without_discount(self):
         partners = [('producto-compatible', Decimal('10.00'))]
         partners += [(case[1], case[2]) for case in PACK_CASES]
         partners += [(case[1], case[3]) for case in NEW_PACK_CASES]
@@ -319,14 +318,35 @@ class ProtectedCatalogueCheckoutTests(unittest.TestCase):
                     with self.subTest(sku=sku, partner=partner_slug, reverse=reverse):
                         items = [self._item(slug, price), self._item(partner_slug, partner_price)]
                         response = self._checkout(items[::-1] if reverse else items)
-                        self.assertEqual(response.status_code, 409)
-                        self.assertEqual(response.get_json()['error'], 'PRODUCT_UNAVAILABLE')
+                        self.assertEqual(response.status_code, 200, response.get_json())
+                        params = self.create_session.call_args.kwargs
+                        self.assertEqual(params['metadata']['total'], format(price + partner_price, '.2f'))
+                        self.assertEqual(params['metadata']['discount_amount'], '0.00')
+                        self.assertNotIn('discounts', params)
+                        self.assertFalse(params.get('allow_promotion_codes', False))
+        self.create_coupon.assert_not_called()
+
+    def test_protected_mixed_cart_rejects_coupon_before_erp_or_stripe(self):
+        partners = [('producto-compatible', Decimal('10.00'))]
+        partners += [(case[1], case[2]) for case in PACK_CASES]
+        partners += [(case[1], case[3]) for case in NEW_PACK_CASES]
+        for sku, slug, price in UNIT_CASES:
+            for partner_slug, partner_price in partners:
+                for code in ('BLACKFRIDAY10', 'BLACKFRIDAY5', 'UNKNOWN'):
+                    with self.subTest(sku=sku, partner=partner_slug, code=code):
+                        items = [self._item(slug, price), self._item(partner_slug, partner_price)]
+                        response = self._checkout(items, discount_code=code)
+                        self.assertEqual(response.status_code, 422)
+                        self.assertEqual(response.get_json()['error'], 'PROMOTION_NOT_AVAILABLE')
         self.create_session.assert_not_called()
+        self.create_coupon.assert_not_called()
+        self.holded_products.assert_not_called()
+        with self.app.app_context():
+            self.assertEqual(StockReservation.query.count(), 0)
 
     def test_repeated_lines_of_same_protected_unit_are_not_a_mixed_pack(self):
         for sku, slug, price in UNIT_CASES:
             with self.subTest(sku=sku):
-                self.assertFalse(is_mixed_with_full_price_only_product([sku, sku]))
                 response = self._checkout([self._item(slug, price), self._item(slug, price, 2)])
                 self.assertEqual(response.status_code, 200, response.get_json())
                 self.assertEqual(self.create_session.call_args.kwargs['metadata']['total'], format(price * 3, '.2f'))
