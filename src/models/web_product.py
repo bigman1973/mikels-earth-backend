@@ -8,6 +8,7 @@ from src.models.user import db
 from src.services.protected_catalogue import is_full_price_only, protect_public_properties
 from src.services.scheduled_pack_pricing import active_catalogue_price, serialize_tiered_pricing
 from src.services.campaign_packs import protect_campaign_pack_public_properties
+from src.services.catalogue_position import catalogue_position
 
 
 class WebProduct(db.Model):
@@ -119,6 +120,7 @@ class WebProduct(db.Model):
             'slug': self.slug,
             'sku': self.sku,
             'inPromotion': bool(self.in_promotion),
+            'displayOrder': catalogue_position(self.display_order),
             'description': description,
             'longDescription': long_description,
             # A dated reservation price is resolved here, at request time, so
@@ -202,7 +204,7 @@ class WebProduct(db.Model):
         d['sku'] = self.sku
         d['active'] = self.active
         d['visibleInStore'] = self.visible_in_store
-        d['displayOrder'] = self.display_order
+        d['displayOrder'] = catalogue_position(self.display_order)
         d['shippingCost'] = self.shipping_cost or 0
         d['preparationCost'] = self.preparation_cost or 0
         if self.reservation_only or self.reservation_message or self.reservation_stock_total is not None:

@@ -28,6 +28,7 @@ from src.services.holded_service import (
 )
 from src.models.user import db
 from src.services.campaign_packs import campaign_pack_for
+from src.services.catalogue_position import catalogue_position, catalogue_order_by, validate_position_payload
 from src.services.holded_tax_service import (
     FiscalValidationError,
     build_holded_master_index,
@@ -150,6 +151,8 @@ def get_products():
             'inPromotion': bool(web_match.get('in_promotion', False)),
             'visibleInStore': web_match.get('visible_in_store', True)
         }
+        if 'display_order' in web_match:
+            product_data['displayOrder'] = catalogue_position(web_match['display_order'])
         result.append(product_data)
 
     # Añadir productos web que NO tienen match en Holded
@@ -185,6 +188,8 @@ def get_products():
                 'inPromotion': bool(wp.get('in_promotion', False)),
                 'visibleInStore': wp.get('visible_in_store', True)
             }
+            if 'display_order' in wp:
+                product_data['displayOrder'] = catalogue_position(wp['display_order'])
             result.append(product_data)
 
     return jsonify({
@@ -550,7 +555,7 @@ def _sync_price_to_holded(sku, web_price_with_iva):
 def get_web_products():
     """Devuelve todos los productos web (activos e inactivos) para el panel admin."""
     from src.models.web_product import WebProduct
-    products = WebProduct.query.order_by(WebProduct.display_order).all()
+    products = WebProduct.query.order_by(*catalogue_order_by(WebProduct)).all()
     return jsonify({'products': [p.to_admin_dict() for p in products]})
 
 
@@ -704,6 +709,10 @@ def create_web_product():
         data = request.get_json()
         if 'inPromotion' in data and not isinstance(data['inPromotion'], bool):
             return jsonify({'error': 'inPromotion debe ser un booleano.'}), 400
+        try:
+            validate_position_payload(data)
+        except ValueError as error:
+            return jsonify({'error': str(error)}), 400
         
         # Validaciones básicas
         if not data.get('name') or not data.get('slug') or not data.get('category'):
@@ -756,7 +765,7 @@ def create_web_product():
             active=data.get('active', True),
             visible_in_store=data.get('visibleInStore', True),
             in_promotion=data.get('inPromotion', False),
-            display_order=int(data.get('displayOrder', 0)),
+            display_order=data.get('displayOrder'),
             shipping_cost=float(data.get('shippingCost', 0)),
             preparation_cost=float(data.get('preparationCost', 0))
         )
@@ -790,6 +799,10 @@ def update_web_product(product_id):
         data = request.get_json()
         if 'inPromotion' in data and not isinstance(data['inPromotion'], bool):
             return jsonify({'error': 'inPromotion debe ser un booleano.'}), 400
+        try:
+            validate_position_payload(data)
+        except ValueError as error:
+            return jsonify({'error': str(error)}), 400
         
         # Actualizar solo los campos que vienen en el body
         if 'name' in data:
@@ -878,7 +891,7 @@ def update_web_product(product_id):
         if 'inPromotion' in data:
             product.in_promotion = data['inPromotion']
         if 'displayOrder' in data:
-            product.display_order = int(data['displayOrder'])
+            product.display_order = data['displayOrder']
         if 'shippingCost' in data:
             product.shipping_cost = float(data['shippingCost'])
         if 'preparationCost' in data:
@@ -2736,6 +2749,7 @@ def _get_web_prices():
                         'active': p.active,
                         'visible_in_store': p.visible_in_store,
                         'in_promotion': bool(p.in_promotion),
+                        'display_order': p.display_order,
                         'shipping_cost': p.shipping_cost or 0,
                         'preparation_cost': p.preparation_cost or 0
                     }
