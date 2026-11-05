@@ -12,6 +12,10 @@ from src.services.checkout_pricing import calculate_checkout_line_price, sent_li
 from src.services.delivery_policy import DeliveryPolicyError, validate_delivery_destination
 from src.services.product_identity import TEMPRANO_NAMES_BY_SKU, harvest_product_name
 from src.services.campaign_packs import campaign_pack_for
+from src.services.bf26_checkout_cutoff import (
+    BF26CampaignClosed, BF26_CLOSED_RESPONSE, checkout_policy, contains_bf26,
+    expire_open_session, is_closed,
+)
 from src.services.cart_promotions import (
     PROMOTION_COUPON_MESSAGE, cart_contains_in_promotion, resolve_product_references,
 )
@@ -143,6 +147,10 @@ def create_checkout_session():
             db_product = candidates[0] if candidates else None
             
             if db_product:
+                # The resolved database identity, not a browser campaign flag,
+                # closes BF purchases before ERP, reservation or Stripe calls.
+                if campaign_pack_for(db_product) and is_closed():
+                    return jsonify(BF26_CLOSED_RESPONSE), 409
                 # Fail closed: inactive and exhausted products may not reach
                 # pricing. Visibility is deliberately not a saleability
                 # condition: gift cases stay hidden but are legitimate active
@@ -362,8 +370,13 @@ def create_checkout_session():
             release_checkout_reservation,
             reserve_checkout_stock,
         )
+        has_bf26 = contains_bf26(checkout_products)
+        bf26_policy = checkout_policy() if has_bf26 else None
         stock_checkout_token = secrets.token_urlsafe(24)
-        reservation_expires_at = datetime.utcnow() + timedelta(minutes=30)
+        reservation_expires_at = (
+            datetime.utcfromtimestamp(bf26_policy['expires_at']) if bf26_policy
+            else datetime.utcnow() + timedelta(minutes=30)
+        )
         try:
             reserve_checkout_stock(items, stock_checkout_token, reservation_expires_at)
             db.session.commit()
@@ -455,23 +468,68 @@ def create_checkout_session():
             session_params['discounts'] = [{'coupon': coupon.id}]
         
         try:
-            session = stripe.checkout.Session.create(**session_params)
+            # Recheck after every slow validation/reservation/coupon operation.
+            # Stripe expiry cannot be <30min; final-window sessions need sweep.
+            if has_bf26:
+                bf26_policy = checkout_policy()
+                session_params['expires_at'] = bf26_policy['expires_at']
+                session_params['metadata'].update(bf26_policy['metadata'])
+                session_params['idempotency_key'] = f'bf26-create-{stock_checkout_token}'
+                reservation_expires_at = datetime.utcfromtimestamp(bf26_policy['expires_at'])
             from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
             pending_checkout_rules = dict(tax_snapshot)
             pending_checkout_rules[CHECKOUT_PRICING_SNAPSHOT_KEY] = checkout_pricing_snapshot
-            db.session.add(CheckoutTaxSnapshot(
+            pending_snapshot = CheckoutTaxSnapshot(
                 checkout_token=stock_checkout_token,
                 rules=pending_checkout_rules,
                 expires_at=reservation_expires_at,
-            ))
+            )
+            if has_bf26:
+                # Commit the immutable receipt/tax rules BEFORE opening an
+                # external payable session. A timeout or failed local bind
+                # must not erase the only record needed by its late webhook.
+                db.session.add(pending_snapshot)
+                db.session.commit()
+                if is_closed():
+                    raise BF26CampaignClosed()
+            session = stripe.checkout.Session.create(**session_params)
+            if not has_bf26:
+                db.session.add(pending_snapshot)
+            if has_bf26:
+                # Align allocation expiry, without modifying physical stock.
+                from src.models.stock import StockReservation
+                StockReservation.query.filter_by(checkout_token=stock_checkout_token).update(
+                    {'expires_at': reservation_expires_at}, synchronize_session=False,
+                )
             bind_reservation_to_session(stock_checkout_token, session.id)
+        except BF26CampaignClosed:
+            release_checkout_reservation(stock_checkout_token)
+            return jsonify(BF26_CLOSED_RESPONSE), 409
         except Exception:
+            if has_bf26:
+                # Ambiguous API success: keep snapshot/allocation for any
+                # delayed paid webhook. The marked Stripe sweep catches the
+                # session even if no local binding could be committed.
+                db.session.rollback()
+                return jsonify({'error': 'BF26_CHECKOUT_UNAVAILABLE',
+                                'message': 'No se ha podido abrir el pago. Inténtalo de nuevo.'}), 503
             release_checkout_reservation(stock_checkout_token)
             from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
             CheckoutTaxSnapshot.query.filter_by(checkout_token=stock_checkout_token).delete()
             db.session.commit()
             raise
         
+        if has_bf26 and is_closed():
+            # A request may cross midnight inside Stripe.create. Do not expose
+            # a new payable URL; retain snapshots for a completion that won
+            # the race. The native catchup sweep covers failed expiration.
+            outcome = expire_open_session(stripe.checkout.Session, session.id)
+            if outcome == 'expired':
+                return jsonify(BF26_CLOSED_RESPONSE), 409
+            if outcome != 'complete':
+                return jsonify({'error': 'BF26_CLOSURE_PENDING',
+                                'message': 'No se ha podido abrir el pago. Actualiza tu carrito.'}), 503
+
         # Started Checkout is intentionally emitted only by POST
         # /api/abandoned-cart. Emitting it again here created duplicate Flow
         # entries seconds apart for a single customer cart.
@@ -482,6 +540,8 @@ def create_checkout_session():
             'order_number': order_number
         })
         
+    except BF26CampaignClosed:
+        return jsonify(BF26_CLOSED_RESPONSE), 409
     except Exception as e:
         print(f"Error creating checkout session: {str(e)}")
         return jsonify({'error': str(e)}), 500
@@ -524,6 +584,9 @@ def create_subscription_checkout():
             unresolved_identifier |= product is None
             if product is not None:
                 subscription_products.append(product)
+        if contains_bf26(subscription_products):
+            return jsonify({'error': 'PROMOTION_NOT_AVAILABLE',
+                            'message': 'La suscripción no está disponible para este producto.'}), 422
         if contains_promotion_protected_product(subscription_products) or is_promotion_protected(item):
             return jsonify({
                 'error': 'PROMOTION_NOT_AVAILABLE',
@@ -630,10 +693,16 @@ def stripe_webhook():
         return jsonify({'error': 'Invalid signature'}), 400
     
     # Handle the event
-    if event['type'] == 'checkout.session.completed':
+    if event['type'] in ('checkout.session.completed', 'checkout.session.async_payment_succeeded'):
         session = event['data']['object']
         
         if session['mode'] == 'payment':
+            # Receipt time is NOT purchase eligibility: paid events delivered
+            # after cutoff (or a payment winning an expire race) must persist.
+            # Delayed methods are not enabled by us; if an old session uses
+            # one, wait for success rather than treating completion as paid.
+            if session.get('payment_status') not in (None, 'paid', 'no_payment_required'):
+                return jsonify({'status': 'success', 'payment_pending': True})
             # One-time payment completed
             order_number = session['metadata'].get('order_number')
             print(f"Order {order_number} paid successfully")
@@ -643,9 +712,12 @@ def stripe_webhook():
             # confirmations — never one of each per retry.
             from src.models.order import Order
             from src.models.user import db
+            payment_intent_id = session.get('payment_intent')
+            paid_identity = Order.stripe_checkout_session_id == session['id']
+            if payment_intent_id:
+                paid_identity = paid_identity | (Order.stripe_payment_intent_id == payment_intent_id)
             existing_order = Order.query.filter(
-                (Order.stripe_checkout_session_id == session['id'])
-                | (Order.stripe_payment_intent_id == session.get('payment_intent', ''))
+                paid_identity
             ).first()
             if existing_order:
                 print(f"ℹ️ Checkout session {session['id']} was already processed as {existing_order.order_number}")
