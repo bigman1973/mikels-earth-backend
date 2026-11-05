@@ -84,6 +84,8 @@ class WebProduct(db.Model):
     storefront_notice = db.Column(db.Text)
     active = db.Column(db.Boolean, default=True, nullable=False)  # Se puede vender y resolver en checkout/addons
     visible_in_store = db.Column(db.Boolean, default=True, nullable=False)  # Aparece en el catálogo público
+    # Existing production column; authoritative coupon veto, not a browser flag.
+    in_promotion = db.Column(db.Boolean, default=False, server_default=db.false(), nullable=False)
     
     # Costes logísticos (para cálculo de margen en panel admin)
     shipping_cost = db.Column(db.Float, default=0.0)  # Coste de portes por unidad

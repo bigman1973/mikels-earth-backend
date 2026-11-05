@@ -3,37 +3,14 @@ Rutas para gestión de cupones de descuento
 """
 from flask import Blueprint, request, jsonify
 from src.models.coupon import Coupon
-from src.models.web_product import WebProduct
-from src.services.protected_catalogue import is_promotion_protected
+from src.services.coupon_policy import cart_blocks_coupon, PROMOTION_COUPON_MESSAGE
 
 coupon_bp = Blueprint('coupon', __name__)
 
 
 def _has_protected_cart_item(data):
-    """Check optional cart context; a context-free preview is not sale approval.
-
-    Resolve each identifier independently so a forged SKU cannot hide a protected
-    database ID/slug. Checkout remains authoritative for callers omitting items.
-    """
-    items = data.get('items', [])
-    if isinstance(items, dict):
-        items = [items]
-    if not isinstance(items, list):
-        return False
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        if is_promotion_protected(item):
-            return True
-        if item.get('id'):
-            product = WebProduct.query.get(item['id'])
-            if is_promotion_protected(product):
-                return True
-        if item.get('slug'):
-            product = WebProduct.query.filter_by(slug=item['slug']).first()
-            if is_promotion_protected(product):
-                return True
-    return False
+    """Optional preview context; checkout always checks its own persisted cart."""
+    return cart_blocks_coupon(data.get('items', []), preserve_legacy_sku=True)
 
 
 @coupon_bp.route('/validate', methods=['POST'])
@@ -55,7 +32,7 @@ def validate_coupon():
             return jsonify({
                 'valid': False,
                 'error': 'PROMOTION_NOT_AVAILABLE',
-                'message': 'El código no se puede aplicar a este pedido.',
+                'message': PROMOTION_COUPON_MESSAGE,
             }), 200
         
         # Validar cupón (busca por código case-insensitive)
@@ -101,7 +78,7 @@ def use_coupon():
             return jsonify({
                 'success': False,
                 'error': 'PROMOTION_NOT_AVAILABLE',
-                'message': 'El código no se puede aplicar a este pedido.',
+                'message': PROMOTION_COUPON_MESSAGE,
             }), 422
         
         # Validar cupón primero

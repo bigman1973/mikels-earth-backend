@@ -11,6 +11,7 @@ from src.services.money import as_eur, cents_to_eur, eur_metadata, eur_to_cents,
 from src.services.checkout_pricing import calculate_checkout_line_price, sent_line_total
 from src.services.delivery_policy import DeliveryPolicyError, validate_delivery_destination
 from src.services.product_identity import TEMPRANO_NAMES_BY_SKU, harvest_product_name
+from src.services.coupon_policy import cart_blocks_coupon, PROMOTION_COUPON_MESSAGE
 from src.services.protected_catalogue import (
     contains_promotion_protected_product,
     is_mixed_with_full_price_only_product,
@@ -104,6 +105,13 @@ def create_checkout_session():
         # browser. It is never authoritative: the code, owner, validity and
         # amount are re-derived from the coupon stored in the database below.
         discount_code = str(data.get('discount_code') or '').strip().upper() or None
+        # Veto ALL code origins before pricing, ERP reads, reservations or Stripe.
+        # Resolve each DB identity before canonicalization overwrites browser data.
+        if discount_code and cart_blocks_coupon(items):
+            return jsonify({
+                'error': 'PROMOTION_NOT_AVAILABLE',
+                'message': PROMOTION_COUPON_MESSAGE,
+            }), 422
         coupon_discount_amount = Decimal('0.00')
         volume_discount_amount = Decimal('0.00')
         checkout_pricing_snapshot = {}
@@ -397,6 +405,7 @@ def create_checkout_session():
             'payment_method_types': ['card'],
             'line_items': line_items,
             'mode': 'payment',
+            'allow_promotion_codes': False,
             # The customer confirmation component lives at /order-success.
             # Keep Stripe's redirect on that real, public route.
             'success_url': f'{frontend_url}/order-success?session_id={{CHECKOUT_SESSION_ID}}',
@@ -490,6 +499,11 @@ def create_subscription_checkout():
         item = data['item']
         customer_info = data['customer_info']
         frequency = item.get('subscription_frequency')
+        if str(data.get('discount_code') or '').strip() and cart_blocks_coupon([item]):
+            return jsonify({
+                'error': 'PROMOTION_NOT_AVAILABLE',
+                'message': PROMOTION_COUPON_MESSAGE,
+            }), 422
 
         # Resolve every supplied identifier independently: a forged ordinary
         # ID must not mask a protected slug/SKU. Never accept an unresolved
@@ -576,6 +590,7 @@ def create_subscription_checkout():
                 'quantity': item['quantity'],
             }],
             mode='subscription',
+            allow_promotion_codes=False,
             success_url=f'{frontend_url}/suscripcion-exitosa?session_id={{CHECKOUT_SESSION_ID}}',
             cancel_url=f'{frontend_url}/checkout?cancelled=true',
             customer_email=customer_info['email'],
