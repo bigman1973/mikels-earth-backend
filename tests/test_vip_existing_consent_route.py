@@ -25,7 +25,6 @@ class VipExistingConsentRouteTests(unittest.TestCase):
         self.app.register_blueprint(vip_routes.vip_bp, url_prefix='/api/vip')
         with self.app.app_context():
             db.create_all()
-        vip_routes._vip_rate_store.clear()
         klaviyo_service._vip_list_id_cache = None
         self.client = self.app.test_client()
         self.environment = patch.dict(os.environ, {

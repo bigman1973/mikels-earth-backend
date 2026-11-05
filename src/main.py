@@ -109,6 +109,11 @@ def create_tables():
     if request.path == '/api/health':
         return None
 
+    # A form/honeypot must not trigger unrelated schema, catalogue or seed work.
+    # Existing consent tables are a prerequisite; no migration is run here.
+    if request.path in ('/api/vip/signup', '/api/contact/send-message'):
+        return None
+
     if not hasattr(app, 'tables_created'):
         try:
             db.create_all()

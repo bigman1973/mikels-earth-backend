@@ -8,13 +8,10 @@ from src.models.user import db
 from src.services.email_identity import normalize_email_address, newsletter_email_key
 from datetime import datetime
 import re
-import time
-from collections import defaultdict
 
 newsletter_bp = Blueprint('newsletter', __name__)
 
-# Anti-spam
-_newsletter_rate_store = defaultdict(list)
+# IP admission disabled: Railway ingress identity is not certified.
 
 
 def _is_gibberish(text):
@@ -34,15 +31,6 @@ def _is_gibberish(text):
     return False
 
 
-def _is_newsletter_rate_limited(ip):
-    now = time.time()
-    _newsletter_rate_store[ip] = [t for t in _newsletter_rate_store[ip] if now - t < 3600]
-    if len(_newsletter_rate_store[ip]) >= 5:
-        return True
-    _newsletter_rate_store[ip].append(now)
-    return False
-
-
 @newsletter_bp.route('/subscribe', methods=['POST'])
 def subscribe_newsletter():
     """
@@ -53,18 +41,6 @@ def subscribe_newsletter():
     cannot create a second welcome coupon.
     """
     try:
-        # Anti-spam: rate limiting
-        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-        if client_ip:
-            client_ip = client_ip.split(',')[0].strip()
-        if _is_newsletter_rate_limited(client_ip):
-            print(f"⚠️ Newsletter rate limited: {client_ip}")
-            return jsonify({
-                'success': True,
-                'already_subscribed': True,
-                'message': 'Ya estás suscrito. Si no encuentras tu cupón, escríbenos.',
-            }), 200
-
         data = request.get_json(silent=True) or {}
         email = normalize_email_address(data.get('email'))
         first_name = data.get('first_name', '').strip()
@@ -100,7 +76,6 @@ def subscribe_newsletter():
 
         # Anti-spam: gibberish name check
         if _is_gibberish(first_name) or _is_gibberish(last_name):
-            print(f"🚫 Newsletter spam blocked (gibberish): {first_name} {last_name} / {email} / IP={client_ip}")
             return jsonify({'success': True, 'message': 'Subscription successful'}), 200
 
         email_key = newsletter_email_key(email)

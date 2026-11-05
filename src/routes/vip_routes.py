@@ -4,15 +4,17 @@ Persist each affirmative form declaration locally. Existing Klaviyo profiles
 may join the dedicated list only with current email consent and no suppression;
 the form must never renew or override their remote subscription state.
 """
-from collections import defaultdict
 from datetime import datetime
-import time
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify
 
 from src.models.user import db
 from src.models.vip_signup import VipSignup
 from src.services.email_identity import normalize_email_address
+from src.services.form_security import (
+    UNVERIFIED_IP, consent_ip_evidence, honeypot_filled, phone_is_rejected,
+    read_form_payload, silent_success,
+)
 from src.services.klaviyo_service import (
     klaviyo_subscribe_vip_contact,
     klaviyo_track_vip_signup,
@@ -20,7 +22,6 @@ from src.services.klaviyo_service import (
 
 
 vip_bp = Blueprint('vip', __name__)
-_vip_rate_store = defaultdict(list)
 _VIP_INELIGIBLE_ERRORS = frozenset({
     'VIP_EXISTING_NO_EMAIL_CONSENT',
     'VIP_EXISTING_EMAIL_SUPPRESSED',
@@ -28,28 +29,18 @@ _VIP_INELIGIBLE_ERRORS = frozenset({
 })
 
 
-def _client_ip():
-    forwarded_for = request.headers.get('X-Forwarded-For', '')
-    return (forwarded_for.split(',', 1)[0].strip() or request.remote_addr or 'unknown')[:45]
-
-
-def _is_rate_limited(ip):
-    now = time.time()
-    _vip_rate_store[ip] = [timestamp for timestamp in _vip_rate_store[ip] if now - timestamp < 3600]
-    if len(_vip_rate_store[ip]) >= 5:
-        return True
-    _vip_rate_store[ip].append(now)
-    return False
-
-
 @vip_bp.route('/signup', methods=['POST'])
 def signup_for_vip_list():
     """Record explicit VIP consent without overriding an existing profile's state."""
-    data = request.get_json(silent=True) or {}
-    client_ip = _client_ip()
-
-    if _is_rate_limited(client_ip):
-        return jsonify({'error': 'Demasiados intentos. Inténtalo más tarde.'}), 429
+    data = read_form_payload()
+    if data is None:
+        return jsonify({'error': 'El formulario no es válido.', 'code': 'invalid_payload'}), 400
+    # Fixed hook for funnel integration: HONEYPOT_OUTCOME = honeypot_discarded.
+    # This branch must remain before IP observation, consent DB and all providers.
+    if honeypot_filled(data):
+        return silent_success()
+    if phone_is_rejected(data.get('phone')):
+        return jsonify({'error': 'El teléfono de diez dígitos necesita prefijo internacional.', 'code': 'invalid_phone'}), 400
 
     email = normalize_email_address(data.get('email'))
     first_name = str(data.get('first_name') or '').strip()[:120]
@@ -61,12 +52,14 @@ def signup_for_vip_list():
         return jsonify({'error': 'Debes aceptar recibir comunicaciones comerciales para entrar en la lista VIP.'}), 400
 
     consented_at = datetime.utcnow()
+    observed_ip, ip_provenance = consent_ip_evidence()
     signup = VipSignup(
         email=email,
         first_name=first_name or None,
         consent_marketing=True,
         consented_at=consented_at,
-        source_ip=client_ip,
+        source_ip=observed_ip,
+        source=ip_provenance,
     )
     db.session.add(signup)
     db.session.commit()
@@ -75,7 +68,7 @@ def signup_for_vip_list():
         email=email,
         first_name=first_name,
         consented_at=consented_at,
-        source_ip=client_ip,
+        source_ip=UNVERIFIED_IP,
     )
     if subscribed:
         signup.klaviyo_subscription_status = 'accepted'
@@ -96,7 +89,7 @@ def signup_for_vip_list():
         email=email,
         first_name=first_name,
         consented_at=consented_at,
-        source_ip=client_ip,
+        source_ip=UNVERIFIED_IP,
         signup_id=signup.id,
     )
     signup.klaviyo_event_status = 'accepted' if event_sent else 'failed'

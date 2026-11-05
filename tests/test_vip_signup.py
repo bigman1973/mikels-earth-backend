@@ -21,7 +21,6 @@ class VipSignupTests(unittest.TestCase):
         self.app.register_blueprint(vip_bp, url_prefix='/api/vip')
         with self.app.app_context():
             db.create_all()
-        vip_routes._vip_rate_store.clear()
         self.client = self.app.test_client()
 
     def tearDown(self):
@@ -65,7 +64,8 @@ class VipSignupTests(unittest.TestCase):
             self.assertEqual(signup.email, 'vip@example.com')
             self.assertEqual(signup.first_name, 'Marisa')
             self.assertTrue(signup.consent_marketing)
-            self.assertEqual(signup.source_ip, '198.51.100.42')
+            self.assertEqual(signup.source_ip, 'unverified')
+            self.assertEqual(signup.source, 'vip_black_friday_2026:ip_unverified:unavailable')
             self.assertIsNotNone(signup.consented_at)
             self.assertEqual(signup.klaviyo_subscription_status, 'accepted')
             self.assertEqual(signup.klaviyo_event_status, 'accepted')

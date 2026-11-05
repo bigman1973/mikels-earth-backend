@@ -26,7 +26,6 @@ class NewsletterConsentTests(unittest.TestCase):
         with self.app.app_context():
             db.create_all()
 
-        newsletter_routes._newsletter_rate_store.clear()
         self.client = self.app.test_client()
 
     def tearDown(self):
