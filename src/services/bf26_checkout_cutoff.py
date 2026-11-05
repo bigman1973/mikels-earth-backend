@@ -14,9 +14,6 @@ BF26_CLOSE_AT = datetime(2026, 12, 1, tzinfo=ZoneInfo('Europe/Madrid'))
 BF26_CLOSE_TIMESTAMP = int(BF26_CLOSE_AT.timestamp())
 STRIPE_MIN_TTL = 30 * 60
 STRIPE_MAX_TTL = 24 * 60 * 60
-# Avoid a timestamp on the minimum boundary arriving a few seconds too late.
-# Larger network/clock skew can still fail safely; do not silently close early.
-CREATION_MARGIN = 60
 BF26_METADATA_KEY = 'purchase_campaign'
 BF26_CLOSED_RESPONSE = {
     'error': 'BF26_CAMPAIGN_CLOSED',
@@ -49,19 +46,17 @@ def contains_bf26(products):
 def checkout_policy(now=None):
     """Server-only policy; last second stays valid, no browser time accepted.
 
-    Normally expire after 31 minutes or at cutoff, whichever is earlier.
-    Inside the minimum-plus-network-margin window use 31 minutes and rely on
-    the cutoff sweep. This deliberately preserves the whole last Monday.
+    Request exactly 30 minutes from the server's Unix second, without margin.
+    Final-window sessions rely on the existing cutoff sweep. Stripe may reject
+    the minimum after latency/clock skew; creation must fail closed, not extend
+    the TTL or fall back to the provider's 24-hour default.
     """
     now = now or utc_now()
     if is_closed(now):
         raise BF26CampaignClosed()
     timestamp = int(_timestamp(now))
-    minimum_with_margin = timestamp + STRIPE_MIN_TTL + CREATION_MARGIN
-    expires_at = min(minimum_with_margin, BF26_CLOSE_TIMESTAMP)
-    requires_sweep = BF26_CLOSE_TIMESTAMP < minimum_with_margin
-    if requires_sweep:
-        expires_at = minimum_with_margin
+    expires_at = timestamp + STRIPE_MIN_TTL
+    requires_sweep = BF26_CLOSE_TIMESTAMP < expires_at
     return {
         'expires_at': expires_at,
         'metadata': {

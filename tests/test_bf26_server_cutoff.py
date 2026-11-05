@@ -36,19 +36,32 @@ class PolicyTests(unittest.TestCase):
             with self.assertRaises(BF26CampaignClosed):
                 checkout_policy(CLOSE + timedelta(seconds=delta))
 
-    def test_expiry_min_max_and_full_monday_preserved(self):
-        for seconds_remaining in (86401, 86400, 3600, 1861, 1860, 1859, 1800, 1799, 1):
+    def test_exact_30_minute_expiry_and_sweep_boundary_preserve_full_monday(self):
+        for seconds_remaining in (86401, 86400, 3600, 1861, 1860, 1859,
+                                  1801, 1800, 1799, 60, 2, 1):
             now = CLOSE - timedelta(seconds=seconds_remaining)
-            policy = checkout_policy(now)
-            ttl = policy['expires_at'] - int(now.timestamp())
-            self.assertGreaterEqual(ttl, 1800)
-            self.assertLessEqual(ttl, 86400)
-            self.assertEqual(policy['metadata'][BF26_METADATA_KEY], 'BF26')
-            if seconds_remaining >= 1860:
-                self.assertLessEqual(policy['expires_at'], BF26_CLOSE_TIMESTAMP)
-            else:
-                self.assertGreater(policy['expires_at'], BF26_CLOSE_TIMESTAMP)
+            with self.subTest(seconds_remaining=seconds_remaining):
+                policy = checkout_policy(now)
+                self.assertEqual(policy['expires_at'], now.timestamp() + 1800)
+                self.assertIsInstance(policy['expires_at'], int)
+                self.assertEqual(policy['metadata'], {
+                    BF26_METADATA_KEY: 'BF26',
+                    'purchase_campaign_closes_at': str(BF26_CLOSE_TIMESTAMP),
+                    'purchase_campaign_requires_sweep': str(seconds_remaining < 1800).lower(),
+                })
+                if seconds_remaining == 1800:
+                    self.assertEqual(policy['expires_at'], BF26_CLOSE_TIMESTAMP)
+
+    def test_fractional_last_seconds_use_unix_integer_without_roundup_margin(self):
+        for seconds_remaining in (1.001, 0.999, 0.001, 0.000001):
+            now = CLOSE - timedelta(seconds=seconds_remaining)
+            with self.subTest(seconds_remaining=seconds_remaining):
+                policy = checkout_policy(now)
+                self.assertEqual(policy['expires_at'], int(now.timestamp()) + 1800)
+                self.assertIsInstance(policy['expires_at'], int)
                 self.assertEqual(policy['metadata']['purchase_campaign_requires_sweep'], 'true')
+
+    def test_naive_server_clock_is_rejected(self):
         with self.assertRaises(ValueError):
             checkout_policy(datetime(2026, 11, 30))
 
@@ -149,18 +162,56 @@ class CheckoutBoundaryTests(unittest.TestCase):
 
     def test_last_second_opens_card_only_with_sweep_and_snapshot(self):
         item = self.prepare()
-        with self.freeze(CLOSE-timedelta(seconds=1)):
+        now = CLOSE-timedelta(seconds=1)
+        with self.freeze(now):
             response = self.checkout([item])
         self.assertEqual(response.status_code, 200)
         params = self.session.call_args.kwargs
         self.assertEqual(params['payment_method_types'], ['card'])
-        self.assertGreater(params['expires_at'], BF26_CLOSE_TIMESTAMP)
+        self.assertEqual(params['expires_at'], now.timestamp() + 1800)
         self.assertEqual(params['metadata']['purchase_campaign_requires_sweep'], 'true')
         self.assertTrue(params['idempotency_key'].startswith('bf26-create-'))
         with self.app.app_context():
             allocation = StockReservation.query.one()
             self.assertEqual(allocation.expires_at, datetime.utcfromtimestamp(params['expires_at']))
+            self.assertEqual(CheckoutTaxSnapshot.query.one().expires_at, allocation.expires_at)
+            self.assertEqual(StockMovement.query.count(), 0)
+
+    def test_last_30_minutes_and_last_seconds_request_exact_ttl_for_mixed_cart(self):
+        item = self.prepare()
+        for seconds_remaining in (1801, 1800, 1799, 60, 2, 1, 0.001):
+            now = CLOSE-timedelta(seconds=seconds_remaining)
+            with self.subTest(seconds_remaining=seconds_remaining), self.freeze(now):
+                response = self.checkout([item, self.item('NORMAL-LOCAL')])
+                self.assertEqual(response.status_code, 200)
+                params = self.session.call_args.kwargs
+                self.assertEqual(params['expires_at'], int(now.timestamp()) + 1800)
+                self.assertEqual(params['metadata']['purchase_campaign_requires_sweep'],
+                                 str(seconds_remaining < 1800).lower())
+                self.assertEqual(params['payment_method_types'], ['card'])
+
+    def test_stripe_minimum_validation_fails_closed_without_longer_or_default_retry(self):
+        from stripe._error import InvalidRequestError
+
+        item = self.prepare()
+        self.session.side_effect = InvalidRequestError('synthetic expires_at minimum rejection',
+                                                       param='expires_at')
+        now = CLOSE-timedelta(seconds=1)
+        with self.freeze(now):
+            response = self.checkout([item])
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()['error'], 'BF26_CHECKOUT_UNAVAILABLE')
+        self.assertNotIn('url', response.get_json())
+        self.assertNotIn('sessionId', response.get_json())
+        self.assertNotIn('synthetic', str(response.get_json()))
+        self.session.assert_called_once()
+        params = self.session.call_args.kwargs
+        self.assertEqual(params['expires_at'], now.timestamp() + 1800)
+        self.assertEqual(params['payment_method_types'], ['card'])
+        with self.app.app_context():
             self.assertEqual(CheckoutTaxSnapshot.query.count(), 1)
+            self.assertEqual(StockReservation.query.one().status, 'active')
+            self.assertEqual(Order.query.count(), 0)
             self.assertEqual(StockMovement.query.count(), 0)
 
     def test_normal_cart_keeps_existing_behaviour_after_cutoff(self):
@@ -226,7 +277,7 @@ class CheckoutBoundaryTests(unittest.TestCase):
             response = self.checkout([item])
         self.assertEqual(response.status_code, 200)
         params = self.session.call_args.kwargs
-        self.assertEqual(params['expires_at'], int((CLOSE-timedelta(hours=1)+timedelta(minutes=31)).timestamp()))
+        self.assertEqual(params['expires_at'], (CLOSE-timedelta(hours=1)).timestamp() + 1800)
         api = Mock()
         api.expire.return_value = {'status': 'complete'}
         api.list.return_value = {'data': [], 'has_more': False}
