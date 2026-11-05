@@ -350,7 +350,8 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
 
     @patch('src.routes.stripe_routes.stripe.Coupon.create')
     @patch('src.routes.stripe_routes.stripe.checkout.Session.create')
-    def test_temprano_rejects_every_active_coupon_before_stripe(self, create_session, create_coupon):
+    def test_temprano_accepts_normal_valid_coupons_at_19_90_without_quantity_discount(self, create_session, create_coupon):
+        create_coupon.return_value = SimpleNamespace(id='coupon_temprano')
         with self.app.app_context():
             temprano = WebProduct.query.filter_by(slug='aceite-temprano-sin-filtrar').first()
             temprano.sku = 'MIKVET500'
@@ -397,14 +398,29 @@ class CheckoutMoneyIntegrityTests(unittest.TestCase):
             ))
             db.session.commit()
 
-        newsletter_coupon = self.client.post('/api/stripe/create-checkout-session', json={
-            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=1)],
-            'customer_info': self.customer,
-            'discount_code': 'mikels-subscriber',
-            'discount_amount': 0,
+        for code in ('mikels-subscriber', 'IRVIANCESTRAL', 'VUELVE10-CUSTOMER', 'PRUEBA10'):
+            for quantity in (1, 3, 6, 12):
+                with self.subTest(code=code, quantity=quantity):
+                    create_session.return_value = SimpleNamespace(id=f'cs_temprano_{code}_{quantity}', url='https://stripe.test/local')
+                    result = self.client.post('/api/stripe/create-checkout-session', json={
+                        'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90', quantity=quantity)],
+                        'customer_info': self.customer, 'discount_code': code, 'discount_amount': 999999,
+                    })
+                    self.assertEqual(result.status_code, 200, result.get_json())
+                    params = create_session.call_args.kwargs
+                    self.assertEqual(params['line_items'][0]['price_data']['unit_amount'], 1990)
+                    self.assertEqual(params['metadata']['volume_discount_amount'], '0.00')
+                    self.assertEqual(params['metadata']['coupon_discount_amount'], format(Decimal('1.99') * quantity, '.2f'))
+                    self.assertEqual(params['metadata']['total'], format(Decimal('17.91') * quantity, '.2f'))
+                    self.assertEqual(create_coupon.call_args.kwargs['amount_off'], 199 * quantity)
+        create_session.reset_mock()
+        create_coupon.reset_mock()
+        used_coupon = self.client.post('/api/stripe/create-checkout-session', json={
+            'items': [self._checkout_item(1, 'aceite-temprano-sin-filtrar', '19.90')],
+            'customer_info': self.customer, 'discount_code': 'MIKELS-ALREADY-USED',
         })
-        self.assertEqual(newsletter_coupon.status_code, 422)
-        self.assertEqual(newsletter_coupon.get_json()['error'], 'PROMOTION_NOT_AVAILABLE')
+        self.assertEqual(used_coupon.status_code, 422)
+        self.assertEqual(used_coupon.get_json()['error'], 'COUPON_INVALID')
         create_session.assert_not_called()
         create_coupon.assert_not_called()
 

@@ -1,8 +1,7 @@
-"""Server-owned cart coupon exclusions; never infer eligibility from browser flags."""
+"""Server-owned coupon policy, independent of catalogue price/tier protections."""
 from src.models.user import db
 from src.models.coupon import Coupon
 from src.models.web_product import WebProduct
-from src.services.protected_catalogue import is_promotion_protected
 
 PROMOTION_COUPON_MESSAGE = (
     'Este código no se puede aplicar porque el pedido incluye productos en promoción.'
@@ -10,6 +9,15 @@ PROMOTION_COUPON_MESSAGE = (
 # Exact stored codes confirmed by the owner. Incoming lookup remains case-insensitive;
 # descriptions, historical collaborators and friends codes cannot grant permission.
 PROMOTION_COLLABORATOR_CODES = frozenset({'IRVIANCESTRAL', 'dr.gemmavalls'})
+# These six campaign containers remain promotional even with a stale persisted
+# flag or a forged ordinary ID/slug. Ordinary full-price SKUs are NOT coupon vetoes.
+PROMOTION_CAMPAIGN_SKUS = frozenset({
+    'BF26-TEMP6', 'BF26-TEMP12', 'BF26-ECO6',
+    'BF26-PARA3', 'BF26-PARA6', 'BF26-5L3',
+    # Retain reserved legacy campaign identities; never turn them into ordinary units.
+    'MIKVET500BF3', 'MIKVET500BF6', 'MIKBIO19BF6',
+    'MIKPARA450BF3', 'MIKPARA450BF6', 'MIKVE5LPBF3',
+})
 
 
 def coupon_allows_promotion(coupon):
@@ -27,14 +35,20 @@ def coupon_allows_promotion(coupon):
     return bool(valid)
 
 
+def _is_campaign_sku(sku):
+    return str(sku or '').strip().upper() in PROMOTION_CAMPAIGN_SKUS
+
+
 def cart_blocks_coupon(items, *, preserve_legacy_sku=False, discount_code=None):
     """Resolve every supplied identity independently before any sale side effect.
 
-    A forged ordinary identifier cannot hide a protected DB identifier. Hidden
-    add-ons are ordinary cart lines and receive exactly the same check. The
-    collaborator exception relaxes ONLY persisted in_promotion, never protected
-    SKUs (including the legacy raw-SKU preview veto). Browser promotion flags,
-    coupon flags, descriptions and metadata are never read.
+    All ordinary products accept otherwise valid coupons, including the five
+    catalogue-protected SKUs. Pricing, volume, subscription and mixed-cart gates
+    are separate and unchanged. A promotion anywhere rejects the WHOLE coupon
+    unless the stored, currently valid collaborator capability allows it.
+    Browser promotion/coupon flags and metadata are never read. Hidden add-ons
+    supplied as cart lines receive exactly the same checks. The legacy keyword
+    is retained for callers, but no longer vetoes ordinary full-price raw SKUs.
     """
     if isinstance(items, dict):
         items = [items]
@@ -44,10 +58,6 @@ def cart_blocks_coupon(items, *, preserve_legacy_sku=False, discount_code=None):
     for item in items:
         if not isinstance(item, dict):
             continue
-        # All callers retain the raw protected-SKU veto, even if a forged ID
-        # resolves to an ordinary product or a protected row no longer exists.
-        if is_promotion_protected(item):
-            return True
         products = []
         if item.get('id'):
             products.append(WebProduct.query.get(item['id']))
@@ -57,9 +67,12 @@ def cart_blocks_coupon(items, *, preserve_legacy_sku=False, discount_code=None):
             products.append(WebProduct.query.filter(
                 db.func.upper(WebProduct.sku) == str(item['sku']).strip().upper()
             ).first())
-        if any(product is not None and is_promotion_protected(product) for product in products):
-            return True
-        if any(product is not None and product.in_promotion is True for product in products):
+        contains_promotion = _is_campaign_sku(item.get('sku')) or any(
+            product is not None
+            and (product.in_promotion is True or _is_campaign_sku(product.sku))
+            for product in products
+        )
+        if contains_promotion:
             if allows_promotion is None:
                 coupon = None
                 if isinstance(discount_code, str) and discount_code.strip():

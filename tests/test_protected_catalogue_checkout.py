@@ -160,7 +160,8 @@ class ProtectedCatalogueCheckoutTests(unittest.TestCase):
                 id=f'cs_local_{self.create_session.call_count}', url='https://checkout.stripe.test/local',
             ),
         )
-        self.create_coupon = self._patch('src.routes.stripe_routes.stripe.Coupon.create')
+        self.create_coupon = self._patch('src.routes.stripe_routes.stripe.Coupon.create',
+                                         return_value=SimpleNamespace(id='coupon_local'))
         self.create_price = self._patch('src.routes.stripe_routes.stripe.Price.create')
         # Any unexpected requests-based external call fails the test instead of
         # accessing Stripe/Holded or any other external service.
@@ -287,16 +288,30 @@ class ProtectedCatalogueCheckoutTests(unittest.TestCase):
         self.create_session.assert_not_called()
         self.holded_products.assert_not_called()
 
-    def test_all_protected_items_reject_every_code_before_stripe_and_holded(self):
+    def test_all_protected_items_accept_valid_codes_at_master_price_and_invalid_codes_fail_early(self):
         for sku, slug, price in PROTECTED_CASES:
             for code in ('BLACKFRIDAY10', 'BLACKFRIDAY5', 'UNKNOWN', ' blackfriday10 '):
                 with self.subTest(sku=sku, code=code):
+                    self.create_session.reset_mock()
+                    self.create_coupon.reset_mock()
+                    self.holded_products.reset_mock()
                     response = self._checkout([self._item(slug, price)], discount_code=code)
-                    self.assertEqual(response.status_code, 422)
-                    self.assertEqual(response.get_json()['error'], 'PROMOTION_NOT_AVAILABLE')
-        self.create_session.assert_not_called()
-        self.create_coupon.assert_not_called()
-        self.holded_products.assert_not_called()
+                    if code == 'UNKNOWN':
+                        self.assertEqual(response.status_code, 422)
+                        self.assertEqual(response.get_json()['error'], 'COUPON_INVALID')
+                        self.create_session.assert_not_called()
+                        self.create_coupon.assert_not_called()
+                        self.holded_products.assert_not_called()
+                        continue
+                    self.assertEqual(response.status_code, 200, response.get_json())
+                    discount = Decimal('5.00') if code == 'BLACKFRIDAY5' else (price * Decimal('0.10')).quantize(Decimal('0.01'))
+                    params = self.create_session.call_args.kwargs
+                    self.assertEqual(params['line_items'][0]['price_data']['unit_amount'], eur_to_cents(price))
+                    self.assertEqual(params['metadata']['subtotal'], format(price, '.2f'))
+                    self.assertEqual(params['metadata']['coupon_discount_amount'], format(discount, '.2f'))
+                    self.assertEqual(params['metadata']['volume_discount_amount'], '0.00')
+                    self.assertEqual(params['metadata']['total'], format(price - discount, '.2f'))
+                    self.assertEqual(self.create_coupon.call_args.kwargs['amount_off'], eur_to_cents(discount))
 
     def test_forged_discount_amount_without_code_is_ignored_not_applied(self):
         for sku, slug, price in PROTECTED_CASES:
@@ -389,8 +404,9 @@ class ProtectedCatalogueCheckoutTests(unittest.TestCase):
         self.create_price.assert_not_called()
         self.create_session.assert_not_called()
 
-    def test_coupon_preview_and_use_reject_optional_protected_cart_context(self):
+    def test_coupon_preview_and_use_accept_all_ordinary_protected_identity_contexts(self):
         ordinary = self._item('producto-compatible', 10.00)
+        use_counts = {'BLACKFRIDAY10': 0, 'BLACKFRIDAY5': 0}
         for sku, slug, price in PROTECTED_CASES:
             canonical = self._item(slug, price)
             for item in (
@@ -402,15 +418,20 @@ class ProtectedCatalogueCheckoutTests(unittest.TestCase):
                         payload = {'code': code, 'email': self.customer['email'], 'items': [item]}
                         preview = self.client.post('/api/coupon/validate', json=payload)
                         self.assertEqual(preview.status_code, 200)
-                        self.assertFalse(preview.get_json()['valid'])
-                        self.assertEqual(preview.get_json()['error'], 'PROMOTION_NOT_AVAILABLE')
+                        self.assertTrue(preview.get_json()['valid'])
+                        self.assertFalse(preview.get_json()['coupon']['valid_in_promotion'])
                         used = self.client.post('/api/coupon/use', json=payload)
-                        self.assertEqual(used.status_code, 422)
-                        self.assertEqual(used.get_json()['error'], 'PROMOTION_NOT_AVAILABLE')
+                        self.assertEqual(used.status_code, 200)
+                        self.assertTrue(used.get_json()['success'])
+                        use_counts[code] += 1
         with self.app.app_context():
             for coupon in Coupon.query.all():
                 self.assertFalse(coupon.used)
-                self.assertEqual(coupon.current_uses, 0)
+                self.assertEqual(coupon.current_uses, use_counts[coupon.code])
+                self.assertFalse(coupon.valid_in_promotion)
+        self.create_session.assert_not_called()
+        self.create_coupon.assert_not_called()
+        self.holded_products.assert_not_called()
 
     def test_context_free_coupon_preview_remains_valid_but_is_not_checkout_approval(self):
         response = self.client.post('/api/coupon/validate', json={'code': 'BLACKFRIDAY10'})

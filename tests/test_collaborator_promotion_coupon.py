@@ -32,8 +32,8 @@ COLLABORATORS = (('IRVIANCESTRAL', 286, 87), ('dr.gemmavalls', 281, 7))
 PROTECTED = ('MIKVET500', 'MIKVE5LP', 'MIKPARA450', 'MIKPACKF', 'MIKPACKTP')
 # Six distinct fixed-price BF pack containers. Their component units do not
 # inherit the parent container's permission (or vice versa).
-BF_PACKS = ('MIKVET500BF3', 'MIKVET500BF6', 'MIKBIO19BF6',
-            'MIKPARA450BF3', 'MIKPARA450BF6', 'MIKVE5LPBF3')
+BF_PACKS = ('BF26-TEMP6', 'BF26-TEMP12', 'BF26-ECO6',
+            'BF26-PARA3', 'BF26-PARA6', 'BF26-5L3')
 DENIED_CODES = ('PUBLIC10', 'FIXED5', 'MIKELS-WELCOME', 'MIKELSFRIENDS', 'MIKELSFAMILY',
                 'ME2025', 'BIENVENIDA10', 'COLLAB10', 'RETURN10', 'UNKNOWN', 'STRIPE-ONLY')
 
@@ -307,7 +307,7 @@ class CollaboratorPromotionCouponTests(unittest.TestCase):
                 self.assert_veto(self.use(code, [self.item(BF_PACKS[0])]))
                 self.assertFalse(self.preview(code).get_json()['valid'])
 
-    def test_all_five_protected_skus_veto_both_collaborators_every_identity_and_route(self):
+    def test_all_five_ordinary_protected_skus_allow_both_collaborators_every_identity_except_subscription(self):
         for (code, _, _), sku in itertools.product(COLLABORATORS, PROTECTED):
             ordinary = self.item('REGULAR')
             attempts = (
@@ -320,12 +320,24 @@ class CollaboratorPromotionCouponTests(unittest.TestCase):
             )
             for attempt in attempts:
                 with self.subTest(code=code, sku=sku, identity=attempt):
-                    self.assert_veto(self.checkout([attempt], code))
-                    self.assert_veto(self.preview(code, [attempt]), 200)
-                    self.assert_veto(self.use(code, [attempt]))
-                    self.assert_veto(self.subscription(attempt, code))
+                    self.assertTrue(self.preview(code, [attempt]).get_json()['valid'])
+                    self.assertEqual(self.use(code, [attempt]).status_code, 200)
+                    result = self.checkout([{'price': 10, 'quantity': 1, **attempt}], code)
+                    if not attempt.get('id') and not attempt.get('slug'):
+                        self.assertEqual(result.status_code, 409)
+                        self.assertEqual(result.get_json()['error'], 'PRODUCT_NOT_FOUND')
+                    else:
+                        self.assertEqual(result.status_code, 200, result.get_json())
+                        self.assertEqual(self.effects['coupon'].call_args.kwargs['amount_off'], 100)
+                        self.assertEqual(self.effects['session'].call_args.kwargs['metadata']['volume_discount_amount'], '0.00')
+                    self.reset_effects()
+                    result = self.subscription(attempt, code)
+                    self.assertEqual(result.status_code, 422)
+                    self.assertEqual(result.get_json()['message'], 'La suscripción no está disponible para este producto.')
+                    for mock in self.effects.values():
+                        mock.assert_not_called()
 
-    def test_protected_hidden_addons_and_all_mixed_line_orders_full_veto(self):
+    def test_protected_hidden_promo_addons_allow_collaborator_policy_but_keep_mixed_gate_all_orders(self):
         for sku in PROTECTED:
             with self.app.app_context():
                 product = WebProduct.query.get(self.ids[sku])
@@ -337,11 +349,20 @@ class CollaboratorPromotionCouponTests(unittest.TestCase):
                 lines = [self.item(BF_PACKS[0]), self.item('REGULAR'),
                          self.item(sku, isAddon=True, inPromotion=False, valid_in_promotion=True)]
                 for ordered in itertools.permutations(lines):
-                    self.assert_veto(self.checkout(list(ordered), code))
-                    self.assert_veto(self.preview(code, list(ordered)), 200)
-                    self.assert_veto(self.use(code, list(ordered)))
+                    self.assertTrue(self.preview(code, list(ordered)).get_json()['valid'])
+                    self.assertEqual(self.use(code, list(ordered)).status_code, 200)
+                    self.reset_effects()
+                    result = self.checkout(list(ordered), code)
+                    if sku in PROTECTED[:3]:
+                        self.assertEqual(result.status_code, 409)
+                        self.assertEqual(result.get_json()['error'], 'PRODUCT_UNAVAILABLE')
+                        for mock in self.effects.values():
+                            mock.assert_not_called()
+                    else:
+                        self.assertEqual(result.status_code, 200, result.get_json())
+                        self.assertEqual(self.effects['coupon'].call_args.kwargs['amount_off'], 300)
 
-    def test_unresolved_raw_protected_sku_cannot_be_hidden_by_ordinary_id(self):
+    def test_unresolved_raw_ordinary_protected_sku_is_not_a_coupon_veto_but_subscription_still_fails(self):
         with self.app.app_context():
             for sku in PROTECTED:
                 db.session.delete(WebProduct.query.get(self.ids[sku]))
@@ -349,10 +370,15 @@ class CollaboratorPromotionCouponTests(unittest.TestCase):
             self.before = self.snapshot()
         for (code, _, _), sku in itertools.product(COLLABORATORS, PROTECTED):
             attempt = {**self.item('REGULAR'), 'sku': f' {sku.lower()} '}
-            self.assert_veto(self.checkout([attempt], code))
-            self.assert_veto(self.preview(code, [attempt]), 200)
-            self.assert_veto(self.use(code, [attempt]))
-            self.assert_veto(self.subscription(attempt, code))
+            self.assertTrue(self.preview(code, [attempt]).get_json()['valid'])
+            self.assertEqual(self.use(code, [attempt]).status_code, 200)
+            self.assertEqual(self.checkout([attempt], code).status_code, 200)
+            self.reset_effects()
+            result = self.subscription(attempt, code)
+            self.assertEqual(result.status_code, 422)
+            self.assertEqual(result.get_json()['message'], 'La suscripción no está disponible para este producto.')
+            for mock in self.effects.values():
+                mock.assert_not_called()
 
     def test_generic_promotion_hidden_addon_only_relaxed_for_confirmed_codes(self):
         lines = [self.item('REGULAR'), self.item('HIDDENPROMO', isAddon=True, inPromotion=False)]
@@ -369,12 +395,15 @@ class CollaboratorPromotionCouponTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(self.effects['coupon'].call_args.kwargs['amount_off'], 100)
 
-    def test_allowlisted_product_identity_forgery_still_cannot_mask_protected_product(self):
+    def test_allowlisted_conflicting_ordinary_protected_identity_has_no_coupon_veto(self):
         for sku in PROTECTED:
             attempt = self.item(BF_PACKS[0], slug=sku.lower(), sku='REGULAR')
             for code, _, _ in COLLABORATORS:
-                self.assert_veto(self.checkout([attempt], code))
-                self.assert_veto(self.preview(code, attempt), 200)
+                self.assertTrue(self.preview(code, attempt).get_json()['valid'])
+                result = self.checkout([attempt], code)
+                self.assertEqual(result.status_code, 200, result.get_json())
+                self.assertEqual(self.effects['coupon'].call_args.kwargs['amount_off'], 100)
+                self.assertEqual(self.effects['session'].call_args.kwargs['line_items'][0]['price_data']['product_data']['metadata']['sku'], BF_PACKS[0])
 
     def test_context_free_preview_is_not_trusted_after_flag_is_removed(self):
         self.assertTrue(self.preview('IRVIANCESTRAL').get_json()['coupon']['valid_in_promotion'])
@@ -520,6 +549,186 @@ class CollaboratorPromotionCouponTests(unittest.TestCase):
                 self.assertEqual(coupon.min_order_amount, 0)
                 self.assertIsNone(coupon.expires_at)
         self.assert_no_effects()
+
+    def test_all_normal_coupon_origins_discount_all_five_ordinary_protected_skus(self):
+        valid_codes = [code for code in DENIED_CODES if code not in ('UNKNOWN', 'STRIPE-ONLY')]
+        valid_codes += [code for code, _, _ in COLLABORATORS]
+        for code, sku in itertools.product(valid_codes, PROTECTED):
+            with self.subTest(code=code, sku=sku):
+                self.assertTrue(self.preview(code, [self.item(sku)]).get_json()['valid'])
+                result = self.checkout([self.item(sku, quantity=3)], code, discount_amount=999999)
+                self.assertEqual(result.status_code, 200, result.get_json())
+                params = self.effects['session'].call_args.kwargs
+                self.assertEqual(params['metadata']['subtotal'], '30.00')
+                self.assertEqual(params['metadata']['coupon_discount_amount'], '5.00' if code == 'FIXED5' else '3.00')
+                self.assertEqual(params['metadata']['volume_discount_amount'], '0.00')
+                self.assertEqual(self.effects['coupon'].call_args.kwargs['amount_off'], 500 if code == 'FIXED5' else 300)
+                self.assertEqual(params['line_items'][0]['price_data']['unit_amount'], 1000)
+
+    def test_every_bf_plus_normal_cart_ordinary_code_rejects_whole_coupon_in_all_orders(self):
+        for code, sku, normal in itertools.product(DENIED_CODES, BF_PACKS, ('REGULAR', *PROTECTED)):
+            for ordered in itertools.permutations([self.item(sku), self.item(normal)]):
+                with self.subTest(code=code, bf=sku, normal=normal):
+                    self.assert_veto(self.checkout(list(ordered), code))
+                    self.assert_veto(self.preview(code, list(ordered)), 200)
+                    self.assert_veto(self.use(code, list(ordered)))
+
+    def test_bf_plus_temprano_collaborator_coupon_policy_accepts_both_but_mixed_gate_unchanged(self):
+        for (code, _, _), sku in itertools.product(COLLABORATORS, BF_PACKS):
+            for ordered in itertools.permutations([self.item(sku), self.item('MIKVET500')]):
+                with self.app.app_context():
+                    self.assertFalse(cart_blocks_coupon(list(ordered), discount_code=code))
+                self.assertTrue(self.preview(code, list(ordered)).get_json()['valid'])
+                result = self.checkout(list(ordered), code)
+                self.assertEqual(result.status_code, 409)
+                self.assertEqual(result.get_json()['error'], 'PRODUCT_UNAVAILABLE')
+                self.assert_no_effects()
+
+    def test_collaborator_bf_plus_ordinary_component_pack_discounts_both_lines(self):
+        for (code, _, _), sku, normal in itertools.product(COLLABORATORS, BF_PACKS, ('REGULAR', *PROTECTED[3:])):
+            result = self.checkout([self.item(sku), self.item(normal)], code)
+            self.assertEqual(result.status_code, 200, result.get_json())
+            params = self.effects['session'].call_args.kwargs
+            self.assertEqual(params['metadata']['subtotal'], '20.00')
+            self.assertEqual(params['metadata']['coupon_discount_amount'], '2.00')
+            self.assertEqual(params['metadata']['total'], '18.00')
+            self.assertEqual(self.effects['coupon'].call_args.kwargs['amount_off'], 200)
+
+    def test_supported_ordinary_subscription_validates_all_coupon_origins_without_new_discount(self):
+        codes = [code for code in DENIED_CODES if code not in ('UNKNOWN', 'STRIPE-ONLY')]
+        codes += [code for code, _, _ in COLLABORATORS]
+        for code in codes:
+            result = self.subscription(self.item('REGULAR'), code, discount_amount=99999,
+                                       discounts=[{'coupon': 'forged'}], allow_promotion_codes=True)
+            self.assertEqual(result.status_code, 200, result.get_json())
+            params = self.effects['session'].call_args.kwargs
+            self.assertEqual(params['mode'], 'subscription')
+            self.assertIs(params['allow_promotion_codes'], False)
+            self.assertNotIn('discounts', params)
+            self.assertEqual(self.effects['price'].call_args.kwargs['unit_amount'], 1000)
+            self.effects['coupon'].assert_not_called()
+
+    def test_supported_ordinary_subscription_normal_coupon_minimum_and_email_are_unchanged(self):
+        for values in ({'min_order_amount': 50}, {'email': 'other@example.invalid'}):
+            self.modify_coupon('PUBLIC10', min_order_amount=0, email=None)
+            self.modify_coupon('PUBLIC10', **values)
+            result = self.subscription(self.item('REGULAR', price=999999), 'PUBLIC10',
+                                       subtotal=999999, order_amount=999999, valid_in_promotion=True)
+            self.assertEqual(result.status_code, 422)
+            self.assertEqual(result.get_json()['error'], 'COUPON_INVALID')
+            self.assert_no_effects()
+
+    def test_exact_six_campaign_skus_veto_without_persisted_promotion_or_with_forged_identity(self):
+        with self.app.app_context():
+            for sku in BF_PACKS:
+                WebProduct.query.get(self.ids[sku]).in_promotion = False
+            db.session.commit()
+            self.before = self.snapshot()
+        for sku in BF_PACKS:
+            ordinary = self.item('REGULAR')
+            attempts = (self.item(sku, in_promotion=False), {'id': self.ids[sku]},
+                        {'slug': sku.lower()}, {'sku': f' {sku.lower()} '},
+                        self.item(sku, slug='regular', sku='REGULAR'),
+                        {**ordinary, 'slug': sku.lower()}, {**ordinary, 'sku': sku},
+                        {'id': 999999, 'slug': sku.lower(), 'sku': 'REGULAR'})
+            for attempt in attempts:
+                self.assert_veto(self.checkout([attempt], 'PUBLIC10'))
+                self.assert_veto(self.preview('PUBLIC10', attempt), 200)
+                self.assert_veto(self.use('PUBLIC10', attempt))
+                self.assert_veto(self.subscription(attempt, 'PUBLIC10'))
+        for (code, _, _), sku in itertools.product(COLLABORATORS, BF_PACKS):
+            self.assertTrue(self.preview(code, [self.item(sku)]).get_json()['valid'])
+            result = self.checkout([self.item(sku)], code)
+            self.assertEqual(result.status_code, 200, result.get_json())
+            self.assertEqual(self.effects['coupon'].call_args.kwargs['amount_off'], 100)
+
+    def test_unresolved_raw_campaign_sku_still_vetoes_ordinary_coupon_with_forged_id(self):
+        with self.app.app_context():
+            for sku in BF_PACKS:
+                db.session.delete(WebProduct.query.get(self.ids[sku]))
+            db.session.commit()
+            self.before = self.snapshot()
+        for sku in BF_PACKS:
+            attempt = {**self.item('REGULAR'), 'sku': f' {sku.lower()} '}
+            self.assert_veto(self.checkout([attempt], 'PUBLIC10'))
+            self.assert_veto(self.preview('PUBLIC10', attempt), 200)
+            self.assert_veto(self.use('PUBLIC10', attempt))
+            self.assert_veto(self.subscription(attempt, 'PUBLIC10'))
+
+    def test_nearby_bf_names_do_not_invent_coupon_campaign_exclusions(self):
+        for sku in ('MIKVET500BF', 'MIKVET500BF3EXTRA', 'MIKBIO19BF3', 'MIKPACKFR'):
+            with self.app.app_context():
+                self.assertFalse(cart_blocks_coupon({**self.item('REGULAR'), 'sku': sku}, discount_code='PUBLIC10'))
+        self.assert_no_effects()
+
+    def test_ordinary_protected_coupon_invalid_expired_used_exhausted_and_email_checks_all_flows(self):
+        states = ({'active': False}, {'used': True},
+                  {'expires_at': datetime.utcnow() - timedelta(days=1)},
+                  {'max_uses': 2, 'current_uses': 2}, {'email': 'other@example.invalid'})
+        for sku, state in itertools.product(PROTECTED, states):
+            self.modify_coupon('PUBLIC10', active=True, used=False, expires_at=None,
+                               max_uses=None, current_uses=0, email=None)
+            self.modify_coupon('PUBLIC10', **state)
+            for result in (self.checkout([self.item(sku)], 'PUBLIC10'),
+                           self.subscription(self.item(sku), 'PUBLIC10')):
+                self.assertEqual(result.status_code, 422)
+                self.assertEqual(result.get_json()['error'], 'COUPON_INVALID')
+            self.assertFalse(self.preview('PUBLIC10', [self.item(sku)]).get_json()['valid'])
+            self.assertEqual(self.use('PUBLIC10', [self.item(sku)]).status_code, 400)
+            self.assert_no_effects()
+
+    def test_ordinary_protected_coupon_minimum_uses_server_base_not_browser_amount(self):
+        self.modify_coupon('PUBLIC10', min_order_amount=50)
+        for sku in PROTECTED:
+            result = self.checkout([self.item(sku)], 'PUBLIC10', subtotal=999999, order_amount=999999)
+            self.assertEqual(result.status_code, 422)
+            self.assertEqual(result.get_json()['error'], 'COUPON_INVALID')
+            self.assertIn('50', result.get_json()['message'])
+            self.assert_no_effects()
+        # The minimum passes on the same ordinary SKU at 5 master-price units.
+        result = self.checkout([self.item('MIKVET500', quantity=5)], 'PUBLIC10')
+        self.assertEqual(result.status_code, 200, result.get_json())
+        self.assertEqual(self.effects['session'].call_args.kwargs['metadata']['coupon_discount_amount'], '5.00')
+
+    def test_stale_client_valid_preview_does_not_override_new_persisted_promotion(self):
+        preview = self.preview('PUBLIC10', [self.item('MIKVET500')])
+        self.assertTrue(preview.get_json()['valid'])
+        with self.app.app_context():
+            WebProduct.query.get(self.ids['MIKVET500']).in_promotion = True
+            db.session.commit()
+            self.before = self.snapshot()
+        flags = {'coupon': preview.get_json()['coupon'], 'valid_in_promotion': True}
+        self.assert_veto(self.checkout([self.item('MIKVET500', in_promotion=False)], 'PUBLIC10', **flags))
+        self.assert_veto(self.preview('PUBLIC10', [self.item('MIKVET500')], **flags), 200)
+        self.assert_veto(self.use('PUBLIC10', [self.item('MIKVET500')], **flags))
+
+    def test_23_synthetic_historical_flags_remain_false_never_grant_bf_exception(self):
+        # Synthetic identities exercise all 23 flags without reading/mutating live data.
+        codes = [f'HISTORICAL-FIXTURE-{index:02d}' for index in range(23)]
+        with self.app.app_context():
+            db.session.add_all(Coupon(code=code, description='Historical collaborator', discount_value=10)
+                               for code in codes)
+            db.session.commit()
+            self.before = self.snapshot()
+        for code in codes:
+            self.assertTrue(self.preview(code, [self.item('MIKVET500')]).get_json()['valid'])
+            self.assert_veto(self.checkout([self.item(BF_PACKS[0])], code))
+            self.assert_veto(self.preview(code, [self.item(BF_PACKS[0])]), 200)
+        with self.app.app_context():
+            for code in (*codes, 'MIKELSFRIENDS'):
+                coupon = Coupon.query.filter_by(code=code).one()
+                self.assertFalse(coupon.valid_in_promotion)
+                self.assertFalse(coupon_allows_promotion(coupon))
+
+    def test_reserved_legacy_campaign_aliases_do_not_become_ordinary_coupon_lines(self):
+        aliases = ('MIKVET500BF3', 'MIKVET500BF6', 'MIKBIO19BF6',
+                   'MIKPARA450BF3', 'MIKPARA450BF6', 'MIKVE5LPBF3')
+        for sku in aliases:
+            attempt = {**self.item('REGULAR'), 'sku': sku}
+            self.assert_veto(self.preview('MIKELSFRIENDS', attempt), 200)
+            self.assert_veto(self.checkout([attempt], 'PUBLIC10'))
+            with self.app.app_context():
+                self.assertFalse(cart_blocks_coupon(attempt, discount_code='IRVIANCESTRAL'))
 
 
 if __name__ == '__main__':

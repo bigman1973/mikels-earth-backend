@@ -222,7 +222,7 @@ def create_checkout_session():
 
         # Preserve the mixed-cart gate except for the two exact Temprano
         # harvest SKUs. This ordinary cart has independent per-line prices;
-        # the promotion veto below still forbids indirect discounts/coupons.
+        # catalogue volume protections remain separate from coupon permission.
         if is_mixed_with_full_price_only_product(checkout_products):
             return jsonify({
                 'error': 'PRODUCT_UNAVAILABLE',
@@ -240,9 +240,9 @@ def create_checkout_session():
 
         # Stripe distributes a checkout-wide discount over all lines. A tier
         # on an unrelated line must not indirectly discount a protected pack.
-        if contains_promotion_protected_product(checkout_products) and (
-            discount_code or volume_discount_amount > 0
-        ):
+        # Valid coupons are allowed on ordinary protected SKUs; ONLY volume
+        # savings retain this catalogue veto. coupon_policy checks promotions.
+        if contains_promotion_protected_product(checkout_products) and volume_discount_amount > 0:
             return jsonify({
                 'error': 'PROMOTION_NOT_AVAILABLE',
                 'message': 'El código o descuento no se puede aplicar a este pedido.',
@@ -264,6 +264,9 @@ def create_checkout_session():
             for item in items
         )
         subtotal = as_eur(subtotal, field='subtotal')
+        # Once the whole-cart coupon policy passes, every line is coupon-eligible,
+        # including ordinary full-price SKUs (and BF for opted-in collaborators).
+        # Do not reuse catalogue tier eligibility to exclude coupon line amounts.
         discountable_subtotal = as_eur(
             subtotal - volume_discount_amount,
             field='subtotal con descuento por cantidad',
