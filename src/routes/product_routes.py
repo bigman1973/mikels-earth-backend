@@ -9,6 +9,7 @@ precio válido nunca se incluye en la respuesta pública.
 from flask import Blueprint, jsonify, request
 from src.models.web_product import WebProduct
 from src.services.protected_catalogue import is_promotion_protected, protect_public_properties
+from src.services.catalogue_position import catalogue_order_by
 
 product_bp = Blueprint('products', __name__)
 
@@ -98,7 +99,7 @@ def get_products():
     products = WebProduct.query.filter_by(
         active=True,
         visible_in_store=True
-    ).order_by(WebProduct.display_order).all()
+    ).order_by(*catalogue_order_by(WebProduct)).all()
     addon_products = _resolve_addons(products, lang)
     products_list = [
         _serialize_product(product, addon_products, lang)

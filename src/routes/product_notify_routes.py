@@ -3,10 +3,13 @@ from src.models.user import db
 from src.models.product_notification import ProductNotification
 from src.services.email_dispatcher import dispatch_product_notify_subscribe, dispatch_product_back_in_stock
 import re
+import time
+from collections import defaultdict
 
 product_notify_bp = Blueprint('product_notify', __name__)
 
-# IP admission disabled: Railway ingress identity is not certified.
+# Anti-spam
+_notify_rate_store = defaultdict(list)
 
 
 def _is_gibberish(text):
@@ -26,6 +29,16 @@ def _is_gibberish(text):
 def subscribe_product_notification():
     """Registra inter\u00e9s de un cliente en un producto agotado y env\u00eda evento a Klaviyo"""
     try:
+        # Rate limiting
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+        now = time.time()
+        _notify_rate_store[client_ip] = [t for t in _notify_rate_store[client_ip] if now - t < 3600]
+        if len(_notify_rate_store[client_ip]) >= 5:
+            return jsonify({'success': True, 'message': 'Te avisaremos cuando est\u00e9 disponible'}), 200
+        _notify_rate_store[client_ip].append(now)
+
         data = request.get_json()
         email = data.get('email', '').strip().lower()
         name = data.get('name', '').strip()

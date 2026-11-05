@@ -8,11 +8,28 @@ import os
 import re
 import requests
 from datetime import datetime
+from collections import defaultdict
 import time
 
 horeca_bp = Blueprint('horeca', __name__)
 
-# IP admission disabled: Railway ingress identity is not certified.
+# ============================================================
+# ANTI-SPAM: Rate limiting por IP (en memoria)
+# ============================================================
+_rate_limit_store = defaultdict(list)  # {ip: [timestamp1, timestamp2, ...]}
+RATE_LIMIT_MAX = 3  # Max submissions per window
+RATE_LIMIT_WINDOW = 3600  # 1 hour in seconds
+
+
+def _is_rate_limited(ip):
+    """Check if an IP has exceeded the rate limit."""
+    now = time.time()
+    # Clean old entries
+    _rate_limit_store[ip] = [t for t in _rate_limit_store[ip] if now - t < RATE_LIMIT_WINDOW]
+    if len(_rate_limit_store[ip]) >= RATE_LIMIT_MAX:
+        return True
+    _rate_limit_store[ip].append(now)
+    return False
 
 
 # ============================================================
@@ -112,11 +129,25 @@ def create_horeca_order():
     Procesa una solicitud de pedido HORECA con protección anti-spam
     """
     try:
+        # Rate limiting by IP
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+        
+        if _is_rate_limited(client_ip):
+            print(f"⚠️ HORECA rate limited: {client_ip}")
+            # Return success to not reveal to bots that they're blocked
+            return jsonify({
+                'success': True,
+                'message': 'Solicitud enviada correctamente. Recibirás una propuesta en las próximas 24 horas.'
+            }), 200
+        
         data = request.get_json()
         
         # Anti-spam checks
         is_spam, spam_reason = _is_spam_submission(data)
         if is_spam:
+            print(f"🚫 HORECA spam blocked ({spam_reason}): {data.get('establishmentName', '?')} / {data.get('email', '?')} / IP: {client_ip}")
             # Return success to not reveal detection to bots
             return jsonify({
                 'success': True,

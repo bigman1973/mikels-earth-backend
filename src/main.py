@@ -58,6 +58,8 @@ from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot  # IVA capturad
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 app.config['SECRET_KEY'] = os.environ['SECRET_KEY'].strip()
+app.config['VIP_FUNNEL_HONEYPOT_ACTIVE'] = True
+app.config['VIP_FUNNEL_RATE_LIMIT_ACTIVE'] = False
 install_vip_funnel(app)  # Best effort; additive table is migrated manually, not via create_all.
 
 # Enable CORS
@@ -109,7 +111,7 @@ def create_tables():
     # El healthcheck de Railway solo confirma que el proceso responde. No debe
     # quedar bloqueado por migraciones; la primera petición funcional seguirá
     # ejecutando este bloque completo antes de consultar o modificar datos.
-    if request.path in ('/api/health', '/api/admin/vip/funnel', '/api/vip/pageview'):
+    if request.path in ('/health', '/api/health', '/api/admin/vip/funnel', '/api/vip/pageview'):
         # Aggregate endpoints must never trigger unrelated schema/business work.
         return None
 

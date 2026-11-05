@@ -32,7 +32,8 @@ DB_URL = os.getenv('VIP_FUNNEL_TEST_DATABASE_URL', '')
 
 def local_app(url='sqlite:///:memory:'):
     app = Flask(__name__)
-    app.config.update(TESTING=True, SQLALCHEMY_DATABASE_URI=url, SQLALCHEMY_TRACK_MODIFICATIONS=False)
+    app.config.update(TESTING=True, SQLALCHEMY_DATABASE_URI=url, SQLALCHEMY_TRACK_MODIFICATIONS=False,
+                      VIP_FUNNEL_HONEYPOT_ACTIVE=True, VIP_FUNNEL_RATE_LIMIT_ACTIVE=False)
     db.init_app(app)
     install_vip_funnel(app)
     app.register_blueprint(vip_routes.vip_bp, url_prefix='/api/vip')
@@ -113,7 +114,6 @@ class FunnelUnitTests(unittest.TestCase):
         app = local_app()
         with app.app_context():
             db.create_all()
-        vip_routes._vip_rate_store.clear()
         with patch('src.services.vip_funnel.record_aggregate', return_value=False), \
                 patch('src.routes.vip_routes.klaviyo_subscribe_vip_contact', return_value=(True, None)), \
                 patch('src.routes.vip_routes.klaviyo_track_vip_signup', return_value=(True, None)):
@@ -159,7 +159,6 @@ class FunnelPostgresTests(unittest.TestCase):
         self.network = patch('requests.sessions.Session.request', side_effect=AssertionError('Network blocked in tests'))
         self.network.start()
         self.client = self.app.test_client()
-        vip_routes._vip_rate_store.clear()
         with self.app.app_context():
             with db.engine.begin() as conn:
                 conn.execute(text('TRUNCATE vip_funnel_daily, vip_signups, admin_users RESTART IDENTITY'))
@@ -187,13 +186,14 @@ class FunnelPostgresTests(unittest.TestCase):
                 event.assert_not_called()
         with patch('src.routes.vip_routes.klaviyo_subscribe_vip_contact', return_value=(False, 'LOOKUP_FAILED')):
             self.assertEqual(self.submit().status_code, 502)
-        self.assertEqual(self.submit().status_code, 429)
+        self.assertEqual(self.client.post('/api/vip/signup', json={'website': 'local-trap-fixture'}).status_code, 200)
         counts = self.counts()
         self.assertEqual(counts['submissions'], 6)
         self.assertEqual(counts['validation_rejected'], 1)
         self.assertEqual(counts['ineligible'], 3)
         self.assertEqual(counts['technical_failure'], 1)
-        self.assertEqual(counts['rate_limited'], 1)
+        self.assertEqual(counts['honeypot'], 1)
+        self.assertEqual(counts['rate_limited'], 0)
         self.assertEqual(counts['unknown_outcome'], 0)
 
     def test_success_requires_event_accepted(self):
@@ -251,12 +251,16 @@ class FunnelPostgresTests(unittest.TestCase):
             from flask import request
             if request.json.get('trap'):
                 mark_vip_outcome('honeypot')
+            if request.json.get('limited'):
+                return jsonify({'neutral': True}), 429
             return jsonify({'neutral': True})
         client = app.test_client()
         client.post('/api/vip/signup', json={'trap': True})
         client.post('/api/vip/signup', json={})
+        client.post('/api/vip/signup', json={'limited': True})
         counts = self.counts()
         self.assertEqual(counts['honeypot'], 1)
+        self.assertEqual(counts['rate_limited'], 1)  # Classification hook, not an active IP limiter.
         self.assertEqual(counts['unknown_outcome'], 1)
         self.assertEqual(counts['successful_signup'], 0)
 
@@ -281,6 +285,8 @@ class FunnelPostgresTests(unittest.TestCase):
         observation = datetime.now(timezone.utc)
         with self.app.app_context():
             for source, at in [('vip_black_friday_2026', observation - timedelta(hours=1)),
+                               ('vip_black_friday_2026:ip_unverified:x_real_ip', observation - timedelta(hours=1)),
+                               ('vip_black_friday_2026:ip_unverified:unavailable', observation - timedelta(hours=1)),
                                ('other', observation - timedelta(hours=1))]:
                 db.session.add(VipSignup(email='historical@example.invalid', source_ip='192.0.2.1',
                     source=source, consent_marketing=True, created_at=at.replace(tzinfo=None),
@@ -290,7 +296,7 @@ class FunnelPostgresTests(unittest.TestCase):
             self.assertTrue(record_aggregate({'successful_signup': 1, 'unknown_outcome': -1}, observation))
         response = self.client.get('/api/admin/vip/funnel', headers=self.headers)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(sum(day['historical_persisted']['successful_signup'] for day in response.json['daily'] if day['historical_persisted']), 1)
+        self.assertEqual(sum(day['historical_persisted']['successful_signup'] for day in response.json['daily'] if day['historical_persisted']), 3)
         self.assertEqual(sum(day['live']['successful_signup'] or 0 for day in response.json['daily']), 1)
         for query in ['start=invalid', 'end=2099-01-01', 'token=not-allowed', 'start=2026-01-01&start=2026-01-02']:
             self.assertEqual(self.client.get('/api/admin/vip/funnel?' + query, headers=self.headers).status_code, 400)

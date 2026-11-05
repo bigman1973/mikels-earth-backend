@@ -82,7 +82,9 @@ HISTORICAL_SQL = text("""
                OR (klaviyo_subscription_status = 'accepted' AND klaviyo_event_status = 'failed')))
                AS unknown_outcome
     FROM vip_signups
-    WHERE source = 'vip_black_friday_2026'
+    WHERE source IN ('vip_black_friday_2026',
+        'vip_black_friday_2026:ip_unverified:x_real_ip',
+        'vip_black_friday_2026:ip_unverified:unavailable')
       AND created_at >= :start_utc AND created_at < :end_utc
       AND created_at < :cutoff_utc
     GROUP BY 1 ORDER BY 1

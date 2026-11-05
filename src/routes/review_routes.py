@@ -10,8 +10,10 @@ from src.models.review import Review
 from src.models.order import Order
 from src.services.klaviyo_service import send_klaviyo_event
 from datetime import datetime
+from collections import defaultdict
 import os
 import re
+import time
 import hmac
 
 review_bp = Blueprint('review', __name__)
@@ -20,7 +22,8 @@ ADMIN_SECRET_KEY = os.environ['ADMIN_SECRET_KEY'].strip()
 if not ADMIN_SECRET_KEY:
     raise RuntimeError('Missing required security environment variable: ADMIN_SECRET_KEY')
 
-# IP admission disabled: Railway ingress identity is not certified.
+# Anti-spam
+_review_rate_store = defaultdict(list)
 
 
 def _is_gibberish(text):
@@ -64,6 +67,15 @@ def _validate_email(email):
 
 @review_bp.route('', methods=['POST'])
 def create_review():
+    # Anti-spam: rate limiting
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if client_ip:
+        client_ip = client_ip.split(',')[0].strip()
+    now = time.time()
+    _review_rate_store[client_ip] = [t for t in _review_rate_store[client_ip] if now - t < 3600]
+    if len(_review_rate_store[client_ip]) >= 3:
+        return jsonify({'error': 'Demasiados intentos. Inténtalo más tarde.'}), 429
+    _review_rate_store[client_ip].append(now)
     """
     Crear una nueva reseña y enviar su evento de confirmación a Klaviyo.
     

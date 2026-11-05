@@ -142,14 +142,17 @@ class FormSecurityTests(unittest.TestCase):
         self.assertNotIn('private-fixture', response.get_data(as_text=True))
         self.assertEqual(captured.getvalue(), '')
 
-    def test_all_legacy_form_ip_limits_removed_and_main_bypasses_bootstrap(self):
+    def test_only_vip_contact_ip_limits_removed_and_main_bypasses_bootstrap(self):
         root = Path(__file__).resolve().parents[1]
-        for name in ('vip_routes.py', 'contact_routes.py', 'newsletter_routes.py', 'horeca_routes.py', 'product_notify_routes.py', 'review_routes.py'):
+        for name in ('vip_routes.py', 'contact_routes.py'):
             source = (root / 'src/routes' / name).read_text()
             self.assertNotIn('rate_store', source)
             self.assertNotIn('rate_limit_store', source)
             self.assertNotIn('X-Forwarded-For', source)
             self.assertNotIn('remote_addr', source)
+        for name in ('newsletter_routes.py', 'horeca_routes.py', 'product_notify_routes.py', 'review_routes.py'):
+            source = (root / 'src/routes' / name).read_text()
+            self.assertIn('rate_', source)
         main = (root / 'src/main.py').read_text()
         block = main[main.index('def create_tables():'):main.index('    if not hasattr(app,')]
         self.assertIn("('/api/vip/signup', '/api/contact/send-message')", block)
