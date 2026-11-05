@@ -42,6 +42,8 @@ from src.routes.product_routes import product_bp  # Catálogo público de produc
 from src.routes.meta_catalog_routes import meta_catalog_bp  # Feed público de Meta Commerce
 from src.routes.translate_routes import translate_bp  # Traducción de reseñas
 from src.routes.vip_routes import vip_bp  # Lista VIP Black Friday
+from src.routes.vip_funnel_routes import vip_funnel_bp
+from src.services.vip_funnel import install_vip_funnel
 from src.models.blog import BlogPost  # Modelo del blog
 from src.models.review import Review  # Modelo de reseñas
 from src.models.abandoned_cart import AbandonedCart  # Modelo de carrito abandonado
@@ -56,6 +58,7 @@ from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot  # IVA capturad
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 app.config['SECRET_KEY'] = os.environ['SECRET_KEY'].strip()
+install_vip_funnel(app)  # Best effort; additive table is migrated manually, not via create_all.
 
 # Enable CORS
 # Permitir múltiples orígenes: producción, Vercel preview, y desarrollo local
@@ -106,7 +109,8 @@ def create_tables():
     # El healthcheck de Railway solo confirma que el proceso responde. No debe
     # quedar bloqueado por migraciones; la primera petición funcional seguirá
     # ejecutando este bloque completo antes de consultar o modificar datos.
-    if request.path == '/api/health':
+    if request.path in ('/api/health', '/api/admin/vip/funnel', '/api/vip/pageview'):
+        # Aggregate endpoints must never trigger unrelated schema/business work.
         return None
 
     # A form/honeypot must not trigger unrelated schema, catalogue or seed work.
@@ -617,6 +621,7 @@ app.register_blueprint(product_bp, url_prefix='/api')  # Catálogo público de p
 app.register_blueprint(meta_catalog_bp, url_prefix='/api')  # Feed público de Meta Commerce
 app.register_blueprint(translate_bp, url_prefix='/api/translate')  # Traducción de reseñas
 app.register_blueprint(vip_bp, url_prefix='/api/vip')  # Alta VIP Black Friday
+app.register_blueprint(vip_funnel_bp)  # Admin-only aggregate GET; empty public write-only POST
 
 # Database configuration for coupons and user management
 # Use DATABASE_URL from Railway (PostgreSQL) or fallback to SQLite for local dev
