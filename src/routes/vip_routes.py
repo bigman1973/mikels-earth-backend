@@ -12,6 +12,11 @@ from src.services.klaviyo_service import (
 )
 
 vip_bp = Blueprint('vip', __name__)
+_VIP_INELIGIBLE_ERRORS = frozenset({
+    'VIP_EXISTING_NO_EMAIL_CONSENT',
+    'VIP_EXISTING_EMAIL_SUPPRESSED',
+    'VIP_EXISTING_LIST_SUPPRESSED',
+})
 
 
 @vip_bp.route('/signup', methods=['POST'])
@@ -52,10 +57,15 @@ def signup_for_vip_list():
         subscribed, subscription_error = klaviyo_subscribe_vip_contact(
             email=email, first_name=first_name, consented_at=claim.attempted_at, source_ip=ip,
         )
-        signup.klaviyo_subscription_status = 'accepted' if subscribed else 'failed'
+        if subscribed:
+            signup.klaviyo_subscription_status = 'accepted'
+        elif subscription_error in _VIP_INELIGIBLE_ERRORS:
+            signup.klaviyo_subscription_status = 'ineligible'
+        else:
+            signup.klaviyo_subscription_status = 'failed'
         if not subscribed:
             signup.klaviyo_event_status = 'not_sent'
-            signup.klaviyo_error = subscription_error or 'Klaviyo rechazó la suscripción VIP.'
+            signup.klaviyo_error = subscription_error or 'VIP_SIGNUP_FAILED'
             db.session.commit()
             finish_attempt(claim.attempt_id, 'vip_failed')
             return jsonify({'error': 'No se ha podido completar el alta. Inténtalo de nuevo más tarde.'}), 502
