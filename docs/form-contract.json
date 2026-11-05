@@ -1,4 +1,6 @@
 {
+  "status": "PREPARED_NOT_ACTIVE; app uses 23d4c36 with VIP/contact IP limits disabled",
+  "prepared_module": "src/services/form_security_prepared.py",
   "version": "2026-11-04-keyless-v1",
   "scope": ["POST /api/vip/signup", "POST /api/contact/send-message"],
   "honeypot": {

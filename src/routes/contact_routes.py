@@ -1,19 +1,17 @@
-"""Contact form with shared server-side, keyless anti-spam protection."""
+"""Contact form with zero-effect honeypot and optional phone validation."""
 import re
 import time
 
 from flask import Blueprint, jsonify
 from src.services.email_dispatcher import dispatch_contact_notification, dispatch_contact_confirmation
-from src.services.form_security import (
-    FormSecurityError, claim_attempt, client_ip, finish_attempt, honeypot_filled,
-    normalize_form_email, phone_is_rejected, read_form_payload, silent_success,
-)
+from src.services.form_security import honeypot_filled, phone_is_rejected, read_form_payload, silent_success
 
 contact_bp = Blueprint('contact', __name__)
 
+# IP limits are explicitly disabled: ingress identity is not certified.
+
 
 def _is_gibberish(text):
-    """Retain existing name/message heuristics, unrelated to email identity."""
     if not text or len(text) < 4:
         return False
     clean = re.sub(r'[\s\-\'\.\,\!\?\:]', '', text.lower())
@@ -31,9 +29,7 @@ def _is_gibberish(text):
 
 
 def _is_spam_contact(data):
-    """Preserve legacy _hp/_ts and message/name spam checks."""
-    if honeypot_filled(data):
-        return True, 'honeypot_filled'
+    """Preserve pre-existing timing/name/message heuristics without logging PII."""
     form_start = data.get('_ts')
     if form_start:
         try:
@@ -42,9 +38,9 @@ def _is_spam_contact(data):
         except (ValueError, TypeError):
             pass
     name = data.get('name', '')
-    message = data.get('message', '')
     if _is_gibberish(name):
         return True, 'gibberish_name'
+    message = data.get('message', '')
     if _is_gibberish(message):
         return True, 'gibberish_message'
     if message and len(message.strip()) < 10 and ' ' not in message.strip():
@@ -56,41 +52,29 @@ def _is_spam_contact(data):
 
 @contact_bp.route('/send-message', methods=['POST'])
 def send_message():
-    claim = None
+    data = read_form_payload()
+    if data is None:
+        return jsonify({'error': 'El formulario no es válido.', 'code': 'invalid_payload'}), 400
+    # HONEYPOT_OUTCOME = honeypot_discarded; fixed hook for the funnel agent.
+    if honeypot_filled(data):
+        return silent_success()
+    if phone_is_rejected(data.get('phone')):
+        return jsonify({'error': 'El teléfono de diez dígitos necesita prefijo internacional.', 'code': 'invalid_phone'}), 400
+    if any(not isinstance(data.get(field, ''), str) for field in ('name', 'email', 'message')):
+        return jsonify({'error': 'El formulario no es válido.', 'code': 'invalid_payload'}), 400
     try:
-        data = read_form_payload()
-        if honeypot_filled(data):
-            return silent_success()
-        ip = client_ip()
-        email = normalize_form_email(data.get('email'))
-        name = data.get('name')
-        message = data.get('message')
-        phone = data.get('phone', '')
-        valid_text = isinstance(name, str) and isinstance(message, str) and bool(name.strip() and message.strip())
-        bad_phone = phone_is_rejected(phone)
-        is_spam, _ = _is_spam_contact(data) if valid_text else (False, '')
-        claim = claim_attempt('contact', ip, email, eligible=bool(email and valid_text and not bad_phone and not is_spam))
-        if not valid_text or not email:
-            return jsonify({'error': 'Nombre, email válido y mensaje son requeridos'}), 400
-        if bad_phone:
-            return FormSecurityError('invalid_phone', 400, 0).response()
+        is_spam, _ = _is_spam_contact(data)
         if is_spam:
-            finish_attempt(claim.attempt_id, 'contact_spam')
-            return silent_success()
-
-        # Canonical duplicates are AUDIT ONLY for contact. A second distinct
-        # legitimate message must still be delivered within the IP quota.
-        dispatch_contact_notification(name.strip(), email, phone or '', message.strip())
-        dispatch_contact_confirmation(name.strip(), email, message.strip())
-        finish_attempt(claim.attempt_id, 'contact_accepted')
+            return jsonify({'success': True, 'message': 'Mensaje enviado correctamente'}), 200
+        name = data.get('name')
+        email = data.get('email')
+        phone = data.get('phone') or ''
+        message = data.get('message')
+        if not name or not email or not message:
+            return jsonify({'error': 'Nombre, email y mensaje son requeridos'}), 400
+        dispatch_contact_notification(name, email, phone, message)
+        dispatch_contact_confirmation(name, email, message)
         return jsonify({'success': True, 'message': 'Mensaje enviado correctamente'}), 200
-    except FormSecurityError as error:
-        return error.response()
     except Exception:
-        if claim is not None:
-            try:
-                finish_attempt(claim.attempt_id, 'contact_failed')
-            except FormSecurityError:
-                pass
-        # Never return raw exception strings containing contact or config data.
-        return jsonify({'error': 'No se ha podido enviar el mensaje. Inténtalo más tarde.'}), 502
+        # No exception strings, payloads, addresses or provider responses.
+        return jsonify({'error': 'No se ha podido enviar el mensaje. Inténtalo más tarde.'}), 500

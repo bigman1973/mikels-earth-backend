@@ -1,14 +1,23 @@
-"""Black Friday VIP signup: explicit consent; no newsletter/coupon flow."""
+"""Black Friday VIP signup with current-consent protection and aggregate telemetry.
+
+The public response never reveals a remote profile's consent or suppression.
+Existing Klaviyo profiles are linked only; their subscription is never renewed.
+"""
+from datetime import datetime
+
 from flask import Blueprint, jsonify
 
 from src.models.user import db
 from src.models.vip_signup import VipSignup
+from src.services.email_identity import normalize_email_address
 from src.services.form_security import (
-    FormSecurityError, claim_attempt, client_ip, finish_attempt, honeypot_filled,
-    normalize_form_email, phone_is_rejected, read_form_payload, silent_success,
+    UNVERIFIED_IP, consent_ip_evidence, honeypot_filled, phone_is_rejected,
+    read_form_payload, silent_success,
 )
+from src.services.vip_funnel import mark_vip_outcome
 from src.services.klaviyo_service import (
-    klaviyo_subscribe_vip_contact, klaviyo_track_vip_signup,
+    klaviyo_subscribe_vip_contact,
+    klaviyo_track_vip_signup,
 )
 
 vip_bp = Blueprint('vip', __name__)
@@ -21,73 +30,82 @@ _VIP_INELIGIBLE_ERRORS = frozenset({
 
 @vip_bp.route('/signup', methods=['POST'])
 def signup_for_vip_list():
-    """Preserve historic consent; one new VIP action per canonical identity."""
-    claim = None
-    try:
-        data = read_form_payload()
-        if honeypot_filled(data):
-            return silent_success()
-        ip = client_ip()
-        email = normalize_form_email(data.get('email'))
-        first_name = str(data.get('first_name') or '').strip()[:120]
-        consent = data.get('marketing_consent') is True
-        bad_phone = phone_is_rejected(data.get('phone'))
-        claim = claim_attempt('vip', ip, email, eligible=bool(email and consent and not bad_phone))
-        if not email:
-            return jsonify({'error': 'Introduce un email válido.'}), 400
-        if not consent:
-            return jsonify({'error': 'Debes aceptar recibir comunicaciones comerciales para entrar en la lista VIP.'}), 400
-        if bad_phone:
-            return FormSecurityError('invalid_phone', 400, 0).response()
-        if claim.duplicate:
-            return silent_success()
+    """Record explicit consent without overriding an existing profile's state."""
+    data = read_form_payload()
+    if data is None:
+        mark_vip_outcome('validation_rejected')
+        return jsonify({'error': 'El formulario no es válido.', 'code': 'invalid_payload'}), 400
+    # No IP, payload, profile, event, email or consent row for a trapped request.
+    # Aggregate-only observation is independent of consent/business transactions.
+    if honeypot_filled(data):
+        mark_vip_outcome('honeypot')
+        return silent_success()
+    if phone_is_rejected(data.get('phone')):
+        mark_vip_outcome('validation_rejected')
+        return jsonify({'error': 'El teléfono de diez dígitos necesita prefijo internacional.', 'code': 'invalid_phone'}), 400
 
-        signup = VipSignup(
-            email=email, first_name=first_name or None, consent_marketing=True,
-            consented_at=claim.attempted_at, source_ip=ip,
-        )
-        db.session.add(signup)
-        try:
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            finish_attempt(claim.attempt_id, 'vip_failed')
-            raise FormSecurityError('form_unavailable') from None
+    email = normalize_email_address(data.get('email'))
+    first_name = str(data.get('first_name') or '').strip()[:120]
+    marketing_consent = data.get('marketing_consent') is True
 
-        subscribed, subscription_error = klaviyo_subscribe_vip_contact(
-            email=email, first_name=first_name, consented_at=claim.attempted_at, source_ip=ip,
-        )
-        if subscribed:
-            signup.klaviyo_subscription_status = 'accepted'
-        elif subscription_error in _VIP_INELIGIBLE_ERRORS:
-            signup.klaviyo_subscription_status = 'ineligible'
-        else:
-            signup.klaviyo_subscription_status = 'failed'
-        if not subscribed:
-            signup.klaviyo_event_status = 'not_sent'
-            signup.klaviyo_error = subscription_error or 'VIP_SIGNUP_FAILED'
-            db.session.commit()
-            finish_attempt(claim.attempt_id, 'vip_failed')
-            return jsonify({'error': 'No se ha podido completar el alta. Inténtalo de nuevo más tarde.'}), 502
+    if not email:
+        mark_vip_outcome('validation_rejected')
+        return jsonify({'error': 'Introduce un email válido.'}), 400
+    if not marketing_consent:
+        mark_vip_outcome('validation_rejected')
+        return jsonify({'error': 'Debes aceptar recibir comunicaciones comerciales para entrar en la lista VIP.'}), 400
 
-        sent, error = klaviyo_track_vip_signup(
-            email=email, first_name=first_name, consented_at=claim.attempted_at,
-            source_ip=ip, signup_id=signup.id,
-        )
-        signup.klaviyo_event_status = 'accepted' if sent else 'failed'
-        signup.klaviyo_error = error if not sent else None
+    consented_at = datetime.utcnow()
+    observed_ip, ip_provenance = consent_ip_evidence()
+    signup = VipSignup(
+        email=email,
+        first_name=first_name or None,
+        consent_marketing=True,
+        consented_at=consented_at,
+        source_ip=observed_ip,
+        source=ip_provenance,
+    )
+    db.session.add(signup)
+    db.session.commit()
+
+    subscribed, subscription_error = klaviyo_subscribe_vip_contact(
+        email=email,
+        first_name=first_name,
+        consented_at=consented_at,
+        source_ip=UNVERIFIED_IP,
+    )
+    if subscribed:
+        signup.klaviyo_subscription_status = 'accepted'
+    elif subscription_error in _VIP_INELIGIBLE_ERRORS:
+        signup.klaviyo_subscription_status = 'ineligible'
+    else:
+        signup.klaviyo_subscription_status = 'failed'
+
+    if not subscribed:
+        signup.klaviyo_event_status = 'not_sent'
+        signup.klaviyo_error = subscription_error or 'VIP_SIGNUP_FAILED'
         db.session.commit()
-        finish_attempt(claim.attempt_id, 'vip_accepted' if sent else 'vip_failed')
-        if not sent:
-            return jsonify({'error': 'No se ha podido completar el alta. Inténtalo de nuevo más tarde.'}), 502
-        return jsonify({'success': True, 'signup_id': signup.id, 'message': 'Alta VIP registrada.'}), 201
-    except FormSecurityError as error:
-        return error.response()
-    except Exception:
-        db.session.rollback()
-        if claim is not None:
-            try:
-                finish_attempt(claim.attempt_id, 'vip_failed')
-            except FormSecurityError:
-                pass
-        return FormSecurityError('form_unavailable').response()
+        mark_vip_outcome('ineligible' if signup.klaviyo_subscription_status == 'ineligible' else 'technical_failure')
+        return jsonify({'error': 'No se ha podido completar el alta. Inténtalo de nuevo más tarde.'}), 502
+
+    event_sent, event_error = klaviyo_track_vip_signup(
+        email=email,
+        first_name=first_name,
+        consented_at=consented_at,
+        source_ip=UNVERIFIED_IP,
+        signup_id=signup.id,
+    )
+    signup.klaviyo_event_status = 'accepted' if event_sent else 'failed'
+    signup.klaviyo_error = event_error if not event_sent else None
+    db.session.commit()
+
+    if not event_sent:
+        mark_vip_outcome('technical_failure')
+        return jsonify({'error': 'No se ha podido completar el alta. Inténtalo de nuevo más tarde.'}), 502
+
+    mark_vip_outcome('successful_signup')
+    return jsonify({
+        'success': True,
+        'signup_id': signup.id,
+        'message': 'Alta VIP registrada.',
+    }), 201

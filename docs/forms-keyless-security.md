@@ -1,3 +1,5 @@
+> **Preparación local NO ACTIVADA (2026-11-05).** El módulo es `src/services/form_security_prepared.py` y sus rutas son exclusivamente fixtures en `tests/prepared_*_fixture.py`. La aplicación usa las defensas publicadas en `23d4c36`: límites IP VIP/contact desactivados, IP no verificada y embudo agregado independiente. `add_form_attempts.sql` no se ejecuta.
+
 # VIP/contacto · protección local sin claves externas
 
 ## Alcance y contrato

@@ -3,22 +3,22 @@ Rutas para gestión de cupones de descuento
 """
 from flask import Blueprint, request, jsonify
 from src.models.coupon import Coupon
-from src.services.protected_catalogue import is_promotion_protected
 from src.services.money import as_eur, MoneyValueError
+from src.services.protected_catalogue import is_promotion_protected
 from src.services.cart_promotions import (
-    PROMOTION_COUPON_MESSAGE, cart_contains_in_promotion,
-    cart_item_references, resolve_product_references,
+    cart_contains_in_promotion, cart_item_references, resolve_product_references,
 )
+from src.services.coupon_policy import cart_blocks_coupon, PROMOTION_COUPON_MESSAGE
 
 coupon_bp = Blueprint('coupon', __name__)
 
 
 def _has_protected_cart_item(data):
-    """Check optional cart context; a context-free preview is not sale approval.
-
-    Resolve each identifier independently so a forged SKU cannot hide a protected
-    database ID/slug. Checkout remains authoritative for callers omitting items.
-    """
+    """Optional preview context; checkout always checks its own persisted cart."""
+    if cart_blocks_coupon(data.get('items', []), preserve_legacy_sku=True):
+        return True
+    # Preserve this branch's selected nested-addon protection as well as the
+    # published independent ID/slug/SKU policy; browser flags stay irrelevant.
     for item in cart_item_references(data.get('items', [])):
         if is_promotion_protected(item):
             return True
@@ -53,7 +53,7 @@ def validate_coupon():
             return jsonify({
                 'valid': False,
                 'error': 'PROMOTION_NOT_AVAILABLE',
-                'message': 'El código no se puede aplicar a este pedido.',
+                'message': PROMOTION_COUPON_MESSAGE,
             }), 200
         
         amount_context = {}
@@ -116,7 +116,7 @@ def use_coupon():
             return jsonify({
                 'success': False,
                 'error': 'PROMOTION_NOT_AVAILABLE',
-                'message': 'El código no se puede aplicar a este pedido.',
+                'message': PROMOTION_COUPON_MESSAGE,
             }), 422
         
         # Validar cupón primero

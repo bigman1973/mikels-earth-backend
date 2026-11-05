@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 from flask import Flask
 
-from src.models.form_attempt import FormAuditBase
 from src.models.user import db
 from src.models.vip_signup import VipSignup
 from src.routes import vip_routes
@@ -17,21 +16,17 @@ class VipSignupTests(unittest.TestCase):
             TESTING=True,
             SQLALCHEMY_DATABASE_URI='sqlite:///:memory:',
             SQLALCHEMY_TRACK_MODIFICATIONS=False,
-            SECRET_KEY='form-unit-fixture-not-a-production-key',
-            FORM_SECURITY_SQLITE_FIXTURE=True,
         )
         db.init_app(self.app)
         self.app.register_blueprint(vip_bp, url_prefix='/api/vip')
         with self.app.app_context():
             db.create_all()
-            FormAuditBase.metadata.create_all(db.engine)
         self.client = self.app.test_client()
 
     def tearDown(self):
         with self.app.app_context():
             db.session.remove()
             db.drop_all()
-            FormAuditBase.metadata.drop_all(db.engine)
 
     def payload(self, **overrides):
         data = {
@@ -69,7 +64,8 @@ class VipSignupTests(unittest.TestCase):
             self.assertEqual(signup.email, 'vip@example.com')
             self.assertEqual(signup.first_name, 'Marisa')
             self.assertTrue(signup.consent_marketing)
-            self.assertEqual(signup.source_ip, '127.0.0.1')
+            self.assertEqual(signup.source_ip, 'unverified')
+            self.assertEqual(signup.source, 'vip_black_friday_2026:ip_unverified:unavailable')
             self.assertIsNotNone(signup.consented_at)
             self.assertEqual(signup.klaviyo_subscription_status, 'accepted')
             self.assertEqual(signup.klaviyo_event_status, 'accepted')

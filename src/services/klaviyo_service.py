@@ -981,7 +981,7 @@ def klaviyo_send_contact_confirmation(name, email, message=''):
         metric_name="Mikels Contact Confirmation",
         profile_email=email,
         properties=properties,
-        # The contact name remains event data; do not mutate the profile.
+        profile_attrs={"first_name": name.split(' ')[0] if name else ''}
     )
 
 

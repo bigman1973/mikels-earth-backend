@@ -7,7 +7,6 @@ from unittest.mock import Mock, patch
 
 from flask import Flask
 
-from src.models.form_attempt import FormAuditBase
 from src.models.user import db
 from src.models.vip_signup import VipSignup
 from src.routes import vip_routes
@@ -19,8 +18,6 @@ class VipExistingConsentRouteTests(unittest.TestCase):
         self.app = Flask(__name__)
         self.app.config.update(
             TESTING=True,
-            SECRET_KEY='offline-existing-profile-fixture',
-            FORM_SECURITY_SQLITE_FIXTURE=True,
             SQLALCHEMY_DATABASE_URI='sqlite:///:memory:',
             SQLALCHEMY_TRACK_MODIFICATIONS=False,
         )
@@ -28,7 +25,6 @@ class VipExistingConsentRouteTests(unittest.TestCase):
         self.app.register_blueprint(vip_routes.vip_bp, url_prefix='/api/vip')
         with self.app.app_context():
             db.create_all()
-            FormAuditBase.metadata.create_all(db.engine)
         klaviyo_service._vip_list_id_cache = None
         self.client = self.app.test_client()
         self.environment = patch.dict(os.environ, {
@@ -43,7 +39,6 @@ class VipExistingConsentRouteTests(unittest.TestCase):
         with self.app.app_context():
             db.session.remove()
             db.drop_all()
-            FormAuditBase.metadata.drop_all(db.engine)
 
     def submit(self):
         return self.client.post('/api/vip/signup', json={

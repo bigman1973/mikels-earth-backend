@@ -234,7 +234,9 @@ class WelcomeCouponMinimumTests(unittest.TestCase):
     def test_checkout_without_coupon_is_not_subject_to_welcome_minimum(self):
         response = self.checkout('48.99', discount_code='')
         self.assertEqual(response.status_code, 200, response.get_json())
-        self.assertNotIn('allow_promotion_codes', self.session.call_args.kwargs)
+        # Published policy: no discounts means explicit False; with discounts
+        # the mutually exclusive parameter is omitted, never enabled.
+        self.assertIs(self.session.call_args.kwargs['allow_promotion_codes'], False)
 
     def test_checkout_wrong_owner_used_and_expired_are_rejected_above_minimum(self):
         for field, value in [('email', 'other@example.com'), ('used', True),
