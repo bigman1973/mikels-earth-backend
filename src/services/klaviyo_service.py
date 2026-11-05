@@ -48,7 +48,7 @@ def _get_headers():
     }
 
 
-def send_klaviyo_event(metric_name, profile_email, properties, value=None, unique_id=None, profile_attrs=None, return_result=False):
+def send_klaviyo_event(metric_name, profile_email, properties, value=None, unique_id=None, profile_attrs=None, return_result=False, redact_logs=False):
     """
     Envía un evento a Klaviyo via la Events API.
     
@@ -59,6 +59,7 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
         value: Valor monetario del evento (opcional)
         unique_id: ID único para deduplicación (opcional)
         profile_attrs: Dict con atributos adicionales del perfil (first_name, etc.)
+        redact_logs: Use sanitized VIP error codes, logs and a 15-second timeout.
     
     Returns:
         True si el evento se envió correctamente, False en caso contrario
@@ -68,7 +69,7 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
 
     api_key = _get_api_key()
     if not api_key:
-        error = 'KLAVIYO_API_KEY no configurada'
+        error = 'VIP_API_KEY_NOT_CONFIGURED' if redact_logs else 'KLAVIYO_API_KEY no configurada'
         print(f"ERROR: {error}")
         return result(False, error)
     
@@ -117,21 +118,31 @@ def send_klaviyo_event(metric_name, profile_email, properties, value=None, uniqu
     
     try:
         payload = _json_safe_payload(payload)
+        request_options = {'timeout': 15} if redact_logs else {}
         response = requests.post(
             f"{KLAVIYO_API_URL}/events",
             headers=_get_headers(),
-            json=payload
+            json=payload,
+            **request_options,
         )
         
         if response.status_code == 202:
-            print(f"✅ [KLAVIYO] Evento '{metric_name}' enviado para {profile_email}")
+            if redact_logs:
+                print('[KLAVIYO] VIP_EVENT_ACCEPTED HTTP 202')
+            else:
+                print(f"✅ [KLAVIYO] Evento '{metric_name}' enviado para {profile_email}")
             return result(True)
         else:
+            if redact_logs:
+                return result(False, _vip_http_error('VIP_EVENT_HTTP_ERROR', response))
             error = f"Klaviyo HTTP {response.status_code}: {response.text[:500]}"
             print(f"❌ [KLAVIYO] Error enviando evento '{metric_name}': {error}")
             return result(False, error)
             
     except Exception as e:
+        if redact_logs:
+            print('[KLAVIYO] VIP_EVENT_REQUEST_FAILED')
+            return result(False, 'VIP_EVENT_REQUEST_FAILED')
         error = f"Klaviyo excepción: {str(e)}"
         print(f"❌ [KLAVIYO] Excepción enviando evento '{metric_name}': {str(e)}")
         return result(False, error)
@@ -299,13 +310,38 @@ VIP_LIST_NAME = 'Black Friday VIP 2026'
 _vip_list_id_cache = None
 
 
-def _get_vip_list_id():
-    """Return the dedicated VIP list ID, creating the approved list once.
+def _vip_http_error(code, response):
+    """Never expose a remote body, request URL, email or exception in VIP errors."""
+    status = response.status_code
+    if type(status) is int and 100 <= status <= 599:
+        return f'{code}_HTTP_{status}'
+    return code
 
-    The list is intentionally separate from the regular newsletter so its
-    membership can be used for the Black Friday campaign without enrolling a
-    person in the welcome-coupon flow.
-    """
+
+def _vip_resource_id(value):
+    return isinstance(value, str) and bool(value) and all(
+        char.isascii() and (char.isalnum() or char in '-_') for char in value
+    )
+
+
+def _vip_collection(document, code):
+    """An empty collection is authoritative only without a next page or errors."""
+    if not isinstance(document, dict) or 'errors' in document:
+        return None, f'{code}_MALFORMED'
+    data = document.get('data')
+    links = document.get('links', {})
+    if not isinstance(data, list) or not isinstance(links, dict):
+        return None, f'{code}_MALFORMED'
+    next_page = links.get('next')
+    if next_page is not None and (not isinstance(next_page, str) or not next_page):
+        return None, f'{code}_MALFORMED'
+    if next_page is not None or len(data) > 1:
+        return None, f'{code}_AMBIGUOUS'
+    return data, None
+
+
+def _get_vip_list_id():
+    """Resolve the existing dedicated VIP list; never create or alter a list."""
     global _vip_list_id_cache
 
     if _vip_list_id_cache:
@@ -313,10 +349,12 @@ def _get_vip_list_id():
 
     api_key = _get_api_key()
     if not api_key:
-        return None, 'KLAVIYO_API_KEY no configurada'
+        return None, 'VIP_API_KEY_NOT_CONFIGURED'
 
     configured_list_id = str(os.getenv('KLAVIYO_VIP_LIST_ID') or '').strip()
     if configured_list_id:
+        if not _vip_resource_id(configured_list_id):
+            return None, 'VIP_LIST_CONFIGURATION_INVALID'
         _vip_list_id_cache = configured_list_id
         return _vip_list_id_cache, None
 
@@ -325,96 +363,180 @@ def _get_vip_list_id():
             f'{KLAVIYO_API_URL}/lists',
             headers=_get_headers(),
             params={
-                'filter': f"equals(name,'{VIP_LIST_NAME}')",
-                'page[size]': 10,
+                'filter': f'equals(name,{json.dumps(VIP_LIST_NAME)})',
+                'page[size]': 2,
             },
             timeout=15,
         )
         if response.status_code != 200:
-            return None, f'Klaviyo HTTP {response.status_code} al buscar la lista VIP: {response.text[:500]}'
+            return None, _vip_http_error('VIP_LIST_LOOKUP_FAILED', response)
+        existing_lists, error = _vip_collection(response.json(), 'VIP_LIST_LOOKUP')
+        if error:
+            return None, error
+        if not existing_lists:
+            return None, 'VIP_LIST_NOT_FOUND'
+        vip_list = existing_lists[0]
+        if (not isinstance(vip_list, dict) or vip_list.get('type') != 'list'
+                or not _vip_resource_id(vip_list.get('id'))):
+            return None, 'VIP_LIST_LOOKUP_MALFORMED'
+        _vip_list_id_cache = vip_list['id']
+        return _vip_list_id_cache, None
+    except (ValueError, TypeError):
+        return None, 'VIP_LIST_LOOKUP_MALFORMED'
+    except Exception:
+        return None, 'VIP_LIST_LOOKUP_FAILED'
 
-        existing_lists = response.json().get('data', [])
-        if existing_lists:
-            _vip_list_id_cache = existing_lists[0].get('id')
-            if _vip_list_id_cache:
-                return _vip_list_id_cache, None
 
-        create_response = requests.post(
-            f'{KLAVIYO_API_URL}/lists',
+def _lookup_vip_profile(email):
+    """Read current email consent, distinguishing confirmed absence from failure."""
+    try:
+        response = requests.get(
+            f'{KLAVIYO_API_URL}/profiles',
             headers=_get_headers(),
-            json={
-                'data': {
-                    'type': 'list',
-                    'attributes': {
-                        'name': VIP_LIST_NAME,
-                        'opt_in_process': 'single_opt_in',
-                    },
-                },
+            params={
+                'filter': f'equals(email,{json.dumps(email)})',
+                'additional-fields[profile]': 'subscriptions',
+                'page[size]': 2,
             },
             timeout=15,
         )
-        if create_response.status_code not in [200, 201]:
-            return None, f'Klaviyo HTTP {create_response.status_code} al crear la lista VIP: {create_response.text[:500]}'
+        if response.status_code != 200:
+            return None, _vip_http_error('VIP_PROFILE_LOOKUP_FAILED', response)
+        profiles, error = _vip_collection(response.json(), 'VIP_PROFILE_LOOKUP')
+        if error:
+            return None, error
+        if not profiles:
+            return None, None
+        profile = profiles[0]
+        if (not isinstance(profile, dict) or profile.get('type') != 'profile'
+                or not _vip_resource_id(profile.get('id'))):
+            return None, 'VIP_PROFILE_LOOKUP_MALFORMED'
+        return profile, None
+    except (ValueError, TypeError):
+        return None, 'VIP_PROFILE_LOOKUP_MALFORMED'
+    except Exception:
+        return None, 'VIP_PROFILE_LOOKUP_FAILED'
 
-        _vip_list_id_cache = create_response.json().get('data', {}).get('id')
-        if not _vip_list_id_cache:
-            return None, 'Klaviyo no devolvió el identificador de la lista VIP'
-        print(f'✅ [KLAVIYO] Lista VIP preparada: {VIP_LIST_NAME}')
-        return _vip_list_id_cache, None
-    except Exception as exc:
-        return None, f'Klaviyo excepción preparando la lista VIP: {exc}'
+
+def _vip_existing_consent_error(profile):
+    """Require explicit email subscription and verified absence of suppressions."""
+    marketing = profile
+    for field in ('attributes', 'subscriptions', 'email', 'marketing'):
+        if not isinstance(marketing, dict):
+            return 'VIP_EXISTING_CONSENT_UNVERIFIED'
+        marketing = marketing.get(field)
+    if not isinstance(marketing, dict):
+        return 'VIP_EXISTING_CONSENT_UNVERIFIED'
+    consent = marketing.get('consent')
+    can_receive = marketing.get('can_receive_email_marketing')
+    suppression = marketing.get('suppression')
+    list_suppressions = marketing.get('list_suppressions')
+    if (consent not in ('SUBSCRIBED', 'NEVER_SUBSCRIBED', 'UNSUBSCRIBED')
+            or type(can_receive) is not bool
+            or not isinstance(suppression, list)
+            or not isinstance(list_suppressions, list)):
+        return 'VIP_EXISTING_CONSENT_UNVERIFIED'
+    for entries, fields in (
+        (suppression, ('reason', 'timestamp')),
+        (list_suppressions, ('list_id', 'reason', 'timestamp')),
+    ):
+        if any(not isinstance(entry, dict) or any(
+            not isinstance(entry.get(field), str) or not entry[field]
+            for field in fields
+        ) for entry in entries):
+            return 'VIP_EXISTING_CONSENT_UNVERIFIED'
+    if consent != 'SUBSCRIBED':
+        return 'VIP_EXISTING_NO_EMAIL_CONSENT'
+    if suppression or not can_receive:
+        return 'VIP_EXISTING_EMAIL_SUPPRESSED'
+    # Respect withdrawals from ANY list, not only the VIP list.
+    if list_suppressions:
+        return 'VIP_EXISTING_LIST_SUPPRESSED'
+    return None
 
 
-def _store_vip_consent_on_profile(*, email, first_name='', consented_at=None, source_ip=''):
-    """Persist VIP consent evidence on the profile before the subscription job."""
+def _add_existing_vip_profile(profile, list_id):
+    """Only list membership may change on an eligible existing profile."""
+    error = _vip_existing_consent_error(profile)
+    if error:
+        return False, error
+    try:
+        response = requests.post(
+            f'{KLAVIYO_API_URL}/lists/{list_id}/relationships/profiles',
+            headers=_get_headers(),
+            json={'data': [{'type': 'profile', 'id': profile['id']}]},
+            timeout=15,
+        )
+        # 2024-10-15 Add Profiles to List documents only 204 (also idempotent).
+        if response.status_code == 204:
+            return True, None
+        return False, _vip_http_error('VIP_LIST_MEMBERSHIP_FAILED', response)
+    except Exception:
+        return False, 'VIP_LIST_MEMBERSHIP_FAILED'
+
+
+def klaviyo_subscribe_vip_contact(*, email, first_name='', consented_at=None, source_ip=''):
+    """Add eligible existing profiles, or create and subscribe a new opt-in only.
+
+    Existing profiles are never patched or sent to a subscription job. Lookup
+    failures and uncertain creation outcomes cannot trigger creation or bulk
+    subscription; retries must re-read current consent.
+    """
+    if not _get_api_key():
+        return False, 'VIP_API_KEY_NOT_CONFIGURED'
+    profile, error = _lookup_vip_profile(email)
+    if error:
+        return False, error
+    if profile is not None:
+        error = _vip_existing_consent_error(profile)
+        if error:
+            return False, error
+    elif not isinstance(consented_at, datetime):
+        return False, 'VIP_NEW_CONSENT_REQUIRED'
+
+    list_id, error = _get_vip_list_id()
+    if not list_id:
+        return False, error
+    if profile is not None:
+        return _add_existing_vip_profile(profile, list_id)
+
     attributes = {
         'email': email,
         'properties': {
-            'MikelsVIPConsentAt': consented_at.isoformat() if consented_at else '',
+            'MikelsVIPConsentAt': consented_at.isoformat(),
             'MikelsVIPConsentIP': source_ip,
             'MikelsVIPConsentSource': 'mikels-vip-black-friday-2026',
         },
     }
     if first_name:
         attributes['first_name'] = first_name
-    payload = {'data': {'type': 'profile', 'attributes': attributes}}
     try:
-        profile_id = _find_klaviyo_profile_id(email)
-        if profile_id:
-            payload['data']['id'] = profile_id
-            response = requests.patch(
-                f'{KLAVIYO_API_URL}/profiles/{profile_id}',
-                headers=_get_headers(),
-                json=payload,
-                timeout=15,
-            )
-        else:
-            response = requests.post(
-                f'{KLAVIYO_API_URL}/profiles',
-                headers=_get_headers(),
-                json=payload,
-                timeout=15,
-            )
-        if response.status_code in [200, 201, 202, 204]:
-            return True, None
-        return False, f'Klaviyo HTTP {response.status_code} al guardar el consentimiento VIP: {response.text[:500]}'
-    except Exception as exc:
-        return False, f'Klaviyo excepción guardando el consentimiento VIP: {exc}'
-
-
-def klaviyo_subscribe_vip_contact(*, email, first_name='', consented_at=None, source_ip=''):
-    """Subscribe a consenting visitor to the dedicated single-opt-in VIP list."""
-    list_id, error = _get_vip_list_id()
-    if not list_id:
-        return False, error
-    profile_saved, profile_error = _store_vip_consent_on_profile(
-        email=email,
-        first_name=first_name,
-        consented_at=consented_at,
-        source_ip=source_ip,
-    )
-    if not profile_saved:
-        return False, profile_error
+        response = requests.post(
+            f'{KLAVIYO_API_URL}/profiles',
+            headers=_get_headers(),
+            json={'data': {'type': 'profile', 'attributes': attributes}},
+            timeout=15,
+        )
+        if response.status_code == 409:
+            # A concurrent creation is EXISTING, never a reason to resubscribe.
+            profile, error = _lookup_vip_profile(email)
+            if error:
+                return False, error
+            if profile is None:
+                return False, 'VIP_PROFILE_LOOKUP_CONFLICT_UNRESOLVED'
+            return _add_existing_vip_profile(profile, list_id)
+        if response.status_code != 201:
+            return False, _vip_http_error('VIP_PROFILE_CREATE_FAILED', response)
+        created = response.json()
+        data = created.get('data') if isinstance(created, dict) else None
+        if (not isinstance(data, dict) or 'errors' in created
+                or data.get('type') != 'profile' or not _vip_resource_id(data.get('id'))):
+            return False, 'VIP_PROFILE_CREATE_MALFORMED'
+        profile_id = data['id']
+    except (ValueError, TypeError):
+        return False, 'VIP_PROFILE_CREATE_MALFORMED'
+    except Exception:
+        return False, 'VIP_PROFILE_CREATE_FAILED'
 
     attributes = {
         'email': email,
@@ -435,6 +557,8 @@ def klaviyo_subscribe_vip_contact(*, email, first_name='', consented_at=None, so
                 'profiles': {
                     'data': [{
                         'type': 'profile',
+                        # Revision 2024-10-15 supports ID-first lookup for NEW profiles.
+                        'id': profile_id,
                         'attributes': attributes,
                     }],
                 },
@@ -457,12 +581,11 @@ def klaviyo_subscribe_vip_contact(*, email, first_name='', consented_at=None, so
             json=payload,
             timeout=15,
         )
-        if response.status_code in [200, 201, 202, 204]:
-            print(f'✅ [KLAVIYO] Alta VIP aceptada para {email}')
+        if response.status_code == 202:
             return True, None
-        return False, f'Klaviyo HTTP {response.status_code} al suscribir VIP: {response.text[:500]}'
-    except Exception as exc:
-        return False, f'Klaviyo excepción al suscribir VIP: {exc}'
+        return False, _vip_http_error('VIP_NEW_SUBSCRIPTION_FAILED', response)
+    except Exception:
+        return False, 'VIP_NEW_SUBSCRIPTION_FAILED'
 
 
 def klaviyo_track_vip_signup(*, email, first_name='', consented_at, source_ip, signup_id):
@@ -477,8 +600,8 @@ def klaviyo_track_vip_signup(*, email, first_name='', consented_at, source_ip, s
             'VipSignupId': signup_id,
         },
         unique_id=f'vip-signup-{signup_id}',
-        profile_attrs={'first_name': first_name} if first_name else None,
         return_result=True,
+        redact_logs=True,
     )
 
 
