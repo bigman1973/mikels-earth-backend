@@ -226,12 +226,14 @@ class BF26LocalCheckoutTests(unittest.TestCase):
                 self.assertEqual(data['name'], pack.name)
                 self.assertEqual(data['price'], float(pack.price))
                 self.assertTrue(data['inPromotion'])
+                self.assertIs(data['visibleInStore'], False)
                 self.assertFalse(data['subscriptionAvailable'])
                 for key in ['originalPrice', 'tieredDiscount', 'volumeDiscount', 'addons', 'subscriptionDiscount', 'subscriptionFrequencies', 'subscriptionTerms', 'stock']:
                     self.assertNotIn(key, data)
         self.activate_fixture(visible=True)
         listed = {p['sku']: p for p in self.client.get('/api/products').get_json()['products']}
         self.assertTrue(all(listed[p.sku]['name'] == p.name for p in CAMPAIGN_PACKS))
+        self.assertTrue(all(listed[p.sku]['visibleInStore'] is True for p in CAMPAIGN_PACKS))
         rows = {r['id']: r for r in csv.DictReader(io.StringIO(self.client.get('/api/meta-catalog/products.csv').get_data(as_text=True)))}
         for pack in CAMPAIGN_PACKS:
             self.assertEqual(rows[pack.sku]['title'], pack.name)

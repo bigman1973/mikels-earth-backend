@@ -122,6 +122,9 @@ class WebProduct(db.Model):
             'sku': self.sku,
             'inPromotion': bool(self.in_promotion),
             'displayOrder': catalogue_position(self.display_order),
+            # SEO must distinguish direct-link hidden products from listings.
+            # Visibility is not inventory and never changes saleability.
+            'visibleInStore': bool(self.visible_in_store),
             'description': description,
             'longDescription': long_description,
             # A dated reservation price is resolved here, at request time, so
