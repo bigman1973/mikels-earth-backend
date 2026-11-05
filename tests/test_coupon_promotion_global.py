@@ -86,6 +86,13 @@ class GlobalCouponPromotionTests(unittest.TestCase):
         for key, target in targets.items():
             self.effects[key] = self.stack.enter_context(patch(target))
         self.effects['stripe_session'].return_value = SimpleNamespace(id='cs_offline', url='https://stripe.invalid/offline')
+        def strict_stripe_session(**params):
+            if 'discounts' in params and 'allow_promotion_codes' in params:
+                raise AssertionError('Stripe discounts and allow_promotion_codes are exclusive')
+            if params.get('allow_promotion_codes') is True:
+                raise AssertionError('Stripe promotion entry must stay closed')
+            return SimpleNamespace(id='cs_offline', url='https://stripe.invalid/offline')
+        self.effects['stripe_session'].side_effect = strict_stripe_session
         self.effects['stripe_coupon'].return_value = SimpleNamespace(id='coupon_offline')
         self.effects['stripe_price'].return_value = SimpleNamespace(id='price_offline')
         self.effects['erp'].return_value = [{'sku': 'TESTREG'}]
@@ -201,7 +208,7 @@ class GlobalCouponPromotionTests(unittest.TestCase):
         line = self.item('regular', in_promotion=True, inPromotion=True)
         self.assertEqual(self.checkout([line]).status_code, 200)
         self.assertEqual(self.effects['stripe_coupon'].call_args.kwargs['amount_off'], 100)
-        self.assertFalse(self.effects['stripe_session'].call_args.kwargs['allow_promotion_codes'])
+        self.assertNotIn('allow_promotion_codes', self.effects['stripe_session'].call_args.kwargs)
 
     def test_context_free_preview_cannot_approve_a_subsequent_promoted_sale(self):
         result = self.client.post('/api/coupon/validate', json={'code': 'PUBLIC10'})
@@ -236,7 +243,7 @@ class GlobalCouponPromotionTests(unittest.TestCase):
         params = self.effects['stripe_session'].call_args.kwargs
         self.assertEqual(params['metadata']['total'], '33.30')
         self.assertEqual(self.effects['stripe_coupon'].call_args.kwargs['amount_off'], 670)
-        self.assertFalse(params['allow_promotion_codes'])
+        self.assertNotIn('allow_promotion_codes', params)
 
     def test_fixed_coupon_remains_valid_when_cart_has_no_promotion(self):
         self.assertEqual(self.checkout([self.item('regular')], 'FIXED5').status_code, 200)

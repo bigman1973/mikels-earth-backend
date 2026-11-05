@@ -452,6 +452,9 @@ def create_checkout_session():
                 name=discount_code or 'Descuento por cantidad',
             )
             session_params['discounts'] = [{'coupon': coupon.id}]
+            # Stripe treats discounts and allow_promotion_codes as exclusive.
+            # Omission keeps code entry closed; never enable it from the payload.
+            session_params.pop('allow_promotion_codes', None)
         
         try:
             session = stripe.checkout.Session.create(**session_params)
