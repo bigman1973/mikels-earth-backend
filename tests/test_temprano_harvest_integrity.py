@@ -9,6 +9,7 @@ from unittest.mock import patch
 from flask import Flask
 
 from src.models.checkout_tax_snapshot import CheckoutTaxSnapshot
+from src.models.coupon import Coupon
 from src.models.order import Order
 from src.models.stock import StockMovement, StockReservation
 from src.models.user import db
@@ -165,15 +166,34 @@ class TempranoHarvestIntegrityTests(unittest.TestCase):
                 self.assertNotIn('discounts', params)
         self.create_coupon.assert_not_called()
 
-    def test_coupon_is_rejected_in_both_orders_before_external_checkout(self):
+    def test_unknown_coupon_is_rejected_in_both_orders_before_external_checkout(self):
         self.activate_fixture()
         for items in (self.items(), self.items()[::-1]):
             response = self.checkout(items, discount_code='ANY-CODE')
             self.assertEqual(response.status_code, 422)
-            self.assertEqual(response.get_json()['error'], 'PROMOTION_NOT_AVAILABLE')
+            self.assertEqual(response.get_json()['error'], 'COUPON_INVALID')
         self.create_coupon.assert_not_called()
         self.create_session.assert_not_called()
         self.holded.assert_not_called()
+
+    def test_valid_ordinary_coupon_discounts_both_harvests_without_changing_base_prices(self):
+        self.activate_fixture()
+        with self.app.app_context():
+            db.session.add(Coupon(code='NORMAL10', discount_value=10, active=True))
+            db.session.commit()
+        self.create_coupon.return_value = SimpleNamespace(id='coupon_harvest')
+        for index, items in enumerate((self.items(), self.items()[::-1])):
+            self.create_session.return_value = SimpleNamespace(id=f'cs_harvest_coupon_{index}', url='https://stripe.test/local')
+            response = self.checkout(items, discount_code='NORMAL10', discount_amount=99999)
+            self.assertEqual(response.status_code, 200, response.get_json())
+            params = self.create_session.call_args.kwargs
+            self.assertEqual(params['metadata']['subtotal'], '99.50')
+            self.assertEqual(params['metadata']['coupon_discount_amount'], '9.95')
+            self.assertEqual(params['metadata']['volume_discount_amount'], '0.00')
+            self.assertEqual(params['metadata']['total'], '89.55')
+            self.assertEqual(self.create_coupon.call_args.kwargs['amount_off'], 995)
+            self.assertEqual({line['price_data']['product_data']['metadata']['sku']: line['price_data']['unit_amount']
+                              for line in params['line_items']}, {PROPOSED_SKU: 5970, 'MIKVET500': 1990})
 
     def test_unrelated_volume_tier_cannot_indirectly_discount_current_harvest(self):
         self.activate_fixture()

@@ -336,9 +336,12 @@ class BF26LocalCheckoutTests(unittest.TestCase):
         with self.app.app_context():
             WebProduct.query.filter_by(sku='BF26-ECO6').one().in_promotion = False
             db.session.commit()
-        # Six-SKU recognition is pricing/recipe validation, NOT coupon veto.
+        # Exact canonical BF identities remain promotional even with a stale
+        # persisted flag; browser flags cannot grant ordinary coupon permission.
         preview = self.client.post('/api/coupon/validate', json={'code': 'LOCAL10', 'items': [self.item('BF26-ECO6', inPromotion=True)]})
-        self.assertTrue(preview.get_json()['valid'])
+        self.assertFalse(preview.get_json()['valid'])
+        self.assertEqual(preview.get_json()['message'], PROMOTION_COUPON_MESSAGE)
+        self.assert_no_external_checkout()
 
     def test_conflicting_pack_and_component_identity_is_rejected_not_aliased(self):
         self.activate_fixture()

@@ -1,4 +1,4 @@
-"""Offline regression tests: real persisted promotion + ANY code vetoes checkout."""
+"""Offline regression tests: promotion vetoes ordinary codes, not normal SKUs."""
 import itertools
 import unittest
 from contextlib import ExitStack
@@ -185,13 +185,35 @@ class GlobalCouponPromotionTests(unittest.TestCase):
             with self.subTest(code_type=type(code).__name__):
                 self.assert_veto(self.checkout([self.item('promoted')], code))
 
-    def test_legacy_mikvet500_remains_vetoed_without_db_promotion(self):
+    def test_ordinary_mikvet500_accepts_valid_codes_and_rejects_invalid_codes(self):
         for code in CODES:
-            self.assert_veto(self.checkout([self.item('legacy-temprano')], code))
+            with self.subTest(code=code):
+                for mock in self.effects.values():
+                    mock.reset_mock()
+                result = self.checkout([self.item('legacy-temprano')], code)
+                if code in ('STRIPE-ONLY', 'UNKNOWN-CODE', 'BADTYPE', 'USED10', 'EXPIRED10', 'INACTIVE10'):
+                    self.assertEqual(result.status_code, 422)
+                    self.assertEqual(result.get_json()['error'], 'COUPON_INVALID')
+                    self.effects['stripe_session'].assert_not_called()
+                    self.effects['stripe_coupon'].assert_not_called()
+                    self.effects['erp'].assert_not_called()
+                else:
+                    self.assertEqual(result.status_code, 200, result.get_json())
+                    self.assertEqual(self.effects['stripe_coupon'].call_args.kwargs['amount_off'],
+                                     500 if code == 'FIXED5' else 100)
+                    self.assertEqual(self.effects['stripe_session'].call_args.kwargs['metadata']['volume_discount_amount'], '0.00')
 
-    def test_legacy_mixed_cart_code_is_vetoed_before_mixed_gate(self):
+    def test_ordinary_coupon_discounts_both_lines_when_own_mixed_cart_gate_permits(self):
         for lines in itertools.permutations([self.item('regular'), self.item('legacy-temprano')]):
-            self.assert_veto(self.checkout(list(lines)))
+            result = self.checkout(list(lines))
+            self.assertEqual(result.status_code, 200, result.get_json())
+            params = self.effects['stripe_session'].call_args.kwargs
+            self.assertEqual(params['metadata']['subtotal'], '20.00')
+            self.assertEqual(params['metadata']['coupon_discount_amount'], '2.00')
+            self.assertEqual(params['metadata']['volume_discount_amount'], '0.00')
+            self.assertEqual(params['metadata']['total'], '18.00')
+            self.assertEqual(self.effects['stripe_coupon'].call_args.kwargs['amount_off'], 200)
+            self.assertEqual([line['price_data']['unit_amount'] for line in params['line_items']], [1000, 1000])
 
     def test_preview_and_use_veto_all_origins_without_consuming_coupon(self):
         for code, route in itertools.product(CODES, ('validate', 'use')):
