@@ -3,14 +3,16 @@ Rutas para gestión de cupones de descuento
 """
 from flask import Blueprint, request, jsonify
 from src.models.coupon import Coupon
-from src.services.coupon_policy import cart_blocks_coupon, PROMOTION_COUPON_MESSAGE
+from src.services.coupon_policy import cart_blocks_coupon, coupon_allows_promotion, PROMOTION_COUPON_MESSAGE
 
 coupon_bp = Blueprint('coupon', __name__)
 
 
 def _has_protected_cart_item(data):
     """Optional preview context; checkout always checks its own persisted cart."""
-    return cart_blocks_coupon(data.get('items', []), preserve_legacy_sku=True)
+    return cart_blocks_coupon(
+        data.get('items', []), preserve_legacy_sku=True, discount_code=data.get('code'),
+    )
 
 
 @coupon_bp.route('/validate', methods=['POST'])
@@ -52,6 +54,7 @@ def validate_coupon():
                 'code': coupon.code,
                 'discount_percentage': coupon.discount_value,  # Siempre devolver el valor
                 'discount_type': coupon.discount_type,
+                'valid_in_promotion': coupon_allows_promotion(coupon),
             }
         }), 200
         

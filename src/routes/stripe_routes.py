@@ -107,11 +107,19 @@ def create_checkout_session():
         discount_code = str(data.get('discount_code') or '').strip().upper() or None
         # Veto ALL code origins before pricing, ERP reads, reservations or Stripe.
         # Resolve each DB identity before canonicalization overwrites browser data.
-        if discount_code and cart_blocks_coupon(items):
+        if discount_code and cart_blocks_coupon(items, discount_code=discount_code):
             return jsonify({
                 'error': 'PROMOTION_NOT_AVAILABLE',
                 'message': PROMOTION_COUPON_MESSAGE,
             }), 422
+        # Reject invalid/unknown codes and email mismatches before external reads.
+        # The order-minimum check still runs against the final server subtotal.
+        validated_coupon = None
+        if discount_code:
+            from src.models.coupon import Coupon
+            coupon_valid, validated_coupon = Coupon.validate_coupon(discount_code, customer_info['email'])
+            if not coupon_valid:
+                return jsonify({'error': 'COUPON_INVALID', 'message': validated_coupon}), 422
         coupon_discount_amount = Decimal('0.00')
         volume_discount_amount = Decimal('0.00')
         checkout_pricing_snapshot = {}
@@ -244,31 +252,6 @@ def create_checkout_session():
         # Session is opened. The later webhook applies this snapshot to
         # Stripe's actual charged line totals and persists it in the order.
         # A missing SKU, tax or pack recipe is deliberately fail-closed.
-        from src.services.holded_service import holded_get_products
-        from src.services.holded_tax_service import FiscalValidationError
-        from src.services.order_tax_snapshot import build_tax_rule_snapshot
-        holded_products = holded_get_products()
-        if not holded_products:
-            return jsonify({
-                'error': 'TAX_CATALOGUE_UNAVAILABLE',
-                'message': 'No se ha podido validar la configuración fiscal del pedido. Inténtalo de nuevo en unos minutos.',
-            }), 503
-        web_reference_prices = {
-            product.sku: product.price
-            for product in WebProduct.query.filter(WebProduct.sku.isnot(None)).all()
-            if product.sku
-        }
-        try:
-            tax_snapshot = build_tax_rule_snapshot(items, holded_products, web_reference_prices)
-        except FiscalValidationError as tax_error:
-            return jsonify({
-                'error': 'TAX_CONFIGURATION_INVALID',
-                'message': str(tax_error),
-            }), 422
-        
-        # Generate order number
-        order_number = generate_order_number()
-
         # Calculate the pre-discount subtotal from server prices.  Quantity-tier
         # savings and an optional coupon are both represented as one exact
         # checkout discount so Stripe can charge an amount that matches the
@@ -287,17 +270,7 @@ def create_checkout_session():
         )
 
         if discount_code:
-            from src.models.coupon import Coupon
-
-            coupon = Coupon.query.filter(
-                db.func.lower(Coupon.code) == discount_code.lower()
-            ).first()
-            if not coupon:
-                return jsonify({
-                    'error': 'COUPON_INVALID',
-                    'message': 'Cupón no encontrado.',
-                }), 422
-
+            coupon = validated_coupon
             coupon_valid, coupon_message = coupon.is_valid(
                 order_amount=float(discountable_subtotal),
                 customer_email=customer_info['email'],
@@ -349,6 +322,30 @@ def create_checkout_session():
                 'error': delivery_error.code,
                 'message': str(delivery_error),
             }), 422
+
+        # All coupon validity checks precede even a read from the ERP.
+        from src.services.holded_service import holded_get_products
+        from src.services.holded_tax_service import FiscalValidationError
+        from src.services.order_tax_snapshot import build_tax_rule_snapshot
+        holded_products = holded_get_products()
+        if not holded_products:
+            return jsonify({
+                'error': 'TAX_CATALOGUE_UNAVAILABLE',
+                'message': 'No se ha podido validar la configuración fiscal del pedido. Inténtalo de nuevo en unos minutos.',
+            }), 503
+        web_reference_prices = {
+            product.sku: product.price
+            for product in WebProduct.query.filter(WebProduct.sku.isnot(None)).all()
+            if product.sku
+        }
+        try:
+            tax_snapshot = build_tax_rule_snapshot(items, holded_products, web_reference_prices)
+        except FiscalValidationError as tax_error:
+            return jsonify({
+                'error': 'TAX_CONFIGURATION_INVALID',
+                'message': str(tax_error),
+            }), 422
+        order_number = generate_order_number()
 
         # Reserve availability before opening Stripe Checkout. This prevents two
         # concurrent browser sessions from buying the same last web unit. The
@@ -502,11 +499,18 @@ def create_subscription_checkout():
         item = data['item']
         customer_info = data['customer_info']
         frequency = item.get('subscription_frequency')
-        if str(data.get('discount_code') or '').strip() and cart_blocks_coupon([item]):
+        discount_code = str(data.get('discount_code') or '').strip().upper() or None
+        if discount_code and cart_blocks_coupon([item], discount_code=discount_code):
             return jsonify({
                 'error': 'PROMOTION_NOT_AVAILABLE',
                 'message': PROMOTION_COUPON_MESSAGE,
             }), 422
+        validated_coupon = None
+        if discount_code:
+            from src.models.coupon import Coupon
+            coupon_valid, validated_coupon = Coupon.validate_coupon(discount_code, customer_info['email'])
+            if not coupon_valid:
+                return jsonify({'error': 'COUPON_INVALID', 'message': validated_coupon}), 422
 
         # Resolve every supplied identifier independently: a forged ordinary
         # ID must not mask a protected slug/SKU. Never accept an unresolved
@@ -572,6 +576,20 @@ def create_subscription_checkout():
             return jsonify({'error': 'Invalid subscription frequency'}), 400
         
         interval_config = interval_mapping[frequency]
+
+        # Preserve the subscription tariff/Stripe contract. A supplied code
+        # must nevertheless pass all validity checks before opening Stripe;
+        # the browser cannot invent a subtotal to bypass the coupon minimum.
+        if validated_coupon is not None:
+            subscription_subtotal = as_eur(
+                as_eur(subscription_product.price, field='precio de suscripción') * Decimal(str(item['quantity'])),
+                field='subtotal de suscripción',
+            )
+            coupon_valid, coupon_message = validated_coupon.is_valid(
+                order_amount=float(subscription_subtotal), customer_email=customer_info['email'],
+            )
+            if not coupon_valid:
+                return jsonify({'error': 'COUPON_INVALID', 'message': coupon_message}), 422
         
         # Create Stripe Price for subscription
         price = stripe.Price.create(
