@@ -43,6 +43,7 @@ from src.routes.meta_catalog_routes import meta_catalog_bp  # Feed público de M
 from src.routes.translate_routes import translate_bp  # Traducción de reseñas
 from src.routes.vip_routes import vip_bp  # Lista VIP Black Friday
 from src.routes.vip_funnel_routes import vip_funnel_bp
+from src.routes.vip_conversion_routes import vip_conversion_bp
 from src.services.vip_funnel import install_vip_funnel
 from src.models.blog import BlogPost  # Modelo del blog
 from src.models.review import Review  # Modelo de reseñas
@@ -119,6 +120,10 @@ def create_tables():
     # A form/honeypot must not trigger unrelated schema, catalogue or seed work.
     # Existing consent tables are a prerequisite; no migration is run here.
     if request.path in ('/api/vip/signup', '/api/contact/send-message'):
+        return None
+
+    # Confirmation must never trigger unrelated migrations, catalogue or seed.
+    if request.path == '/api/vip/conversion':
         return None
 
     if not hasattr(app, 'tables_created'):
@@ -625,6 +630,7 @@ app.register_blueprint(meta_catalog_bp, url_prefix='/api')  # Feed público de M
 app.register_blueprint(translate_bp, url_prefix='/api/translate')  # Traducción de reseñas
 app.register_blueprint(vip_bp, url_prefix='/api/vip')  # Alta VIP Black Friday
 app.register_blueprint(vip_funnel_bp)  # Admin-only aggregate GET; empty public write-only POST
+app.register_blueprint(vip_conversion_bp)  # No runtime migrations or signup mutations
 
 # Database configuration for coupons and user management
 # Use DATABASE_URL from Railway (PostgreSQL) or fallback to SQLite for local dev

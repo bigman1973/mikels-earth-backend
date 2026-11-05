@@ -15,6 +15,8 @@ from src.services.form_security import (
     read_form_payload, silent_success,
 )
 from src.services.vip_funnel import mark_vip_outcome
+from src.services.vip_membership_verification import read_vip_membership
+from src.services.vip_conversion_confirmation import prepare_vip_conversion
 from src.services.klaviyo_service import (
     klaviyo_subscribe_vip_contact,
     klaviyo_track_vip_signup,
@@ -55,6 +57,12 @@ def signup_for_vip_list():
         mark_vip_outcome('validation_rejected')
         return jsonify({'error': 'Debes aceptar recibir comunicaciones comerciales para entrar en la lista VIP.'}), 400
 
+    # GET-only analytics evidence. Unknown/failed reads NEVER prevent normal
+    # signup, and no subscription helper or existing consent state is changed.
+    try:
+        before_membership = read_vip_membership(email)
+    except Exception:
+        before_membership = None  # Optional analytics must never break signup.
     consented_at = datetime.utcnow()
     observed_ip, ip_provenance = consent_ip_evidence()
     signup = VipSignup(
@@ -104,8 +112,16 @@ def signup_for_vip_list():
         return jsonify({'error': 'No se ha podido completar el alta. Inténtalo de nuevo más tarde.'}), 502
 
     mark_vip_outcome('successful_signup')
-    return jsonify({
+    response = {
         'success': True,
         'signup_id': signup.id,
         'message': 'Alta VIP registrada.',
-    }), 201
+    }
+    # Optional, isolated analytics: a 202 subscribe job is not list membership.
+    try:
+        conversion = prepare_vip_conversion(signup.id, before_membership)
+    except Exception:
+        conversion = None  # No raw error/PII; business success remains intact.
+    if conversion:
+        response['conversion'] = conversion
+    return jsonify(response), 201
