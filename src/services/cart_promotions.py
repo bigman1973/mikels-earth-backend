@@ -69,8 +69,12 @@ def contains_in_promotion(products: Iterable[Any]) -> bool:
     return any(bool(getattr(product, 'in_promotion', False)) for product in products)
 
 
-def cart_contains_in_promotion(items: Any) -> bool:
-    return any(
-        contains_in_promotion(resolve_product_references(item))
-        for item in cart_item_references(items)
-    )
+def cart_contains_in_promotion(items: Any, *, discount_code=None) -> bool:
+    """Compatibility coupon gate wired to the canonical server-owned policy.
+
+    Keep legacy call sites fail-closed without a code, including selected
+    add-ons; never let the approved exception bypass a protected identity.
+    """
+    from src.services.coupon_policy import cart_blocks_coupon
+
+    return cart_blocks_coupon(items, discount_code=discount_code)

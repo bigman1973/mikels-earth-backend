@@ -30,6 +30,9 @@ class Coupon(db.Model):
     # Estado
     active = db.Column(db.Boolean, default=True)
     expires_at = db.Column(db.DateTime, nullable=True)  # None = sin caducidad
+    # Additive migration is required before deploying this model. Only a
+    # server-persisted opt-in may relax the generic product promotion veto.
+    valid_in_promotion = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
     
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -167,6 +170,7 @@ class Coupon(db.Model):
             email=email,
             discount_type='percentage',
             discount_value=discount_percent,
+            valid_in_promotion=False,
             max_uses=1
         )
         
@@ -200,6 +204,7 @@ class Coupon(db.Model):
             discount_type='percentage',
             discount_value=discount_percent,
             min_order_amount=49,
+            valid_in_promotion=False,
             max_uses=1,
             max_uses_per_customer=1,
             active=True,

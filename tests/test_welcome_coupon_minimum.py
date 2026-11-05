@@ -215,8 +215,10 @@ class WelcomeCouponMinimumTests(unittest.TestCase):
         with patch.object(Coupon, 'is_valid', recording):
             response = self.checkout('49.00')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(amounts, [Decimal('49.00')])
-        self.assertIsInstance(amounts[0], Decimal)
+        # Integration adds a code/email preflight before ERP or pricing. The
+        # final order validation must still receive the exact server Decimal.
+        self.assertEqual(amounts, [None, Decimal('49.00')])
+        self.assertIsInstance(amounts[1], Decimal)
 
     def test_checkout_minimum_uses_subtotal_after_server_quantity_discount(self):
         self.product.price = 50
