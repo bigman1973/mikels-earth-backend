@@ -1,6 +1,6 @@
 """Explicit BF26 cutoff sweep; importing this module performs no work.
 
-The application owner must orchestrate run_once at/after cutoff and repeat on
+The application owner must orchestrate run_locked_once at/after cutoff and repeat on
 retry/failure. There is intentionally no daemon, cron registration or web route.
 No catalogue, physical stock, ERP, refund or consent operation exists here.
 """
@@ -10,6 +10,9 @@ from src.services.bf26_checkout_cutoff import (
     BF26_CLOSE_TIMESTAMP, BF26_METADATA_KEY, STRIPE_MAX_TTL,
     expire_open_session, is_closed, utc_now, value,
 )
+
+# Two-int transaction lock namespace; constant across replicas and restarts.
+BF26_JOB_LOCK = (2026, 112301)
 
 
 def run_once(session_api, *, legacy_session_ids=(), now=None, max_pages=100):
@@ -77,7 +80,7 @@ def run_once(session_api, *, legacy_session_ids=(), now=None, max_pages=100):
     return counts
 
 
-def local_bf26_session_ids():
+def local_bf26_session_ids(database_session=None):
     """Read linkage only, including expired/released local allocations.
 
     A stale local reservation does NOT prove Stripe's session is expired.
@@ -88,7 +91,9 @@ def local_bf26_session_ids():
     from src.models.stock import StockReservation
     from src.models.web_product import WebProduct
     from src.services.campaign_packs import CAMPAIGN_PACKS_BY_SKU
-    return [row[0] for row in StockReservation.query.with_entities(
+    query = (database_session.query(StockReservation) if database_session is not None
+             else StockReservation.query)
+    return [row[0] for row in query.with_entities(
         StockReservation.stripe_session_id,
     ).join(WebProduct, StockReservation.product_id == WebProduct.id).filter(
         WebProduct.sku.in_(tuple(CAMPAIGN_PACKS_BY_SKU)),
@@ -100,10 +105,42 @@ def local_bf26_session_ids():
     ).distinct().all()]
 
 
+def run_locked_once(session_api, database_session, *, now=None, max_pages=100):
+    """Serialize a finite sweep across PostgreSQL replicas; never lock orders.
+
+    The transaction is read-only and its advisory lock is released on commit,
+    rollback or connection loss. Call with a fresh application DB session.
+    A busy lock requests another scheduled catchup; it is not a successful sweep.
+    The native runner must bound process lifetime, including HTTP waits.
+    """
+    now = now or utc_now()
+    if not is_closed(now):
+        return {'before_cutoff': True, 'provider_calls': 0}
+    if max_pages < 1:
+        raise ValueError('max_pages must be positive')
+    if database_session.get_bind().dialect.name != 'postgresql':
+        raise ValueError('The production job requires PostgreSQL locking')
+    from sqlalchemy import text
+
+    with database_session.begin():
+        database_session.execute(text('SET TRANSACTION READ ONLY'))
+        database_session.execute(text("SET LOCAL statement_timeout = '15000ms'"))
+        acquired = database_session.execute(text(
+            'SELECT pg_try_advisory_xact_lock(:namespace, :job)'
+        ), {'namespace': BF26_JOB_LOCK[0], 'job': BF26_JOB_LOCK[1]}).scalar()
+        if not acquired:
+            return {'lock_busy': True, 'retry_required': True}
+        legacy_ids = local_bf26_session_ids(database_session)
+        return run_once(session_api, legacy_session_ids=legacy_ids, now=now,
+                        max_pages=max_pages)
+
+
 def main():
     """One explicit invocation; no import of main.py or auto-migration/seed."""
     import argparse
+    import contextlib
     import json
+    import logging
     import os
 
     parser = argparse.ArgumentParser(description='BF26 cutoff sweep — explicit operator action')
@@ -113,6 +150,8 @@ def main():
     args = parser.parse_args()
     if not args.execute:
         parser.error('No action: --execute requires operator approval')
+    if args.max_pages < 1:
+        parser.error('--max-pages must be positive')
     if not is_closed():
         print(json.dumps({'before_cutoff': True, 'provider_calls': 0}))
         return 0
@@ -130,20 +169,41 @@ def main():
     app = Flask('bf26-cutoff-job')
     app.config.update(SQLALCHEMY_DATABASE_URI=database_url,
                       SQLALCHEMY_TRACK_MODIFICATIONS=False)
-    db.init_app(app)
-    stripe.api_key = stripe_key
-    with app.app_context():
-        try:
-            legacy_ids = local_bf26_session_ids()
-            counts = run_once(stripe.checkout.Session, legacy_session_ids=legacy_ids,
-                              max_pages=args.max_pages)
-        except Exception:
-            # Fail safe: never dump raw DB/provider exceptions or identities.
-            print(json.dumps({'job_failed': True, 'retry_required': True}))
-            return 2
+    # Reject unsupported DBs before opening connections or invoking Stripe.
+    from sqlalchemy.engine import make_url
+    try:
+        if make_url(database_url).get_backend_name() != 'postgresql':
+            raise ValueError('Unsupported job database')
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'connect_args': {'connect_timeout': 5}, 'pool_pre_ping': True,
+        }
+        db.init_app(app)
+        stripe.api_key = stripe_key
+        stripe.max_network_retries = 0
+        stripe.default_http_client = stripe.RequestsClient(timeout=(5, 20))
+        with app.app_context():
+            try:
+                # Even inherited SDK debug settings must not print session data.
+                logger = logging.getLogger('stripe')
+                previously_disabled = logger.disabled
+                logger.disabled = True
+                try:
+                    with open(os.devnull, 'w') as silent, \
+                            contextlib.redirect_stdout(silent), contextlib.redirect_stderr(silent):
+                        counts = run_locked_once(stripe.checkout.Session, db.session,
+                                                 max_pages=args.max_pages)
+                finally:
+                    logger.disabled = previously_disabled
+            finally:
+                db.session.remove()
+                db.engine.dispose()
+    except Exception:
+        # Fail safe: never dump raw DB/provider exceptions or identities.
+        print(json.dumps({'job_failed': True, 'retry_required': True}))
+        return 2
     print(json.dumps(counts, sort_keys=True))
-    return 2 if (counts['retry'] or counts['scan_failed']
-                 or counts['page_limit_reached']) else 0
+    return 2 if (counts.get('retry') or counts.get('scan_failed')
+                 or counts.get('page_limit_reached') or counts.get('retry_required')) else 0
 
 
 if __name__ == '__main__':
